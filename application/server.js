@@ -10,6 +10,8 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { PrismaClient } = require('@prisma/client');
+const multer = require('multer');
+const nodemailer = require('nodemailer');
 
 // Initialize Prisma
 const prisma = new PrismaClient();
@@ -22,6 +24,8 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
+app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
+
 
 // Trust proxy for getting real IP addresses
 app.set('trust proxy', true);
@@ -75,6 +79,119 @@ const authenticate = async (req, res, next) => {
     }
 };
 
+// Configure multer for image uploads
+
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        const uploadPath = path.join(__dirname, 'public', 'uploads', 'profiles');
+
+      // ✅ Correct: mkdir with recursive true and callback
+      fs.mkdir(uploadPath, { recursive: true }, (err) => {
+        if (err) return cb(err);
+        cb(null, uploadPath);
+      });
+    },
+    filename: function (req, file, cb) {
+      cb(null, Date.now() + '-' + file.originalname);
+    }
+  });
+
+const upload = multer({
+    storage: storage,
+    limits: {
+        fileSize: 5 * 1024 * 1024 // 5MB limit
+    },
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only image files are allowed'));
+        }
+    }
+});
+const createEmailTransporter = () => {
+    // Option A: Gmail (easiest for development)
+    if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+      return nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: process.env.GMAIL_USER,
+          pass: process.env.GMAIL_APP_PASSWORD
+        }
+      });
+    }}
+
+
+// 4. Create email sending function
+const sendPasswordResetEmail = async (email, resetToken) => {
+  const transporter = createEmailTransporter();
+  const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
+  const resetLink = `${FRONTEND_URL}/reset-password?token=${resetToken}`;
+
+  // Beautiful email template
+  const emailHTML = `
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            .container { max-width: 600px; margin: 0 auto; font-family: Arial, sans-serif; }
+            .header { background: linear-gradient(135deg, #10B981, #059669); padding: 40px 20px; text-align: center; }
+            .logo { color: white; font-size: 24px; font-weight: bold; }
+            .content { padding: 40px 20px; background: #f9f9f9; }
+            .button { 
+                display: inline-block; 
+                background: #10B981; 
+                color: white; 
+                padding: 15px 30px; 
+                text-decoration: none; 
+                border-radius: 8px; 
+                font-weight: bold;
+                margin: 20px 0;
+            }
+            .footer { padding: 20px; text-align: center; color: #666; font-size: 12px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <div class="logo">🌱 Plancana Agricultural System</div>
+            </div>
+            <div class="content">
+                <h2>Password Reset Request</h2>
+                <p>Hello,</p>
+                <p>You requested a password reset for your Plancana account. Click the button below to reset your password:</p>
+                <p style="text-align: center;">
+                    <a href="${resetLink}" class="button">Reset My Password</a>
+                </p>
+                <p>This link will expire in 1 hour for security reasons.</p>
+                <p>If you didn't request this reset, please ignore this email.</p>
+                <p>Best regards,<br>The Plancana Team</p>
+            </div>
+            <div class="footer">
+                <p>© 2025 Plancana Agricultural Supply Chain System</p>
+                <p>This is an automated message, please do not reply.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+  `;
+
+  const mailOptions = {
+    from: process.env.FROM_EMAIL || 'noreply@plancana.com',
+    to: email,
+    subject: '🔐 Password Reset Request - Plancana',
+    html: emailHTML
+  };
+
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    console.log('✅ Password reset email sent:', info.messageId);
+    return { success: true, messageId: info.messageId };
+  } catch (error) {
+    console.error('❌ Email sending failed:', error);
+    return { success: false, error: error.message };
+  }
+};
 // Role-based authorization
 const authorize = (allowedRoles) => {
     return (req, res, next) => {
@@ -95,6 +212,8 @@ const authorize = (allowedRoles) => {
         next();
     };
 };
+
+
 
 // Blockchain connection helper (UNCHANGED - preserves your date handling)
 class BlockchainService {
@@ -145,10 +264,11 @@ class BlockchainService {
     }
 
     async generateQRCode(batchId) {
+        const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
         try {
             const qrData = {
                 batchId: batchId,
-                verificationUrl: `http://localhost:${PORT}/api/verify/${batchId}`,
+                verificationUrl: `${FRONTEND_URL}/verify/${batchId}`,
                 timestamp: new Date().toISOString(),
                 network: 'agricultural-blockchain'
             };
@@ -506,6 +626,289 @@ app.post('/api/auth/login', async (req, res) => {
         });
     }
 });
+// Request password reset
+app.post('/api/auth/forgot-password', async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                error: 'Email is required'
+            });
+        }
+
+        // Find user by email
+        const user = await prisma.user.findUnique({
+            where: { email: email.toLowerCase() }
+        });
+
+        if (!user) {
+            // Don't reveal if user exists or not for security
+            return res.json({
+                success: true,
+                message: 'If an account with that email exists, we have sent a password reset link.'
+            });
+        }
+
+        // Generate secure reset token
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
+
+        // Update user with reset token
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                resetPasswordToken: resetToken,
+                resetPasswordExpires: resetTokenExpiry
+            }
+        });
+
+        // Send email (NEW PART!)
+        const emailResult = await sendPasswordResetEmail(user.email, resetToken);
+        
+        if (emailResult.success) {
+            console.log(`✅ Password reset email sent to ${email}`);
+        } else {
+            console.error(`❌ Failed to send email to ${email}:`, emailResult.error);
+        }
+
+        // Log activity
+        await prisma.activityLog.create({
+            data: {
+                userId: user.id,
+                action: 'PASSWORD_RESET_REQUEST',
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent'),
+                metadata: { 
+                    email,
+                    emailSent: emailResult.success,
+                    messageId: emailResult.messageId
+                }
+            }
+        });
+
+        // Always return success (security - don't reveal if user exists)
+        res.json({
+            success: true,
+            message: 'If an account with that email exists, we have sent a password reset link.'
+        });
+
+    } catch (error) {
+        console.error('Forgot password error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+
+// 2. ✅ MUST HAVE - Verify token is valid
+app.get('/api/auth/verify-reset-token/:token', async (req, res) => {
+    try {
+        const { token } = req.params;
+        
+        console.log('🔍 TOKEN DEBUG: Received token:', token);
+        console.log('🔍 TOKEN DEBUG: Token length:', token.length);
+        console.log('🔍 TOKEN DEBUG: Current time:', new Date().toISOString());
+        
+        const user = await prisma.user.findFirst({
+            where: {
+                resetPasswordToken: token,
+                resetPasswordExpires: {
+                    gt: new Date()
+                }
+            }
+        });
+        
+        console.log('🔍 TOKEN DEBUG: User found with token:', !!user);
+        if (user) {
+            console.log('🔍 TOKEN DEBUG: User email:', user.email);
+            console.log('🔍 TOKEN DEBUG: Token expires at:', user.resetPasswordExpires);
+            console.log('🔍 TOKEN DEBUG: Current time:', new Date().toISOString());
+            console.log('🔍 TOKEN DEBUG: Is expired?', new Date() > user.resetPasswordExpires);
+            console.log('🔍 TOKEN DEBUG: Time remaining (minutes):', Math.floor((user.resetPasswordExpires - new Date()) / 1000 / 60));
+        }
+
+        // ⭐ THE KEY ISSUE: Make sure response matches what frontend expects
+        const response = {
+            success: true,
+            tokenFound: !!user,  // Frontend expects this field
+            user: user ? {
+                email: user.email,
+                expiresAt: user.resetPasswordExpires
+            } : null,
+            message: user ? `Reset token is valid` : 'Token not found or expired'
+        };
+
+        console.log('✅ TOKEN DEBUG: Sending response:', JSON.stringify(response, null, 2));
+        
+        res.json(response);
+        
+    } catch (error) {
+        console.error('❌ TOKEN DEBUG: Error:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message,
+            tokenFound: false 
+        });
+    }
+});
+
+// 3. ✅ MUST HAVE - Update password
+app.post('/api/auth/reset-password', async (req, res) => {
+    try {
+        const { token, newPassword, confirmPassword } = req.body;
+
+        // Validation
+        if (!token || !newPassword || !confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                error: 'Token, new password, and confirm password are required'
+            });
+        }
+
+        if (newPassword !== confirmPassword) {
+            return res.status(400).json({
+                success: false,
+                error: 'Passwords do not match'
+            });
+        }
+
+        if (newPassword.length < 6) {
+            return res.status(400).json({
+                success: false,
+                error: 'Password must be at least 6 characters long'
+            });
+        }
+
+        // Find user with valid reset token
+        const user = await prisma.user.findFirst({
+            where: {
+                resetPasswordToken: token,
+                resetPasswordExpires: {
+                    gt: new Date()
+                }
+            }
+        });
+
+        if (!user) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid or expired reset token'
+            });
+        }
+
+        // Hash new password
+        const hashedPassword = await bcrypt.hash(newPassword, parseInt(process.env.BCRYPT_ROUNDS || 12));
+
+        // Update user password and clear reset token
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                password: hashedPassword,
+                resetPasswordToken: null,
+                resetPasswordExpires: null
+            }
+        });
+
+        // Invalidate all existing sessions for security
+        await prisma.userSession.deleteMany({
+            where: { userId: user.id }
+        });
+
+        console.log(`✅ Password successfully reset for user: ${user.email}`);
+
+        res.json({
+            success: true,
+            message: 'Password has been reset successfully. Please log in with your new password.'
+        });
+
+    } catch (error) {
+        console.error('Reset password error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error'
+        });
+    }
+});
+app.post('/api/test-email-simple', async (req, res) => {
+    const nodemailer = require('nodemailer');
+    
+    try {
+        console.log('🧪 Testing email with config:');
+        console.log('Gmail User:', process.env.GMAIL_USER);
+        console.log('Gmail Pass (length):', process.env.GMAIL_APP_PASSWORD?.length);
+        
+        const transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.GMAIL_USER,
+                pass: process.env.GMAIL_APP_PASSWORD
+            }
+        });
+
+        // Test the connection
+        await transporter.verify();
+        console.log('✅ SMTP connection verified');
+
+        // Send test email
+        const info = await transporter.sendMail({
+            from: process.env.GMAIL_USER,
+            to: req.body.email || process.env.GMAIL_USER, // Send to yourself for testing
+            subject: '🧪 Test Email from Plancana',
+            text: 'This is a test email. If you receive this, email is working!',
+            html: '<h2>✅ Email Working!</h2><p>This is a test email from your Plancana app.</p>'
+        });
+
+        console.log('✅ Test email sent:', info.messageId);
+        res.json({ 
+            success: true, 
+            message: 'Test email sent successfully',
+            messageId: info.messageId
+        });
+
+    } catch (error) {
+        console.error('❌ Email test failed:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+app.get('/api/debug/reset-tokens', async (req, res) => {
+    try {
+        const users = await prisma.user.findMany({
+            where: {
+                resetPasswordToken: { not: null }
+            },
+            select: {
+                id: true,
+                email: true,
+                resetPasswordToken: true,
+                resetPasswordExpires: true
+            }
+        });
+        
+        res.json({
+            success: true,
+            count: users.length,
+            tokens: users.map(user => ({
+                email: user.email,
+                tokenExists: !!user.resetPasswordToken,
+                tokenLength: user.resetPasswordToken?.length,
+                expiresAt: user.resetPasswordExpires,
+                isExpired: user.resetPasswordExpires ? new Date() > user.resetPasswordExpires : null,
+                timeUntilExpiry: user.resetPasswordExpires ? 
+                    Math.round((user.resetPasswordExpires - new Date()) / 1000 / 60) + ' minutes' : null
+            }))
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+
 
 // Get current user profile
 app.get('/api/auth/profile', authenticate, async (req, res) => {
@@ -539,6 +942,8 @@ app.get('/api/auth/profile', authenticate, async (req, res) => {
         
         // Remove sensitive data
         const { password, ...userProfile } = user;
+        
+        console.log('Profile data being sent:', JSON.stringify(userProfile, null, 2)); // Debug log
         
         res.json({
             success: true,
@@ -601,6 +1006,7 @@ app.get('/', async (req, res) => {
 // Create new crop batch (ENHANCED WITH DATABASE)
 app.post('/api/batch/create', authenticate, authorize(['FARMER']), async (req, res) => {
     try {
+        const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
         const { farmer, crop, quantity, location, customBatchId, ...additionalData } = req.body;
 
         // Validate required fields
@@ -715,7 +1121,7 @@ app.post('/api/batch/create', authenticate, authorize(['FARMER']), async (req, r
                 batchData: JSON.parse(result.toString()),
                 databaseRecord: updatedBatch,
                 qrCode: qrCode,
-                verificationUrl: `http://localhost:${PORT}/api/verify/${batchId}`,
+                verificationUrl: `${FRONTEND_URL}/verify/${batchId}`,
                 message: 'Crop batch created successfully on blockchain and database',
                 dataIntegrity: {
                     blockchainHash: result.toString(),
@@ -1195,6 +1601,207 @@ app.get('/api/verify/:batchId', async (req, res) => {
    }
 });
 
+// Update user profile
+app.put('/api/auth/profile', authenticate, async (req, res) => {
+    try {
+        const { profileData, personalData } = req.body;
+        const userId = req.user.id;
+
+        // Update basic user info if provided
+        const userUpdateData = {};
+        if (personalData?.email && personalData.email !== req.user.email) {
+            // Check if email already exists
+            const existingUser = await prisma.user.findFirst({
+                where: { 
+                    email: personalData.email,
+                    NOT: { id: userId }
+                }
+            });
+            
+            if (existingUser) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Email already in use'
+                });
+            }
+            userUpdateData.email = personalData.email;
+        }
+        
+        if (personalData?.username && personalData.username !== req.user.username) {
+            // Check if username already exists
+            const existingUser = await prisma.user.findFirst({
+                where: { 
+                    username: personalData.username,
+                    NOT: { id: userId }
+                }
+            });
+            
+            if (existingUser) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Username already in use'
+                });
+            }
+            userUpdateData.username = personalData.username;
+        }
+
+        // Update user if there are changes
+        if (Object.keys(userUpdateData).length > 0) {
+            await prisma.user.update({
+                where: { id: userId },
+                data: userUpdateData
+            });
+        }
+
+        // Update role-specific profile
+        let updatedProfile = null;
+        
+        switch (req.user.role) {
+            case 'FARMER':
+                updatedProfile = await prisma.farmerProfile.update({
+                    where: { userId: userId },
+                    data: {
+                        firstName: profileData.firstName,
+                        lastName: profileData.lastName,
+                        phone: profileData.phone,
+                        farmName: profileData.farmName,
+                        farmSize: profileData.farmSize ? parseFloat(profileData.farmSize) : null,
+                        address: profileData.address,
+                        state: profileData.state,
+                        primaryCrops: profileData.primaryCrops || [],
+                        farmingType: profileData.farmingType || [],
+                        certifications: profileData.certifications || [],
+                        licenseNumber: profileData.licenseNumber,
+                        profileImage: profileData.profileImage
+                    }
+                });
+                break;
+
+            case 'PROCESSOR':
+                updatedProfile = await prisma.processorProfile.update({
+                    where: { userId: userId },
+                    data: {
+                        companyName: profileData.companyName,
+                        contactPerson: profileData.contactPerson,
+                        phone: profileData.phone,
+                        email: profileData.email,
+                        address: profileData.address,
+                        state: profileData.state,
+                        facilityType: profileData.facilityType || [],
+                        processingCapacity: profileData.processingCapacity ? parseFloat(profileData.processingCapacity) : null,
+                        certifications: profileData.certifications || [],
+                        licenseNumber: profileData.licenseNumber
+                    }
+                });
+                break;
+
+            case 'ADMIN':
+                updatedProfile = await prisma.adminProfile.update({
+                    where: { userId: userId },
+                    data: {
+                        firstName: profileData.firstName,
+                        lastName: profileData.lastName,
+                        phone: profileData.phone,
+                        email: profileData.email,
+                        permissions: profileData.permissions || []
+                    }
+                });
+                break;
+
+            default:
+                return res.status(400).json({
+                    success: false,
+                    error: 'Profile update not supported for this role'
+                });
+        }
+
+        // Log activity
+        await prisma.activityLog.create({
+            data: {
+                userId: userId,
+                action: 'UPDATE_PROFILE',
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent'),
+                metadata: { updatedFields: Object.keys(profileData) }
+            }
+        });
+
+        res.json({
+            success: true,
+            message: 'Profile updated successfully',
+            profile: updatedProfile
+        });
+
+    } catch (error) {
+        console.error('Profile update error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update profile',
+            details: error.message
+        });
+    }
+});
+
+// Upload profile picture
+app.post('/api/auth/profile/avatar', authenticate, upload.single('avatar'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                error: 'No image file provided'
+            });
+        }
+
+        const imageUrl = `/uploads/profiles/${req.file.filename}`;
+        
+        // Update profile image in database based on user role
+        let updatedProfile = null;
+        
+        switch (req.user.role) {
+            case 'FARMER':
+                updatedProfile = await prisma.farmerProfile.update({
+                    where: { userId: req.user.id },
+                    data: { profileImage: imageUrl }
+                });
+                break;
+                
+            case 'PROCESSOR':
+                // For processor, we might store it in a different field or table
+                // For now, let's add a profileImage field to processor profile too
+                break;
+                
+            case 'ADMIN':
+                // Similar handling for admin
+                break;
+        }
+
+        // Log activity
+        await prisma.activityLog.create({
+            data: {
+                userId: req.user.id,
+                action: 'UPDATE_PROFILE_PICTURE',
+                ipAddress: req.ip,
+                userAgent: req.get('User-Agent'),
+                metadata: { imageUrl: imageUrl }
+            }
+        });
+
+        res.json({
+            success: true,
+            message: 'Profile picture uploaded successfully',
+            imageUrl: imageUrl,
+            profile: updatedProfile
+        });
+
+    } catch (error) {
+        console.error('Profile picture upload error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to upload profile picture',
+            details: error.message
+        });
+    }
+});
 // Update batch status (ENHANCED)
 app.put('/api/batch/:batchId/status', authenticate, authorize(['FARMER', 'PROCESSOR', 'DISTRIBUTOR', 'ADMIN']), async (req, res) => {
    try {
@@ -1406,6 +2013,7 @@ app.get('/api/batches', authenticate, authorize(['ADMIN', 'REGULATOR']), async (
 app.get('/api/qr/:batchId', async (req, res) => {
    try {
        const { batchId } = req.params;
+       const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
 
        // Check if batch exists in database first
        const dbBatch = await prisma.batch.findUnique({
@@ -1442,7 +2050,7 @@ app.get('/api/qr/:batchId', async (req, res) => {
            success: true,
            batchId: batchId,
            qrCode: qrCode,
-           verificationUrl: `http://localhost:${PORT}/api/verify/${batchId}`,
+           verificationUrl: `${FRONTEND_URL}/verify/${batchId}`,
            batchStatus: dbBatch?.status || 'unknown',
            sources: {
                database: !!dbBatch,

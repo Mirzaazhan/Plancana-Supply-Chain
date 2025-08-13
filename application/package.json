@@ -25,6 +25,8 @@
     "fabric-ca-client": "^2.2.20",
     "fabric-network": "^2.2.20",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.1",
+    "nodemailer": "^7.0.3",
     "pg": "^8.16.0",
     "qrcode": "^1.5.3"
   },

@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 import { batchService } from '../../services/api';
 import { toast } from 'react-hot-toast';
 
 const BatchRegistration = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [qrCode, setQrCode] = useState(null);
@@ -578,7 +580,7 @@ const BatchRegistration = () => {
 
             <div className="flex space-x-4 justify-center">
               <button
-                onClick={() => window.location.href = '/farmer/dashboard'}
+                onClick={() => navigate('/farmer/dashboard')}
                 className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-md font-medium transition-colors duration-200"
               >
                 Back to Dashboard
@@ -603,12 +605,37 @@ const BatchRegistration = () => {
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Register New Batch</h1>
-            <p className="text-gray-600 mt-1">
-              Enter agricultural batch details for blockchain registration
-            </p>
+          <div className="flex items-center space-x-4">
+            {/* Back Button */}
+            <button
+              onClick={() => window.history.back()}
+              className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors duration-200"
+            >
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+              <span className="text-sm font-medium">Back</span>
+            </button>
+            
+            <div className="border-l border-gray-300 h-6"></div>
+            
+            <div>
+              {/* Breadcrumb */}
+              <nav className="flex items-center space-x-2 text-sm text-gray-500 mb-1">
+                <span>Dashboard</span>
+                <svg className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                </svg>
+                <span className="font-medium text-gray-900">Register New Batch</span>
+              </nav>
+              
+              <h1 className="text-2xl font-bold text-gray-900">Register New Batch</h1>
+              <p className="text-gray-600 mt-1">
+                Enter agricultural batch details for blockchain registration
+              </p>
+            </div>
           </div>
+          
           {currentStep < 3 && (
             <div className="text-sm text-gray-500">
               Step {currentStep + 1} of {steps.length}
