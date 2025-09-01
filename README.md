@@ -10,7 +10,7 @@ This project provides a complete solution for tracking agricultural products thr
 
 - **Backend API** (`/application`): Node.js/Express server with Hyperledger Fabric integration
 - **Smart Contract** (`/chaincode`): Hyperledger Fabric chaincode for agricultural supply chain logic
-- **Frontend** (`/frontend/plancana`): React application with Tailwind CSS for user interface
+- **Frontend** (`/frontend/plancana-nextjs`): Next.js application with TypeScript and Tailwind CSS for user interface
 - **Database**: PostgreSQL with Prisma ORM
 - **Blockchain**: Hyperledger Fabric network
 
@@ -52,9 +52,9 @@ npm run dev
 ### 4. Start the Frontend
 
 ```bash
-cd frontend/plancana
+cd frontend/plancana-nextjs
 npm install
-npm start
+npm run dev
 ```
 
 The application will be available at:
@@ -93,7 +93,7 @@ See `/docs/API.md` for detailed API documentation.
 
 The project uses:
 - **Backend**: Express.js, Prisma ORM, Hyperledger Fabric SDK
-- **Frontend**: React, Tailwind CSS, React Router, Chart.js
+- **Frontend**: Next.js 15, TypeScript, Tailwind CSS 4, Chart.js, React Hook Form
 - **Authentication**: JWT tokens with bcryptjs
 - **File Upload**: Multer for profile images and documents
 - **QR Codes**: qrcode library for generation, qr-scanner for reading

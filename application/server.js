@@ -119,7 +119,40 @@ const createEmailTransporter = () => {
           pass: process.env.GMAIL_APP_PASSWORD
         }
       });
-    }}
+    }
+    
+    // Option B: Outlook/Hotmail
+    if (process.env.OUTLOOK_USER && process.env.OUTLOOK_PASSWORD) {
+      return nodemailer.createTransport({
+        service: 'outlook',
+        auth: {
+          user: process.env.OUTLOOK_USER,
+          pass: process.env.OUTLOOK_PASSWORD
+        }
+      });
+    }
+    
+    // Option C: Generic SMTP
+    if (process.env.SMTP_HOST) {
+      return nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: process.env.SMTP_PORT || 587,
+        secure: process.env.SMTP_SECURE === 'true',
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASSWORD
+        }
+      });
+    }
+    
+    // Option D: Development mode - log to console instead
+    console.warn('⚠️  No email configuration found. Emails will be logged to console.');
+    return nodemailer.createTransport({
+      streamTransport: true,
+      newline: 'unix',
+      buffer: true
+    });
+}
 
 
 // 4. Create email sending function
