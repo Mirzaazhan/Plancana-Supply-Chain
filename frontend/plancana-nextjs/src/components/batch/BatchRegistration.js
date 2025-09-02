@@ -5,6 +5,19 @@ import { useAuth } from '../../context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { batchService } from '../../services/api';
 import { toast } from 'react-hot-toast';
+import AutocompleteInput from '../ui/AutocompleteInput';
+import MultiSelectInput from '../ui/MultiSelectInput';
+import {
+  cropOptions,
+  seedsSourceOptions,
+  fertilizerOptions,
+  pesticideOptions,
+  commonLocations,
+  unitOptions,
+  qualityGradeOptions,
+  cultivationMethodOptions,
+  irrigationMethodOptions
+} from '../../data/formOptions';
 
 const BatchRegistration = () => {
   const { user } = useAuth();
@@ -13,6 +26,7 @@ const BatchRegistration = () => {
   const [loading, setLoading] = useState(false);
   const [qrCode, setQrCode] = useState(null);
   const [batchId, setBatchId] = useState('');
+  const [availableVarieties, setAvailableVarieties] = useState([]);
 
   const [formData, setFormData] = useState({
     // Basic Info
@@ -70,6 +84,25 @@ const BatchRegistration = () => {
       ...prev,
       [field]: value
     }));
+    
+    // Update available varieties when crop changes
+    if (field === 'crop') {
+      const selectedCrop = cropOptions.find(crop => 
+        crop.label.toLowerCase() === value.toLowerCase() || 
+        crop.value.toLowerCase() === value.toLowerCase()
+      );
+      if (selectedCrop) {
+        setAvailableVarieties(selectedCrop.varieties);
+        // Clear variety when crop changes
+        setFormData(prev => ({
+          ...prev,
+          crop: value,
+          variety: ''
+        }));
+      } else {
+        setAvailableVarieties([]);
+      }
+    }
   };
 
   const handleArrayInputChange = (field, value) => {
@@ -173,37 +206,28 @@ const BatchRegistration = () => {
                     <input
                       type="text"
                       value={batchId}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-900"
                       disabled
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Product Name *
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Enter product name"
-                      value={formData.crop}
-                      onChange={(e) => handleInputChange('crop', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      required
-                    />
-                  </div>
+                  <AutocompleteInput
+                    label="Product Name"
+                    value={formData.crop}
+                    onChange={(value) => handleInputChange('crop', value)}
+                    options={cropOptions.map(crop => crop.label)}
+                    placeholder="Search for crop type..."
+                    required={true}
+                  />
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Variety
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Enter crop variety"
-                      value={formData.variety}
-                      onChange={(e) => handleInputChange('variety', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
+                  <AutocompleteInput
+                    label="Variety"
+                    value={formData.variety}
+                    onChange={(value) => handleInputChange('variety', value)}
+                    options={availableVarieties}
+                    placeholder={formData.crop ? "Select variety..." : "Select crop first"}
+                    required={false}
+                  />
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -213,7 +237,7 @@ const BatchRegistration = () => {
                       type="date"
                       value={formData.harvestDate}
                       onChange={(e) => handleInputChange('harvestDate', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                     />
                   </div>
 
@@ -228,7 +252,7 @@ const BatchRegistration = () => {
                         placeholder="0.00"
                         value={formData.quantity}
                         onChange={(e) => handleInputChange('quantity', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                         required
                       />
                     </div>
@@ -239,29 +263,23 @@ const BatchRegistration = () => {
                       <select
                         value={formData.unit}
                         onChange={(e) => handleInputChange('unit', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                       >
-                        <option value="kg">Kilograms (kg)</option>
-                        <option value="tons">Tons</option>
-                        <option value="lbs">Pounds (lbs)</option>
-                        <option value="bushels">Bushels</option>
+                        {unitOptions.map(unit => (
+                          <option key={unit.value} value={unit.value}>{unit.label}</option>
+                        ))}
                       </select>
                     </div>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Farm Location *
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Enter farm location"
-                      value={formData.location}
-                      onChange={(e) => handleInputChange('location', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      required
-                    />
-                  </div>
+                  <AutocompleteInput
+                    label="Farm Location"
+                    value={formData.location}
+                    onChange={(value) => handleInputChange('location', value)}
+                    options={commonLocations}
+                    placeholder="Enter or select location..."
+                    required={true}
+                  />
                 </div>
               </div>
 
@@ -276,28 +294,23 @@ const BatchRegistration = () => {
                     <select
                       value={formData.cultivationMethod}
                       onChange={(e) => handleInputChange('cultivationMethod', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                     >
                       <option value="">Select method</option>
-                      <option value="organic">Organic</option>
-                      <option value="conventional">Conventional</option>
-                      <option value="hydroponic">Hydroponic</option>
-                      <option value="sustainable">Sustainable</option>
+                      {cultivationMethodOptions.map(method => (
+                        <option key={method.value} value={method.value}>{method.label}</option>
+                      ))}
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Seeds Source
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Enter seeds source"
-                      value={formData.seedsSource}
-                      onChange={(e) => handleInputChange('seedsSource', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
+                  <AutocompleteInput
+                    label="Seeds Source"
+                    value={formData.seedsSource}
+                    onChange={(value) => handleInputChange('seedsSource', value)}
+                    options={seedsSourceOptions}
+                    placeholder="Select or enter seeds source..."
+                    required={false}
+                  />
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -306,41 +319,32 @@ const BatchRegistration = () => {
                     <select
                       value={formData.irrigationMethod}
                       onChange={(e) => handleInputChange('irrigationMethod', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                     >
-                      <option value="">Select method</option>
-                      <option value="drip">Drip Irrigation</option>
-                      <option value="sprinkler">Sprinkler</option>
-                      <option value="flood">Flood Irrigation</option>
-                      <option value="rain-fed">Rain-fed</option>
+                      <option value="">Select irrigation method</option>
+                      {irrigationMethodOptions.map(method => (
+                        <option key={method.value} value={method.value}>{method.label}</option>
+                      ))}
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Fertilizers Used
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Enter fertilizers separated by commas"
-                      value={formData.fertilizers.join(', ')}
-                      onChange={(e) => handleArrayInputChange('fertilizers', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
+                  <MultiSelectInput
+                    label="Fertilizers Used"
+                    value={formData.fertilizers}
+                    onChange={(value) => handleInputChange('fertilizers', value)}
+                    options={fertilizerOptions}
+                    placeholder="Select fertilizers..."
+                    required={false}
+                  />
 
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Pesticides Used
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="Enter pesticides separated by commas"
-                      value={formData.pesticides.join(', ')}
-                      onChange={(e) => handleArrayInputChange('pesticides', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
+                  <MultiSelectInput
+                    label="Pesticides Used"
+                    value={formData.pesticides}
+                    onChange={(value) => handleInputChange('pesticides', value)}
+                    options={pesticideOptions}
+                    placeholder="Select pesticides..."
+                    required={false}
+                  />
                 </div>
               </div>
             </div>
@@ -358,13 +362,12 @@ const BatchRegistration = () => {
                     <select
                       value={formData.qualityGrade}
                       onChange={(e) => handleInputChange('qualityGrade', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                     >
-                      <option value="">Select grade</option>
-                      <option value="A">Grade A (Premium)</option>
-                      <option value="B">Grade B (Good)</option>
-                      <option value="C">Grade C (Standard)</option>
-                      <option value="Organic">Organic Certified</option>
+                      <option value="">Select quality grade</option>
+                      {qualityGradeOptions.map(grade => (
+                        <option key={grade.value} value={grade.value}>{grade.label}</option>
+                      ))}
                     </select>
                   </div>
 
@@ -379,7 +382,7 @@ const BatchRegistration = () => {
                         placeholder="0.0"
                         value={formData.moistureContent}
                         onChange={(e) => handleInputChange('moistureContent', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                       />
                     </div>
                     <div>
@@ -392,7 +395,7 @@ const BatchRegistration = () => {
                         placeholder="0.0"
                         value={formData.proteinContent}
                         onChange={(e) => handleInputChange('proteinContent', e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                       />
                     </div>
                   </div>
@@ -406,7 +409,7 @@ const BatchRegistration = () => {
                       placeholder="Enter any additional notes about this batch"
                       value={formData.notes}
                       onChange={(e) => handleInputChange('notes', e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                     />
                   </div>
                 </div>
@@ -449,7 +452,7 @@ const BatchRegistration = () => {
                     placeholder="00.000000"
                     value={formData.latitude}
                     onChange={(e) => handleInputChange('latitude', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                     required
                   />
                 </div>
@@ -463,7 +466,7 @@ const BatchRegistration = () => {
                     placeholder="00.000000"
                     value={formData.longitude}
                     onChange={(e) => handleInputChange('longitude', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                     required
                   />
                 </div>
