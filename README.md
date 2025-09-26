@@ -16,10 +16,12 @@ This project provides a complete solution for tracking agricultural products thr
 
 ## Prerequisites
 
-- Node.js (v14+)
+- Node.js (v18+)
 - Docker and Docker Compose
-- PostgreSQL
+- PostgreSQL (v12+)
 - Hyperledger Fabric (fabric-samples)
+
+⚠️ **IMPORTANT**: For complete setup instructions, see [SETUP-GUIDE.md](./SETUP-GUIDE.md)
 
 ## Quick Start
 
@@ -58,8 +60,8 @@ npm run dev
 ```
 
 The application will be available at:
-- Frontend: http://localhost:3000
-- API: http://localhost:3001
+- Frontend: http://localhost:3001
+- API: http://localhost:3000
 
 ## Features
 

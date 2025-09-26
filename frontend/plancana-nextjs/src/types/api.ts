@@ -36,6 +36,12 @@ export interface ProcessingData {
   [key: string]: string | undefined;
 }
 
+export interface CompletionData {
+  qualityGrade: string;
+  completionNotes: string;
+  [key: string]: string | undefined;
+}
+
 export interface RouteData {
   origin: string;
   destination: string;

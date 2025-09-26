@@ -7,6 +7,7 @@ import {
   StatusData, 
   QueryParams, 
   ProcessingData, 
+  CompletionData,
   RouteData 
 } from '@/types/api';
 
@@ -125,6 +126,9 @@ export const processorService = {
   
   // Process a batch
   processBatch: (batchId: string, processingData: ProcessingData) => api.post(`/processor/process/${batchId}`, processingData),
+  
+  // Complete batch processing
+  completeBatchProcessing: (batchId: string, completionData: CompletionData) => api.put(`/processor/complete/${batchId}`, completionData),
   
   // Get processing history
   getProcessingHistory: () => api.get('/processor/my-processing')

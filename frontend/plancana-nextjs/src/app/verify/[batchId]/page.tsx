@@ -1,11 +1,12 @@
 import QRVerificationPage from '@/components/verification/QRVerificationPage';
 
 interface VerifyPageProps {
-  params: {
+  params: Promise<{
     batchId: string;
-  };
+  }>;
 }
 
-export default function VerifyPage({ params }: VerifyPageProps) {
-  return <QRVerificationPage batchId={params.batchId} />;
+export default async function VerifyPage({ params }: VerifyPageProps) {
+  const { batchId } = await params;
+  return <QRVerificationPage batchId={batchId} />;
 }

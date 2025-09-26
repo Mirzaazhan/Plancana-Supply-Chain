@@ -164,7 +164,7 @@ class AgriculturalContract extends Contract {
     }
 
     // Enhanced status update with processing records
-    async updateBatchStatus(ctx, batchId, status, updatedBy, timestamp, additionalData = "{}") {
+    async updateBatchStatus(ctx, batchId, status, updatedBy, timestamp, additionalData) {
         console.info(`============= START : Update Batch Status ${batchId} ===========`);
         
         const exists = await this.batchExists(ctx, batchId);
@@ -179,7 +179,9 @@ class AgriculturalContract extends Contract {
         // Parse additional data
         let extraData = {};
         try {
-            extraData = typeof additionalData === 'string' ? JSON.parse(additionalData) : additionalData;
+            if (additionalData && additionalData !== "") {
+                extraData = typeof additionalData === 'string' ? JSON.parse(additionalData) : additionalData;
+            }
         } catch (error) {
             console.warn('Invalid additional data in status update');
         }

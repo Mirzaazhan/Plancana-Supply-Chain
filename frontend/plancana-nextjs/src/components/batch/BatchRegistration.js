@@ -7,6 +7,7 @@ import { batchService } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import AutocompleteInput from '../ui/AutocompleteInput';
 import MultiSelectInput from '../ui/MultiSelectInput';
+import LocationInput from '../ui/LocationInput';
 import {
   cropOptions,
   seedsSourceOptions,
@@ -53,12 +54,20 @@ const BatchRegistration = () => {
     
     // Location Data
     latitude: '',
-    longitude: ''
+    longitude: '',
+    
+    // Farm Details (Step 2)
+    soilType: '',
+    climateZone: '',
+    averageRainfall: '',
+    farmSize: '',
+    storageFacilities: '',
+    transportationAccess: ''
   });
 
   const steps = [
     { title: 'Basic Info', description: 'Enter basic batch information' },
-    { title: 'Location', description: 'Set farm location details' },
+    { title: 'Farm Details', description: 'Add farm and environmental details' },
     { title: 'Verification', description: 'Review and verify details' },
     { title: 'Confirmation', description: 'Blockchain registration complete' }
   ];
@@ -137,8 +146,8 @@ const BatchRegistration = () => {
     switch (step) {
       case 0: // Basic Info
         return formData.farmer && formData.crop && formData.quantity && formData.location;
-      case 1: // Location
-        return formData.latitude && formData.longitude;
+      case 1: // Farm Details (optional step)
+        return true; // All fields in this step are optional
       case 2: // Verification
         return true;
       default:
@@ -272,12 +281,13 @@ const BatchRegistration = () => {
                     </div>
                   </div>
 
-                  <AutocompleteInput
-                    label="Farm Location"
-                    value={formData.location}
-                    onChange={(value) => handleInputChange('location', value)}
-                    options={commonLocations}
-                    placeholder="Enter or select location..."
+                  <LocationInput
+                    locationValue={formData.location}
+                    latitudeValue={formData.latitude}
+                    longitudeValue={formData.longitude}
+                    onLocationChange={(value) => handleInputChange('location', value)}
+                    onLatitudeChange={(value) => handleInputChange('latitude', value)}
+                    onLongitudeChange={(value) => handleInputChange('longitude', value)}
                     required={true}
                   />
                 </div>
@@ -435,62 +445,134 @@ const BatchRegistration = () => {
           </div>
         );
 
-      case 1: // Location
+      case 1: // Farm Details
         return (
-          <div className="max-w-2xl mx-auto">
-            <h3 className="text-lg font-semibold text-gray-900 mb-6">Location Details</h3>
+          <div className="max-w-4xl mx-auto">
+            <h3 className="text-lg font-semibold text-gray-900 mb-6">Farm & Environmental Details</h3>
             
             <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Latitude *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.000001"
-                    placeholder="00.000000"
-                    value={formData.latitude}
-                    onChange={(e) => handleInputChange('latitude', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Longitude *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.000001"
-                    placeholder="00.000000"
-                    value={formData.longitude}
-                    onChange={(e) => handleInputChange('longitude', e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                    required
-                  />
+              {/* Location Summary */}
+              <div className="bg-blue-50 rounded-lg p-4">
+                <h4 className="font-medium text-blue-900 mb-2">Location Confirmation</h4>
+                <div className="space-y-1 text-sm">
+                  <p><strong>Farm Location:</strong> {formData.location || 'Not specified'}</p>
+                  {formData.latitude && formData.longitude && (
+                    <p><strong>GPS Coordinates:</strong> {formData.latitude}, {formData.longitude}</p>
+                  )}
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={getCurrentLocation}
-                className="flex items-center space-x-2 text-blue-600 hover:text-blue-700 font-medium"
-              >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-                </svg>
-                <span>Get Current Location</span>
-              </button>
+              {/* Farm Details Form */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Left Column - Environmental Factors */}
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-4">Environmental Conditions</h4>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Soil Type
+                      </label>
+                      <select
+                        value={formData.soilType || ''}
+                        onChange={(e) => handleInputChange('soilType', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                      >
+                        <option value="">Select soil type</option>
+                        <option value="clay">Clay</option>
+                        <option value="sandy">Sandy</option>
+                        <option value="loam">Loam</option>
+                        <option value="silt">Silt</option>
+                        <option value="peat">Peat</option>
+                        <option value="chalk">Chalk</option>
+                      </select>
+                    </div>
 
-              {/* Map Preview */}
-              <div className="bg-gray-100 rounded-lg h-64 flex items-center justify-center">
-                <div className="text-center">
-                  <svg className="mx-auto h-12 w-12 text-gray-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-1.447-.894L15 4m0 13V4m0 0L9 7" />
-                  </svg>
-                  <p className="text-gray-500">Map Preview</p>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Climate Zone
+                      </label>
+                      <select
+                        value={formData.climateZone || ''}
+                        onChange={(e) => handleInputChange('climateZone', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                      >
+                        <option value="">Select climate zone</option>
+                        <option value="arid">Arid</option>
+                        <option value="semi-arid">Semi-Arid</option>
+                        <option value="subtropical">Subtropical</option>
+                        <option value="temperate">Temperate</option>
+                        <option value="tropical">Tropical</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Average Rainfall (mm/year)
+                      </label>
+                      <input
+                        type="number"
+                        placeholder="e.g. 800"
+                        value={formData.averageRainfall || ''}
+                        onChange={(e) => handleInputChange('averageRainfall', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column - Farm Infrastructure */}
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-4">Farm Infrastructure</h4>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Farm Size (acres)
+                      </label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        placeholder="e.g. 5.5"
+                        value={formData.farmSize || ''}
+                        onChange={(e) => handleInputChange('farmSize', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Storage Facilities
+                      </label>
+                      <select
+                        value={formData.storageFacilities || ''}
+                        onChange={(e) => handleInputChange('storageFacilities', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                      >
+                        <option value="">Select storage type</option>
+                        <option value="warehouse">Warehouse</option>
+                        <option value="silo">Silo</option>
+                        <option value="cold-storage">Cold Storage</option>
+                        <option value="open-storage">Open Storage</option>
+                        <option value="controlled-atmosphere">Controlled Atmosphere</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Transportation Access
+                      </label>
+                      <select
+                        value={formData.transportationAccess || ''}
+                        onChange={(e) => handleInputChange('transportationAccess', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                      >
+                        <option value="">Select access type</option>
+                        <option value="direct-road">Direct Road Access</option>
+                        <option value="village-road">Village Road</option>
+                        <option value="unpaved-road">Unpaved Road</option>
+                        <option value="limited-access">Limited Access</option>
+                      </select>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -503,45 +585,76 @@ const BatchRegistration = () => {
             <h3 className="text-lg font-semibold text-gray-900 mb-6">Verify Details</h3>
             
             <div className="space-y-6">
-              <div className="bg-gray-50 rounded-lg p-4">
-                <h4 className="font-medium text-gray-900 mb-3">Batch Information</h4>
+              <div className="bg-white border border-gray-200 rounded-lg p-6">
+                <h4 className="font-semibold text-gray-900 mb-4 text-base">Batch Information</h4>
                 <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-gray-600">Batch ID:</span>
-                    <span className="ml-2 font-medium">{batchId}</span>
+                  <div className="py-2">
+                    <span className="text-gray-800 font-medium">Batch ID:</span>
+                    <span className="ml-2 font-semibold text-gray-900">{batchId || 'Not generated'}</span>
                   </div>
-                  <div>
-                    <span className="text-gray-600">Product:</span>
-                    <span className="ml-2 font-medium">{formData.crop || '-'}</span>
+                  <div className="py-2">
+                    <span className="text-gray-800 font-medium">Product:</span>
+                    <span className="ml-2 font-semibold text-gray-900">{formData.crop || 'Not specified'}</span>
                   </div>
-                  <div>
-                    <span className="text-gray-600">Quantity:</span>
-                    <span className="ml-2 font-medium">{formData.quantity} {formData.unit}</span>
+                  <div className="py-2">
+                    <span className="text-gray-800 font-medium">Quantity:</span>
+                    <span className="ml-2 font-semibold text-gray-900">{formData.quantity ? `${formData.quantity} ${formData.unit}` : 'Not specified'}</span>
                   </div>
-                  <div>
-                    <span className="text-gray-600">Harvest Date:</span>
-                    <span className="ml-2 font-medium">{formData.harvestDate || '-'}</span>
+                  <div className="py-2">
+                    <span className="text-gray-800 font-medium">Harvest Date:</span>
+                    <span className="ml-2 font-semibold text-gray-900">{formData.harvestDate || 'Not specified'}</span>
                   </div>
-                  <div>
-                    <span className="text-gray-600">Location:</span>
-                    <span className="ml-2 font-medium">{formData.location || '-'}</span>
+                  <div className="py-2">
+                    <span className="text-gray-800 font-medium">Location:</span>
+                    <span className="ml-2 font-semibold text-gray-900">{formData.location || 'Not specified'}</span>
                   </div>
-                  <div>
-                    <span className="text-gray-600">Quality Grade:</span>
-                    <span className="ml-2 font-medium">{formData.qualityGrade || '-'}</span>
+                  <div className="py-2">
+                    <span className="text-gray-800 font-medium">Quality Grade:</span>
+                    <span className="ml-2 font-semibold text-gray-900">{formData.qualityGrade || 'Not specified'}</span>
                   </div>
+                  {formData.variety && (
+                    <div className="py-2">
+                      <span className="text-gray-800 font-medium">Variety:</span>
+                      <span className="ml-2 font-semibold text-gray-900">{formData.variety}</span>
+                    </div>
+                  )}
+                  {formData.cultivationMethod && (
+                    <div className="py-2">
+                      <span className="text-gray-800 font-medium">Cultivation:</span>
+                      <span className="ml-2 font-semibold text-gray-900">{formData.cultivationMethod}</span>
+                    </div>
+                  )}
                 </div>
+                
+                {/* Additional Details */}
+                {(formData.fertilizers.length > 0 || formData.pesticides.length > 0) && (
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <h5 className="font-medium text-gray-900 mb-2">Agricultural Details</h5>
+                    {formData.fertilizers.length > 0 && (
+                      <div className="py-1">
+                        <span className="text-gray-800 font-medium">Fertilizers:</span>
+                        <span className="ml-2 text-gray-900">{formData.fertilizers.join(', ')}</span>
+                      </div>
+                    )}
+                    {formData.pesticides.length > 0 && (
+                      <div className="py-1">
+                        <span className="text-gray-800 font-medium">Pesticides:</span>
+                        <span className="ml-2 text-gray-900">{formData.pesticides.join(', ')}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
-              <div className="bg-blue-50 rounded-lg p-4">
-                <h4 className="font-medium text-blue-900 mb-2">Network Status</h4>
-                <div className="flex items-center space-x-2">
-                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                  <span className="text-sm text-blue-800">Hyperledger Fabric Network</span>
-                  <span className="ml-auto text-sm font-medium text-green-600">Connected</span>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                <h4 className="font-semibold text-green-900 mb-3">Network Status</h4>
+                <div className="flex items-center space-x-3">
+                  <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                  <span className="text-sm font-medium text-green-800">Hyperledger Fabric Network</span>
+                  <span className="ml-auto text-sm font-bold text-green-700 bg-green-100 px-2 py-1 rounded">Connected</span>
                 </div>
-                <p className="text-xs text-blue-700 mt-2">
-                  Estimated processing time: 2-3 minutes
+                <p className="text-sm text-green-800 mt-3 font-medium">
+                  ⏱️ Estimated processing time: 2-3 minutes
                 </p>
               </div>
             </div>
@@ -585,7 +698,7 @@ const BatchRegistration = () => {
 
             <div className="flex space-x-4 justify-center">
               <button
-                onClick={() => navigate('/farmer/dashboard')}
+                onClick={() => router.push('/farmer/dashboard')}
                 className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-md font-medium transition-colors duration-200"
               >
                 Back to Dashboard

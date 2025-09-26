@@ -2274,6 +2274,353 @@ app.get('/api/batch/:batchId/integrity', authenticate, async (req, res) => {
    }
 });
 
+// ===============================
+// PROCESSOR ENDPOINTS
+// ===============================
+
+// Get available batches for processing
+app.get('/api/processor/available-batches', authenticate, authorize(['PROCESSOR']), async (req, res) => {
+    try {
+        const batches = await prisma.batch.findMany({
+            where: {
+                status: {
+                    in: ['REGISTERED', 'PROCESSING']
+                }
+            },
+            orderBy: {
+                createdAt: 'desc'
+            },
+            include: {
+                farmer: {
+                    select: {
+                        firstName: true,
+                        lastName: true,
+                        farmName: true,
+                        user: {
+                            select: {
+                                username: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        res.json({
+            success: true,
+            batches: batches,
+            message: `Found ${batches.length} batches (available and in processing)`
+        });
+
+    } catch (error) {
+        console.error('Get available batches error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch available batches'
+        });
+    }
+});
+
+// Process a batch
+app.post('/api/processor/process/:batchId', authenticate, authorize(['PROCESSOR']), async (req, res) => {
+    try {
+        const { batchId } = req.params;
+        const { processType, notes } = req.body;
+        const processorId = req.user.id;
+
+        // Find the batch
+        const batch = await prisma.batch.findUnique({
+            where: { batchId: batchId }
+        });
+
+        if (!batch) {
+            return res.status(404).json({
+                success: false,
+                error: 'Batch not found'
+            });
+        }
+
+        if (batch.status !== 'REGISTERED') {
+            return res.status(400).json({
+                success: false,
+                error: `Cannot process batch with status: ${batch.status}`
+            });
+        }
+
+        // Update batch status to PROCESSING
+        const updatedBatch = await prisma.batch.update({
+            where: { batchId: batchId },
+            data: {
+                status: 'PROCESSING',
+                updatedAt: new Date()
+            }
+        });
+
+        // Get the processor profile ID
+        const processorProfile = await prisma.processorProfile.findUnique({
+            where: {
+                userId: processorId
+            }
+        });
+
+        if (!processorProfile) {
+            return res.status(400).json({
+                success: false,
+                error: 'Processor profile not found'
+            });
+        }
+
+        // Find or create a default processing facility for this processor
+        let facility = await prisma.processingFacility.findFirst({
+            where: {
+                processorId: processorProfile.id,
+                isActive: true
+            }
+        });
+
+        if (!facility) {
+            // Create a default facility if none exists
+            facility = await prisma.processingFacility.create({
+                data: {
+                    processorId: processorProfile.id,
+                    facilityName: `${req.user.username}'s Processing Facility`,
+                    facilityType: 'processing',
+                    latitude: 0.0, // Default coordinates, can be updated later
+                    longitude: 0.0,
+                    address: 'Not specified',
+                    isActive: true,
+                    certifications: [],
+                    equipmentList: []
+                }
+            });
+        }
+
+        // Create processing record
+        const processingRecord = await prisma.processingRecord.create({
+            data: {
+                batchId: batch.id,
+                processorId: processorProfile.id,
+                facilityId: facility.id,
+                processingDate: new Date(),
+                processingType: processType || 'initial_processing',
+                inputQuantity: batch.quantity,
+                outputQuantity: batch.quantity, // Will be updated when processing completes
+                operatorName: req.user.username
+            }
+        });
+
+        // Update blockchain
+        try {
+            const { gateway, contract } = await blockchainService.connectToNetwork();
+            await contract.submitTransaction(
+                'updateBatchStatus',
+                batchId,
+                'PROCESSING',
+                req.user.username,
+                new Date().toISOString()
+            );
+            await gateway.disconnect();
+            console.log(`✅ Blockchain updated: Batch ${batchId} set to PROCESSING`);
+        } catch (blockchainError) {
+            console.error('Blockchain update failed:', blockchainError);
+        }
+
+        res.json({
+            success: true,
+            batch: updatedBatch,
+            processingRecord: processingRecord,
+            message: 'Batch processing started successfully'
+        });
+
+    } catch (error) {
+        console.error('Process batch error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to start batch processing'
+        });
+    }
+});
+
+// Get processor's processing history
+app.get('/api/processor/my-processing', authenticate, authorize(['PROCESSOR']), async (req, res) => {
+    try {
+        const processorId = req.user.id;
+
+        // Get the processor profile ID
+        const processorProfile = await prisma.processorProfile.findUnique({
+            where: {
+                userId: processorId
+            }
+        });
+
+        if (!processorProfile) {
+            return res.status(400).json({
+                success: false,
+                error: 'Processor profile not found'
+            });
+        }
+
+        const processingHistory = await prisma.processingRecord.findMany({
+            where: {
+                processorId: processorProfile.id
+            },
+            orderBy: {
+                processingDate: 'desc'
+            },
+            include: {
+                batch: {
+                    select: {
+                        batchId: true,
+                        productType: true,
+                        variety: true,
+                        status: true
+                    }
+                }
+            }
+        });
+
+        // Transform data for frontend
+        const history = processingHistory.map(record => ({
+            id: record.id,
+            batchId: record.batch?.batchId || record.batchId,
+            productType: record.batch?.productType || 'Unknown',
+            variety: record.batch?.variety,
+            processType: record.processingType,
+            processDate: record.processingDate,
+            createdAt: record.processingDate, // For compatibility with dashboard
+            status: 'COMPLETED', // ProcessingRecord doesn't have a status field in our schema
+            notes: record.operatorName ? `Processed by ${record.operatorName}` : 'Processing completed'
+        }));
+
+        res.json({
+            success: true,
+            history: history,
+            message: `Found ${history.length} processing records`
+        });
+
+    } catch (error) {
+        console.error('Get processing history error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch processing history'
+        });
+    }
+});
+
+// Complete processing for a batch
+app.put('/api/processor/complete/:batchId', authenticate, authorize(['PROCESSOR']), async (req, res) => {
+    try {
+        const { batchId } = req.params;
+        const { qualityGrade, completionNotes } = req.body;
+        const processorId = req.user.id;
+
+        // Get the processor profile ID
+        const processorProfile = await prisma.processorProfile.findUnique({
+            where: {
+                userId: processorId
+            }
+        });
+
+        if (!processorProfile) {
+            return res.status(400).json({
+                success: false,
+                error: 'Processor profile not found'
+            });
+        }
+
+        // Find the batch
+        const batch = await prisma.batch.findUnique({
+            where: { batchId: batchId }
+        });
+
+        if (!batch) {
+            return res.status(404).json({
+                success: false,
+                error: 'Batch not found'
+            });
+        }
+
+        if (batch.status !== 'PROCESSING') {
+            return res.status(400).json({
+                success: false,
+                error: `Cannot complete batch with status: ${batch.status}`
+            });
+        }
+
+        // Update batch status to PROCESSED
+        const updatedBatch = await prisma.batch.update({
+            where: { batchId: batchId },
+            data: {
+                status: 'PROCESSED',
+                qualityGrade: qualityGrade,
+                updatedAt: new Date()
+            }
+        });
+
+        // Update processing record - update the most recent processing record for this batch and processor
+        const mostRecentRecord = await prisma.processingRecord.findFirst({
+            where: {
+                batch: {
+                    batchId: batchId
+                },
+                processorId: processorProfile.id
+            },
+            orderBy: {
+                processingDate: 'desc'
+            }
+        });
+
+        if (mostRecentRecord) {
+            await prisma.processingRecord.update({
+                where: {
+                    id: mostRecentRecord.id
+                },
+                data: {
+                    outputQuantity: batch.quantity, // Update final output quantity
+                    operatorName: `${req.user.username} (completed)`,
+                    qualityTests: qualityGrade ? JSON.stringify({ grade: qualityGrade, notes: completionNotes }) : null
+                }
+            });
+        }
+
+        // Update blockchain
+        try {
+            const { gateway, contract } = await blockchainService.connectToNetwork();
+            await contract.submitTransaction(
+                'updateBatchStatus',
+                batchId,
+                'PROCESSED',
+                req.user.username,
+                new Date().toISOString(),
+                JSON.stringify({
+                    processedBy: req.user.username,
+                    processorId: processorId,
+                    completionDate: new Date().toISOString(),
+                    qualityGrade: qualityGrade,
+                    notes: completionNotes
+                })
+            );
+            await gateway.disconnect();
+            console.log(`✅ Blockchain updated: Batch ${batchId} completed processing`);
+        } catch (blockchainError) {
+            console.error('Blockchain update failed:', blockchainError);
+        }
+
+        res.json({
+            success: true,
+            batch: updatedBatch,
+            message: 'Batch processing completed successfully'
+        });
+
+    } catch (error) {
+        console.error('Complete processing error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to complete batch processing'
+        });
+    }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
    console.error('Unhandled error:', err);
@@ -2335,6 +2682,11 @@ const startServer = async () => {
            console.log(`     GET  /api/batch/:batchId     - Get batch details (Role-based)`);
            console.log(`     PUT  /api/batch/:id/status   - Update batch status`);
            console.log(`     GET  /api/farmer/my-batches  - Get farmer's batches`);
+           console.log(`   Processor Operations:`);
+           console.log(`     GET  /api/processor/available-batches - Get available batches (Processors)`);
+           console.log(`     POST /api/processor/process/:batchId  - Start batch processing`);
+           console.log(`     GET  /api/processor/my-processing     - Get processing history`);
+           console.log(`     PUT  /api/processor/complete/:batchId - Complete batch processing`);
            console.log(`   Verification & QR:`);
            console.log(`     GET  /api/verify/:batchId    - Verify batch (QR scan)`);
            console.log(`     GET  /api/qr/:batchId        - Get QR code for batch`);

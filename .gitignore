@@ -80,3 +80,38 @@ chaincode/*/node_modules/
 # Application specific
 application/public/uploads/
 application/uploads/
+
+# SSH Keys and certificates (SECURITY)
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+id_rsa*
+id_ed25519*
+
+# Screenshots and images
+frontend/screenshots/
+screenshots/
+*.png
+*.jpg
+*.jpeg
+*.gif
+!public/**/*.png
+!public/**/*.jpg
+!public/**/*.jpeg
+!public/**/*.gif
+!src/assets/**/*.png
+!src/assets/**/*.jpg
+!src/assets/**/*.jpeg
+!src/assets/**/*.gif
+
+# Documentation (optional - remove if you want to track docs)
+*.md
+!README.md
+!package.json
+
+# Azure deployment files
+deploy/
+*.pem
