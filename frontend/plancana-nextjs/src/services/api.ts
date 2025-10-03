@@ -11,7 +11,7 @@ import {
   RouteData 
 } from '@/types/api';
 
-const BASE_URL = 'http://localhost:3000/api';
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
 
 // Create axios instance with base configuration
 const api = axios.create({
