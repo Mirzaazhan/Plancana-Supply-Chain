@@ -4,7 +4,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import { Toaster } from "react-hot-toast";
 
 export const metadata: Metadata = {
-  title: "Agricultural Supply Chain",
+  title: "Plancana",
   description: "Blockchain-based agricultural supply chain tracking",
 };
 
