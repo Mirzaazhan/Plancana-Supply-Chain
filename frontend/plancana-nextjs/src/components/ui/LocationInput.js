@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { MapPinIcon, GlobeAltIcon } from '@heroicons/react/24/outline';
 import AutocompleteInput from './AutocompleteInput';
 import { commonLocations } from '../../data/formOptions';
 import { toast } from 'react-hot-toast';
+import ArcGISMap from '@/components/gis-map/geolocation';
 
 const LocationInput = ({
   locationValue,
@@ -58,7 +59,10 @@ const LocationInput = ({
     // You could add logic here to automatically populate coordinates
     // based on known locations or use geocoding API
   };
-
+  
+  useEffect(() =>{
+    console.log("test", latitudeValue)
+  }, [LocationInput])
   return (
     <div className={`space-y-4 ${className}`}>
       {/* Location Name/Address */}
@@ -68,7 +72,7 @@ const LocationInput = ({
             Farm Location
             {required && <span className="text-red-500 ml-1">*</span>}
           </label>
-          <button
+          {/* <button
             type="button"
             onClick={getCurrentLocation}
             disabled={loading}
@@ -76,7 +80,7 @@ const LocationInput = ({
           >
             <MapPinIcon className="h-3 w-3 mr-1" />
             {loading ? 'Getting GPS...' : 'Use GPS'}
-          </button>
+          </button> */}
         </div>
         
         <AutocompleteInput
@@ -93,11 +97,20 @@ const LocationInput = ({
       </div>
 
       {/* GPS Coordinates */}
-      <div className="bg-gray-50 rounded-lg p-4">
+      <div className="bg-gray-50 rounded-lg p-0">
         <div className="flex items-center mb-3">
           <GlobeAltIcon className="h-4 w-4 text-gray-600 mr-2" />
           <span className="text-sm font-medium text-gray-700">GPS Coordinates</span>
           <span className="text-xs text-gray-500 ml-2">(Optional but recommended)</span>
+        </div>
+
+        <div className="flex-1">
+              <ArcGISMap
+                lat={latitudeValue}
+                lng={longitudeValue}
+                onLatitudeChange = {(val) => onLatitudeChange(val)}
+                onLongitudeChange = {(val) => onLongitudeChange(val)}
+              />
         </div>
         
         <div className="grid grid-cols-2 gap-3">
