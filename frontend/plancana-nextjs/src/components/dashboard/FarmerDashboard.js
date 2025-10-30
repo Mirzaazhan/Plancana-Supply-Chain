@@ -89,6 +89,30 @@ const FarmerDashboard = () => {
     );
   }
 
+  // Render Batch Details View
+  if (currentView === "batchDetails" && selectedBatchId) {
+    return (
+      <BatchDetails
+        batchId={selectedBatchId}
+        onBack={handleBackToDashboard}
+        currentUser={user}
+      />
+    );
+  }
+
+  // Render All Batches View
+  if (currentView === "batches") {
+    return (
+      <BatchManagement
+        onBack={handleBackToDashboard}
+        onViewBatch={handleViewBatch}
+        currentUser={user}
+        onCreateBatch={handleCreateBatch}
+      />
+    );
+  }
+
+  // Render Dashboard View (default)
   return (
     <div className="space-y-6">
       {/* Welcome Header */}

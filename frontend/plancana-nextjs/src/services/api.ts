@@ -13,17 +13,24 @@ import {
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
 
+// Log the API URL for debugging
+if (typeof window !== 'undefined') {
+  console.log('🔗 API Base URL:', BASE_URL);
+}
+
 // Create axios instance with base configuration
 const api = axios.create({
   baseURL: BASE_URL,
   headers: {
     'Content-Type': 'application/json',
   },
+  timeout: 30000, // 30 second timeout
 });
 
 // Request interceptor to add auth token
 api.interceptors.request.use(
   (config) => {
+    console.log('📤 API Request:', config.method?.toUpperCase(), config.url);
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
@@ -31,14 +38,25 @@ api.interceptors.request.use(
     return config;
   },
   (error) => {
+    console.error('❌ Request Error:', error);
     return Promise.reject(error);
   }
 );
 
 // Response interceptor for error handling
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    console.log('✅ API Response:', response.status, response.config.url);
+    return response;
+  },
   (error) => {
+    console.error('❌ API Error:', {
+      message: error.message,
+      status: error.response?.status,
+      url: error.config?.url,
+      data: error.response?.data
+    });
+
     if (error.response?.status === 401) {
       // Token expired or invalid
       if (typeof window !== 'undefined') {

@@ -347,23 +347,33 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
             </div>
 
             {/* Certifications */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h2 className="text-xl font-semibold text-gray-900 mb-4">Certifications</h2>
-              <div className="flex flex-wrap gap-2">
-                {['USDA Organic', 'Halal Certified', 'Non-GMO Verified', 'Fair Trade'].map((cert) => (
-                  <span
-                    key={cert}
-                    className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getCertificationColor(cert)}`}
-                  >
-                    {cert === 'USDA Organic' && '🌿'}
-                    {cert === 'Halal Certified' && '🌙'}
-                    {cert === 'Non-GMO Verified' && '🧬'}
-                    {cert === 'Fair Trade' && '⚖️'}
-                    <span className="ml-1">{cert}</span>
-                  </span>
-                ))}
+            {(verificationData?.verification?.blockchain?.traceability?.certifications?.length > 0 ||
+              verificationData?.verification?.blockchain?.traceability?.customCertification) && (
+              <div className="bg-white rounded-lg shadow-sm p-6">
+                <h2 className="text-xl font-semibold text-gray-900 mb-4">Certifications & Compliance</h2>
+                <div className="flex flex-wrap gap-2">
+                  {verificationData.verification.blockchain.traceability.certifications.map((cert) => (
+                    <span
+                      key={cert}
+                      className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${getCertificationColor(cert)}`}
+                    >
+                      {(cert.toLowerCase().includes('organic') || cert.toLowerCase().includes('usda')) && '🌿 '}
+                      {cert.toLowerCase().includes('halal') && '🌙 '}
+                      {cert.toLowerCase().includes('gmo') && '🧬 '}
+                      {cert.toLowerCase().includes('fair trade') && '⚖️ '}
+                      {cert.toLowerCase().includes('haccp') && '🔬 '}
+                      {cert.toLowerCase().includes('iso') && '📋 '}
+                      <span>{cert}</span>
+                    </span>
+                  ))}
+                  {verificationData.verification.blockchain.traceability.customCertification && (
+                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-indigo-100 text-indigo-800">
+                      ✨ {verificationData.verification.blockchain.traceability.customCertification}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Product Journey Timeline */}
             <div className="bg-white rounded-lg shadow-sm p-6">
@@ -432,35 +442,74 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
           {/* Right Column - Summary Info */}
           <div className="space-y-6">
             
-            {/* Financial Summary */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">Financial Summary</h3>
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <p className="text-sm text-gray-600">Production Cost</p>
-                    <p className="text-2xl font-bold text-gray-900">$25,000</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm text-gray-600">Market Value</p>
-                    <p className="text-2xl font-bold text-gray-900">$45,000</p>
-                  </div>
-                </div>
-                
-                <div className="border-t pt-4">
-                  <div className="flex justify-between items-center">
-                    <div>
-                      <p className="text-sm text-gray-600">ROI</p>
-                      <p className="text-xl font-bold text-green-600">+80%</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm text-gray-600">Price/Unit</p>
-                      <p className="text-xl font-bold text-gray-900">$12.99</p>
-                    </div>
-                  </div>
+            {/* Farm-Gate Pricing */}
+            {verificationData?.verification?.blockchain?.pricingInformation && (
+              <div className="bg-white rounded-lg shadow-sm p-6">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Farm-Gate Pricing</h3>
+                <div className="space-y-4">
+                  {verificationData.verification.blockchain.pricingInformation.pricePerUnit && (
+                    <>
+                      <div className="flex justify-between items-center pb-3 border-b">
+                        <div>
+                          <p className="text-sm text-gray-600">Price per Unit</p>
+                          <p className="text-2xl font-bold text-gray-900">
+                            {verificationData.verification.blockchain.pricingInformation.currency || 'MYR'}{' '}
+                            {parseFloat(verificationData.verification.blockchain.pricingInformation.pricePerUnit).toFixed(2)}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            per {verificationData.verification.blockchain.traceability.unit || 'kg'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {verificationData.verification.blockchain.pricingInformation.totalBatchValue && (
+                        <div className="flex justify-between items-center pb-3 border-b">
+                          <div>
+                            <p className="text-sm text-gray-600">Total Batch Value</p>
+                            <p className="text-2xl font-bold text-green-600">
+                              {verificationData.verification.blockchain.pricingInformation.currency || 'MYR'}{' '}
+                              {parseFloat(verificationData.verification.blockchain.pricingInformation.totalBatchValue).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {verificationData.verification.blockchain.traceability.quantity}{' '}
+                              {verificationData.verification.blockchain.traceability.unit || 'kg'} × {' '}
+                              {verificationData.verification.blockchain.pricingInformation.currency || 'MYR'}{' '}
+                              {parseFloat(verificationData.verification.blockchain.pricingInformation.pricePerUnit).toFixed(2)}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="space-y-2">
+                        {verificationData.verification.blockchain.pricingInformation.paymentMethod && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Payment Method:</span>
+                            <span className="font-medium text-gray-900 capitalize">
+                              {verificationData.verification.blockchain.pricingInformation.paymentMethod.replace('-', ' ')}
+                            </span>
+                          </div>
+                        )}
+
+                        {verificationData.verification.blockchain.pricingInformation.buyerName && (
+                          <div className="flex justify-between text-sm">
+                            <span className="text-gray-600">Buyer:</span>
+                            <span className="font-medium text-gray-900">
+                              {verificationData.verification.blockchain.pricingInformation.buyerName}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+                        <p className="text-xs text-blue-800">
+                          <strong>💰 Price Transparency:</strong> Farm-gate prices are recorded on blockchain to ensure fair pricing throughout the supply chain.
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
-            </div>
+            )}
 
             {/* Product Details */}
             <div className="bg-white rounded-lg shadow-sm p-6">
@@ -472,24 +521,55 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
                     {verificationData?.batchInfo?.productType || 'Agricultural Product'}
                   </span>
                 </div>
+
+                {verificationData?.verification?.blockchain?.traceability?.variety && (
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Variety:</span>
+                    <span className="text-sm font-medium text-gray-900">
+                      {verificationData.verification.blockchain.traceability.variety}
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-600">Quantity:</span>
                   <span className="text-sm font-medium text-gray-900">
-                    {verificationData?.batchInfo?.quantity || 'N/A'}
+                    {verificationData?.verification?.blockchain?.traceability?.quantity || verificationData?.batchInfo?.quantity || 'N/A'}{' '}
+                    {verificationData?.verification?.blockchain?.traceability?.unit || 'kg'}
                   </span>
                 </div>
+
+                {verificationData?.verification?.blockchain?.traceability?.qualityGrade && (
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Quality Grade:</span>
+                    <span className="text-sm font-medium text-green-700">
+                      {verificationData.verification.blockchain.traceability.qualityGrade.replace('-', ' ').toUpperCase()}
+                    </span>
+                  </div>
+                )}
+
+                {verificationData?.verification?.blockchain?.traceability?.cultivationMethod && (
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Cultivation:</span>
+                    <span className="text-sm font-medium text-gray-900 capitalize">
+                      {verificationData.verification.blockchain.traceability.cultivationMethod}
+                    </span>
+                  </div>
+                )}
+
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-600">Harvest Date:</span>
                   <span className="text-sm font-medium text-gray-900">
-                    {formatDate(verificationData?.batchInfo?.harvestDate || new Date())}
+                    {formatDate(verificationData?.verification?.blockchain?.traceability?.harvestDate || verificationData?.batchInfo?.harvestDate || new Date())}
                   </span>
                 </div>
+
                 <div className="flex justify-between">
                   <span className="text-sm text-gray-600">Current Status:</span>
                   <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                    getStatusColor(verificationData?.batchInfo?.status)
+                    getStatusColor(verificationData?.verification?.blockchain?.traceability?.currentStatus || verificationData?.batchInfo?.status)
                   }`}>
-                    {verificationData?.batchInfo?.status?.replace('_', ' ') || 'VERIFIED'}
+                    {(verificationData?.verification?.blockchain?.traceability?.currentStatus || verificationData?.batchInfo?.status)?.replace('_', ' ') || 'VERIFIED'}
                   </span>
                 </div>
               </div>

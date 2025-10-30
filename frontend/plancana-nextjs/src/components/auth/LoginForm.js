@@ -7,14 +7,18 @@ import Link from 'next/link';
 import { toast } from 'react-hot-toast';
 
 const LoginForm = () => {
+  console.log('🚀 LoginForm component loaded!');
+
   const [formData, setFormData] = useState({
     email: '',
     password: ''
   });
   const [showPassword, setShowPassword] = useState(false);
-  
+
   const { login, isLoading, error, clearError } = useAuth();
   const router = useRouter();
+
+  console.log('🔍 LoginForm state:', { isLoading, hasError: !!error });
 
   const handleChange = (e) => {
     setFormData({
@@ -26,17 +30,28 @@ const LoginForm = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    const result = await login(formData);
-    
-    if (result.success) {
-      toast.success('Login successful!');
-      
-      // Redirect based on user role
-      const role = result.user.role.toLowerCase();
-      router.push(`/${role}/dashboard`);
-    } else {
-      toast.error(result.error);
+
+    console.log('🔍 Form submitted with:', formData);
+    console.log('🔍 isLoading before:', isLoading);
+
+    try {
+      const result = await login(formData);
+      console.log('🔍 Login result:', result);
+
+      if (result.success) {
+        toast.success('Login successful!');
+
+        // Redirect based on user role
+        const role = result.user.role.toLowerCase();
+        console.log('🔍 Redirecting to:', `/${role}/dashboard`);
+        router.push(`/${role}/dashboard`);
+      } else {
+        console.error('❌ Login failed:', result.error);
+        toast.error(result.error);
+      }
+    } catch (error) {
+      console.error('❌ Login error caught:', error);
+      toast.error('An unexpected error occurred during login');
     }
   };
 

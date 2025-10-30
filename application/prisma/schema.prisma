@@ -264,7 +264,18 @@ model Batch {
   proteinContent    Float?
   images            String[]     // Image URLs
   notes             String?
-  
+
+  // Pricing Information (Farm-gate level)
+  pricePerUnit      Float?       // Farm-gate price per unit
+  currency          String?      @default("MYR")
+  totalBatchValue   Float?       // Quantity × Price per Unit
+  paymentMethod     String?      // cash, bank-transfer, cheque, etc.
+  buyerName         String?      // Buyer or processor name
+
+  // Certifications & Compliance
+  certifications    String[]     // Organic, Halal, MyGAP, GLOBALG.A.P, etc.
+  customCertification String?    // Custom certification if not in dropdown
+
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
   

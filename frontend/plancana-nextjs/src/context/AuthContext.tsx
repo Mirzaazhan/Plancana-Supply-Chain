@@ -111,34 +111,42 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const login = async (credentials: any) => {
+    console.log('🔐 AuthContext.login called with:', credentials);
     try {
+      console.log('🔄 Dispatching LOGIN_START');
       dispatch({ type: 'LOGIN_START' });
-      
+
+      console.log('📡 Calling authService.login...');
       const response = await authService.login(credentials);
-      
+      console.log('✅ authService.login response:', response);
+
       if (response.data.success) {
         const { user, token } = response.data;
-        
+
         // Store token in localStorage
         if (typeof window !== 'undefined') {
           localStorage.setItem('token', token);
+          console.log('💾 Token stored in localStorage');
         }
-        
+
         dispatch({
           type: 'LOGIN_SUCCESS',
           payload: { user, token }
         });
-        
+
+        console.log('✅ Login successful, returning success');
         return { success: true, user };
       } else {
         throw new Error(response.data.error || 'Login failed');
       }
     } catch (error: any) {
+      console.error('❌ Login error in AuthContext:', error);
       const errorMessage = error.response?.data?.error || error.message || 'Login failed';
       dispatch({
         type: 'LOGIN_FAILURE',
         payload: errorMessage
       });
+      console.log('❌ Returning error:', errorMessage);
       return { success: false, error: errorMessage };
     }
   };

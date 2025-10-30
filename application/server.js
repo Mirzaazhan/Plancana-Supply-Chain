@@ -1042,6 +1042,18 @@ app.post('/api/batch/create', authenticate, authorize(['FARMER']), async (req, r
         const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
         const { farmer, crop, quantity, location, customBatchId, ...additionalData } = req.body;
 
+        // DEBUG: Log received data
+        console.log('📥 Received batch creation request:');
+        console.log('   Basic fields:', { farmer, crop, quantity, location });
+        console.log('   Additional data:', JSON.stringify(additionalData, null, 2));
+        console.log('   Pricing fields:', {
+            pricePerUnit: additionalData.pricePerUnit,
+            currency: additionalData.currency,
+            totalBatchValue: additionalData.totalBatchValue,
+            paymentMethod: additionalData.paymentMethod,
+            buyerName: additionalData.buyerName
+        });
+
         // Validate required fields
         if (!farmer || !crop || !quantity || !location) {
             return res.status(400).json({
@@ -1097,6 +1109,15 @@ app.post('/api/batch/create', authenticate, authorize(['FARMER']), async (req, r
                     proteinContent: additionalData.proteinContent ? parseFloat(additionalData.proteinContent) : null,
                     images: additionalData.images || [],
                     notes: additionalData.notes || null,
+                    // Pricing Information
+                    pricePerUnit: additionalData.pricePerUnit ? parseFloat(additionalData.pricePerUnit) : null,
+                    currency: additionalData.currency || 'MYR',
+                    totalBatchValue: additionalData.totalBatchValue ? parseFloat(additionalData.totalBatchValue) : null,
+                    paymentMethod: additionalData.paymentMethod || null,
+                    buyerName: additionalData.buyerName || null,
+                    // Certifications & Compliance
+                    certifications: additionalData.certifications || [],
+                    customCertification: additionalData.customCertification || null,
                     status: 'REGISTERED'
                 },
                 include: {
@@ -1114,11 +1135,32 @@ app.post('/api/batch/create', authenticate, authorize(['FARMER']), async (req, r
             // STEP 2: Create hash of database data for integrity
             const dataHash = calculateStableHash(batch);
 
-            // STEP 3: Submit critical data to blockchain (using your existing format)
+            // STEP 3: Submit critical data to blockchain with pricing and certifications
+            const blockchainData = {
+                variety: additionalData.variety,
+                unit: additionalData.unit || 'kg',
+                harvestDate: additionalData.harvestDate,
+                cultivationMethod: additionalData.cultivationMethod,
+                qualityGrade: additionalData.qualityGrade,
+                certifications: additionalData.certifications || [],
+                customCertification: additionalData.customCertification,
+                // Pricing Information
+                pricePerUnit: additionalData.pricePerUnit,
+                currency: additionalData.currency || 'MYR',
+                totalBatchValue: additionalData.totalBatchValue,
+                paymentMethod: additionalData.paymentMethod,
+                buyerName: additionalData.buyerName,
+                // Coordinates if available
+                coordinates: (additionalData.latitude && additionalData.longitude) ? {
+                    latitude: parseFloat(additionalData.latitude),
+                    longitude: parseFloat(additionalData.longitude)
+                } : null
+            };
+
             const result = await blockchainService.submitTransactionWithRetry(
                 contract,
                 'createBatch',
-                [batchId, farmer, crop, quantity.toString(), location]
+                [batchId, farmer, crop, quantity.toString(), location, JSON.stringify(blockchainData)]
             );
 
             // STEP 4: Update database with blockchain reference

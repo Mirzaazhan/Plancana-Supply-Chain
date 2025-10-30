@@ -132,11 +132,11 @@ const QRCodeModal = ({ isOpen, onClose, batchId, batchData }) => {
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div>
                       <span className="text-gray-600">Product:</span>
-                      <span className="ml-1 font-medium">{batchData.productType}</span>
+                      <span className="ml-1 font-medium text-gray-900">{batchData.productType}</span>
                     </div>
                     <div>
                       <span className="text-gray-600">Quantity:</span>
-                      <span className="ml-1 font-medium">{batchData.quantity} {batchData.unit}</span>
+                      <span className="ml-1 font-medium text-gray-900">{batchData.quantity} {batchData.unit}</span>
                     </div>
                     <div>
                       <span className="text-gray-600">Status:</span>
@@ -151,10 +151,23 @@ const QRCodeModal = ({ isOpen, onClose, batchId, batchData }) => {
                     </div>
                     <div>
                       <span className="text-gray-600">Created:</span>
-                      <span className="ml-1 font-medium">
+                      <span className="ml-1 font-medium text-gray-900">
                         {new Date(batchData.createdAt).toLocaleDateString()}
                       </span>
                     </div>
+                    {batchData.pricePerUnit && (
+                      <div className="col-span-2">
+                        <span className="text-gray-600">Price:</span>
+                        <span className="ml-1 font-medium text-green-600">
+                          {batchData.currency || 'MYR'} {parseFloat(batchData.pricePerUnit).toFixed(2)}/{batchData.unit || 'kg'}
+                        </span>
+                        {batchData.totalBatchValue && (
+                          <span className="ml-2 text-gray-600">
+                            (Total: <span className="font-medium text-green-600">{batchData.currency || 'MYR'} {parseFloat(batchData.totalBatchValue).toFixed(2)}</span>)
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -169,7 +182,7 @@ const QRCodeModal = ({ isOpen, onClose, batchId, batchData }) => {
                     type="text"
                     value={verificationUrl}
                     readOnly
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-l-md text-sm bg-gray-50"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-l-md text-sm bg-gray-50 text-gray-900"
                   />
                   <button
                     onClick={copyVerificationLink}

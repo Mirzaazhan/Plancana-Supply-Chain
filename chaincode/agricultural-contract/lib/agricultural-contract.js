@@ -39,7 +39,7 @@ class AgriculturalContract extends Contract {
     }
 
     // Enhanced batch creation with comprehensive data
-    async createBatch(ctx, batchId, farmer, crop, quantity, location, additionalData = "{}") {
+    async createBatch(ctx, batchId, farmer, crop, quantity, location, additionalData) {
         console.info(`============= START : Create Batch ${batchId} ===========`);
 
         // Check if batch already exists
@@ -54,10 +54,12 @@ class AgriculturalContract extends Contract {
             throw new Error(`Validation failed: ${validationErrors.join(", ")}`);
         }
 
-        // Parse additional data from database
+        // Parse additional data from database (handle undefined/null)
         let extraData = {};
         try {
-            extraData = typeof additionalData === 'string' ? JSON.parse(additionalData) : additionalData;
+            if (additionalData && additionalData !== '') {
+                extraData = typeof additionalData === 'string' ? JSON.parse(additionalData) : additionalData;
+            }
         } catch (error) {
             console.warn('Invalid additional data provided, using defaults');
         }
@@ -81,6 +83,15 @@ class AgriculturalContract extends Contract {
             cultivationMethod: extraData.cultivationMethod || null,
             qualityGrade: extraData.qualityGrade || null,
             certifications: extraData.certifications || [],
+            customCertification: extraData.customCertification || null,
+
+            // Pricing Information (Farm-gate level)
+            pricePerUnit: extraData.pricePerUnit ? parseFloat(extraData.pricePerUnit) : null,
+            currency: extraData.currency || 'MYR',
+            totalBatchValue: extraData.totalBatchValue ? parseFloat(extraData.totalBatchValue) : null,
+            paymentMethod: extraData.paymentMethod || null,
+            buyerName: extraData.buyerName || null,
+
             status: 'REGISTERED',
             docType: 'batch',
             
@@ -417,7 +428,18 @@ class AgriculturalContract extends Contract {
                 quantity: batch.quantity,
                 unit: batch.unit,
                 harvestDate: batch.harvestDate,
-                qualityGrade: batch.qualityGrade
+                qualityGrade: batch.qualityGrade,
+                certifications: batch.certifications || [],
+                customCertification: batch.customCertification || null
+            },
+
+            // Pricing Transparency (Farm-gate level)
+            pricingInformation: {
+                pricePerUnit: batch.pricePerUnit,
+                currency: batch.currency,
+                totalBatchValue: batch.totalBatchValue,
+                paymentMethod: batch.paymentMethod,
+                buyerName: batch.buyerName
             },
             
             supplyChainSummary: {

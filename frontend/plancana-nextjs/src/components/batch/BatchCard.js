@@ -98,6 +98,24 @@ const BatchCard = ({ batch, onViewDetails, showActions = true }) => {
               </div>
             )}
 
+            {batch.pricePerUnit && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Price:</span>
+                <span className="font-medium text-green-600">
+                  {batch.currency || 'MYR'} {parseFloat(batch.pricePerUnit).toFixed(2)}/{batch.unit || 'kg'}
+                </span>
+              </div>
+            )}
+
+            {batch.totalBatchValue && (
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Total Value:</span>
+                <span className="font-medium text-green-600">
+                  {batch.currency || 'MYR'} {parseFloat(batch.totalBatchValue).toFixed(2)}
+                </span>
+              </div>
+            )}
+
             <div className="flex justify-between text-sm">
               <span className="text-gray-600">Created:</span>
               <span className="font-medium text-gray-900">

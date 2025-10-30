@@ -17,7 +17,8 @@ import {
   unitOptions,
   qualityGradeOptions,
   cultivationMethodOptions,
-  irrigationMethodOptions
+  irrigationMethodOptions,
+  certificationOptions
 } from '../../data/formOptions';
 
 const BatchRegistration = () => {
@@ -36,7 +37,7 @@ const BatchRegistration = () => {
     quantity: '',
     location: '',
     customBatchId: '',
-    
+
     // Detailed Agricultural Data (from API)
     variety: '',
     unit: 'kg',
@@ -51,11 +52,22 @@ const BatchRegistration = () => {
     proteinContent: '',
     images: [],
     notes: '',
-    
+
     // Location Data
     latitude: '',
     longitude: '',
-    
+
+    // Pricing Information (NEW)
+    pricePerUnit: '',
+    currency: 'MYR',
+    totalBatchValue: '',
+    paymentMethod: '',
+    buyerName: '',
+
+    // Certifications & Compliance
+    certifications: [],
+    customCertification: '',
+
     // Farm Details (Step 2)
     soilType: '',
     climateZone: '',
@@ -89,15 +101,26 @@ const BatchRegistration = () => {
   }, [user]);
 
   const handleInputChange = (field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      [field]: value
-    }));
-    
+    setFormData(prev => {
+      const updated = {
+        ...prev,
+        [field]: value
+      };
+
+      // Auto-calculate total batch value when quantity or price changes
+      if (field === 'quantity' || field === 'pricePerUnit') {
+        const quantity = parseFloat(field === 'quantity' ? value : prev.quantity) || 0;
+        const pricePerUnit = parseFloat(field === 'pricePerUnit' ? value : prev.pricePerUnit) || 0;
+        updated.totalBatchValue = (quantity * pricePerUnit).toFixed(2);
+      }
+
+      return updated;
+    });
+
     // Update available varieties when crop changes
     if (field === 'crop') {
-      const selectedCrop = cropOptions.find(crop => 
-        crop.label.toLowerCase() === value.toLowerCase() || 
+      const selectedCrop = cropOptions.find(crop =>
+        crop.label.toLowerCase() === value.toLowerCase() ||
         crop.value.toLowerCase() === value.toLowerCase()
       );
       if (selectedCrop) {
@@ -425,6 +448,141 @@ const BatchRegistration = () => {
                 </div>
               </div>
 
+              {/* Pricing Information */}
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Pricing Information</h3>
+
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Price per Unit *
+                      </label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={formData.pricePerUnit}
+                        onChange={(e) => handleInputChange('pricePerUnit', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                        required
+                      />
+                      <p className="text-xs text-gray-500 mt-1">Farm-gate price</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Currency
+                      </label>
+                      <select
+                        value={formData.currency}
+                        onChange={(e) => handleInputChange('currency', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                      >
+                        <option value="MYR">MYR (RM)</option>
+                        <option value="USD">USD ($)</option>
+                        <option value="EUR">EUR (€)</option>
+                        <option value="SGD">SGD (S$)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Total Batch Value
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={formData.totalBatchValue ? `${formData.currency} ${formData.totalBatchValue}` : ''}
+                        readOnly
+                        placeholder="Auto-calculated"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-900 font-semibold"
+                      />
+                      <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                        <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-1">Quantity × Price per Unit</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Payment Method
+                    </label>
+                    <select
+                      value={formData.paymentMethod}
+                      onChange={(e) => handleInputChange('paymentMethod', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                    >
+                      <option value="">Select payment method</option>
+                      <option value="cash">Cash</option>
+                      <option value="bank-transfer">Bank Transfer</option>
+                      <option value="cheque">Cheque</option>
+                      <option value="mobile-payment">Mobile Payment (e-Wallet)</option>
+                      <option value="credit-terms">Credit Terms</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Buyer Name (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Enter buyer or processor name"
+                      value={formData.buyerName}
+                      onChange={(e) => handleInputChange('buyerName', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Certifications & Compliance */}
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Certifications & Compliance</h3>
+
+                <div className="space-y-4">
+                  <MultiSelectInput
+                    label="Certifications (Optional)"
+                    value={formData.certifications}
+                    onChange={(value) => handleInputChange('certifications', value)}
+                    options={certificationOptions}
+                    placeholder="Select certifications..."
+                    required={false}
+                  />
+
+                  {formData.certifications.includes('Other (specify)') && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Specify Other Certification
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Enter custom certification"
+                        value={formData.customCertification}
+                        onChange={(e) => handleInputChange('customCertification', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                      />
+                    </div>
+                  )}
+
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                    <div className="flex items-start space-x-2">
+                      <svg className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <p className="text-xs text-blue-800">
+                        Certifications help establish trust and compliance with trade standards.
+                        Select all that apply to your batch. If your certification is not listed, select "Other" and specify.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {/* Preview QR Code Area */}
               <div className="bg-gray-50 rounded-lg p-6">
                 <h4 className="font-medium text-gray-900 mb-3">Batch QR Code</h4>
@@ -625,7 +783,62 @@ const BatchRegistration = () => {
                     </div>
                   )}
                 </div>
-                
+
+                {/* Pricing Information */}
+                {formData.pricePerUnit && (
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <h5 className="font-medium text-gray-900 mb-2">Pricing Information</h5>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div className="py-2">
+                        <span className="text-gray-800 font-medium">Price per Unit:</span>
+                        <span className="ml-2 font-semibold text-green-600">{formData.currency} {formData.pricePerUnit}</span>
+                      </div>
+                      <div className="py-2">
+                        <span className="text-gray-800 font-medium">Total Value:</span>
+                        <span className="ml-2 font-semibold text-green-600">{formData.currency} {formData.totalBatchValue}</span>
+                      </div>
+                      {formData.paymentMethod && (
+                        <div className="py-2">
+                          <span className="text-gray-800 font-medium">Payment Method:</span>
+                          <span className="ml-2 font-semibold text-gray-900">{formData.paymentMethod}</span>
+                        </div>
+                      )}
+                      {formData.buyerName && (
+                        <div className="py-2">
+                          <span className="text-gray-800 font-medium">Buyer:</span>
+                          <span className="ml-2 font-semibold text-gray-900">{formData.buyerName}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Certifications */}
+                {formData.certifications.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <h5 className="font-medium text-gray-900 mb-2">Certifications & Compliance</h5>
+                    <div className="py-1">
+                      <span className="text-gray-800 font-medium">Certifications:</span>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {formData.certifications.map((cert, idx) => (
+                          <span key={idx} className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                            </svg>
+                            {cert}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    {formData.customCertification && (
+                      <div className="py-1 mt-2">
+                        <span className="text-gray-800 font-medium">Custom Certification:</span>
+                        <span className="ml-2 text-gray-900">{formData.customCertification}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Additional Details */}
                 {(formData.fertilizers.length > 0 || formData.pesticides.length > 0) && (
                   <div className="mt-4 pt-4 border-t border-gray-200">

@@ -128,3 +128,26 @@ export const irrigationMethodOptions = [
   { value: 'subsurface', label: 'Subsurface Irrigation' },
   { value: 'rainwater', label: 'Rainwater Harvesting' }
 ];
+
+export const certificationOptions = [
+  'Organic Certified',
+  'Halal Certified',
+  'MyGAP (Malaysian Good Agricultural Practice)',
+  'GLOBALG.A.P',
+  'Fair Trade Certified',
+  'Rainforest Alliance',
+  'HACCP (Food Safety)',
+  'ISO 22000 (Food Safety Management)',
+  'Non-GMO Verified',
+  'Pesticide Free',
+  'EU Organic Certification',
+  'USDA Organic',
+  'MSC (Marine Stewardship Council)',
+  'ASC (Aquaculture Stewardship Council)',
+  'UTZ Certified',
+  'Bird Friendly',
+  'Carbon Neutral',
+  'Vegan Certified',
+  'None',
+  'Other (specify)'
+];

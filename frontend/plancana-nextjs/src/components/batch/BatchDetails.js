@@ -352,7 +352,44 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
                     <p className="mt-1 text-sm text-gray-900">{batch.cultivationMethod || 'Not specified'}</p>
                   </div>
                 </div>
-                
+
+                {/* Pricing Information */}
+                {(batch.pricePerUnit || batch.totalBatchValue) && (
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <h4 className="text-sm font-medium text-gray-700 mb-3">Pricing Information (Farm-gate)</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      {batch.pricePerUnit && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-500">Price per Unit</label>
+                          <p className="mt-1 text-sm text-green-600 font-semibold">
+                            {batch.currency || 'MYR'} {parseFloat(batch.pricePerUnit).toFixed(2)}/{batch.unit || 'kg'}
+                          </p>
+                        </div>
+                      )}
+                      {batch.totalBatchValue && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-500">Total Batch Value</label>
+                          <p className="mt-1 text-sm text-green-600 font-semibold">
+                            {batch.currency || 'MYR'} {parseFloat(batch.totalBatchValue).toFixed(2)}
+                          </p>
+                        </div>
+                      )}
+                      {batch.paymentMethod && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-500">Payment Method</label>
+                          <p className="mt-1 text-sm text-gray-900 capitalize">{batch.paymentMethod.replace('-', ' ')}</p>
+                        </div>
+                      )}
+                      {batch.buyerName && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-500">Buyer Name</label>
+                          <p className="mt-1 text-sm text-gray-900">{batch.buyerName}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* Additional details */}
                 {batch.notes && (
                   <div className="mt-4 pt-4 border-t border-gray-200">
