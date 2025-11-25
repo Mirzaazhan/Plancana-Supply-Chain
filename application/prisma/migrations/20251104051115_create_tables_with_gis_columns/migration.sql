@@ -1,3 +1,6 @@
+-- CreateExtension
+CREATE EXTENSION IF NOT EXISTS "postgis";
+
 -- CreateEnum
 CREATE TYPE "UserRole" AS ENUM ('FARMER', 'PROCESSOR', 'DISTRIBUTOR', 'RETAILER', 'REGULATOR', 'ADMIN', 'SYSTEM_OPERATOR');
 
@@ -108,6 +111,10 @@ CREATE TABLE "distributor_profiles" (
     "state" TEXT,
     "country" TEXT NOT NULL DEFAULT 'Malaysia',
     "isVerified" BOOLEAN NOT NULL DEFAULT false,
+    "latitude" DOUBLE PRECISION,
+    "longitude" DOUBLE PRECISION,
+    "geocodedAt" TIMESTAMP(3),
+    "geom_point" geography(Point, 4326),
 
     CONSTRAINT "distributor_profiles_pkey" PRIMARY KEY ("id")
 );
@@ -127,6 +134,10 @@ CREATE TABLE "retailer_profiles" (
     "state" TEXT,
     "country" TEXT NOT NULL DEFAULT 'Malaysia',
     "isVerified" BOOLEAN NOT NULL DEFAULT false,
+    "latitude" DOUBLE PRECISION,
+    "longitude" DOUBLE PRECISION,
+    "geocodedAt" TIMESTAMP(3),
+    "geom_point" geography(Point, 4326),
 
     CONSTRAINT "retailer_profiles_pkey" PRIMARY KEY ("id")
 );
@@ -174,6 +185,7 @@ CREATE TABLE "farm_locations" (
     "soilType" TEXT,
     "soilPh" DOUBLE PRECISION,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "geom_point" geography(Point, 4326),
 
     CONSTRAINT "farm_locations_pkey" PRIMARY KEY ("id")
 );
@@ -203,6 +215,13 @@ CREATE TABLE "batches" (
     "proteinContent" DOUBLE PRECISION,
     "images" TEXT[],
     "notes" TEXT,
+    "pricePerUnit" DOUBLE PRECISION,
+    "currency" TEXT DEFAULT 'MYR',
+    "totalBatchValue" DOUBLE PRECISION,
+    "paymentMethod" TEXT,
+    "buyerName" TEXT,
+    "certifications" TEXT[],
+    "customCertification" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -222,6 +241,7 @@ CREATE TABLE "processing_facilities" (
     "certifications" TEXT[],
     "equipmentList" TEXT[],
     "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "geom_point" geography(Point, 4326),
 
     CONSTRAINT "processing_facilities_pkey" PRIMARY KEY ("id")
 );
@@ -266,6 +286,7 @@ CREATE TABLE "transport_routes" (
     "routePolyline" TEXT,
     "status" "TransportStatus" NOT NULL DEFAULT 'PLANNED',
     "blockchainHash" TEXT,
+    "geom_route" geography(LineString, 4326),
 
     CONSTRAINT "transport_routes_pkey" PRIMARY KEY ("id")
 );
@@ -374,6 +395,9 @@ CREATE UNIQUE INDEX "regulator_profiles_userId_key" ON "regulator_profiles"("use
 
 -- CreateIndex
 CREATE UNIQUE INDEX "admin_profiles_userId_key" ON "admin_profiles"("userId");
+
+-- CreateIndex
+CREATE INDEX "farm_locations_geom_point_idx" ON "farm_locations" USING GIST ("geom_point");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "batches_batchId_key" ON "batches"("batchId");
