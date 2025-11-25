@@ -1,14 +1,11 @@
 // prisma/schema.prisma
 generator client {
   provider = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  
-  extensions = [postgis]
 }
 
 // ===== USER AUTHENTICATION & AUTHORIZATION =====
@@ -152,10 +149,6 @@ model DistributorProfile {
   state             String?
   country           String   @default("Malaysia")
   isVerified        Boolean  @default(false)
-  latitude          Float?
-  longitude         Float?
-  geocodedAt        DateTime? // To track when coordinates were generated
-  geom_point Unsupported("geography(Point, 4326)")?
   
   // Transport routes
   transportRoutes   TransportRoute[]
@@ -179,10 +172,6 @@ model RetailerProfile {
   state             String?
   country           String   @default("Malaysia")
   isVerified        Boolean  @default(false)
-  latitude          Float?
-  longitude         Float?
-  geocodedAt        DateTime? // To track when coordinates were generated
-  geom_point Unsupported("geography(Point, 4326)")?
   
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   
@@ -241,12 +230,11 @@ model FarmLocation {
   soilType          String?
   soilPh            Float?
   isActive          Boolean  @default(true)
-  geom_point Unsupported("geography(Point, 4326)")?
   
   farmer            FarmerProfile @relation(fields: [farmerId], references: [id])
   batches           Batch[]
   weatherData       WeatherData[]
-  @@index([geom_point], type: Gist)
+  
   @@map("farm_locations")
 }
 
@@ -328,7 +316,6 @@ model ProcessingFacility {
   certifications    String[]
   equipmentList     String[]
   isActive          Boolean  @default(true)
-  geom_point Unsupported("geography(Point, 4326)")?
   
   processor         ProcessorProfile @relation(fields: [processorId], references: [id])
   processingRecords ProcessingRecord[]
@@ -371,14 +358,13 @@ model TransportRoute {
   destinationLng    Float
   departureTime     DateTime?
   arrivalTime       DateTime?
-  estimatedTime     Int
+  estimatedTime     DateTime?
   distance          Float?   // km
   fuelConsumption   Float?   // liters
   transportCost     Float?
   routePolyline     String?  // Encoded polyline
   status            TransportStatus @default(PLANNED)
   blockchainHash    String?
-  geom_route Unsupported("geography(LineString, 4326)")?
   
   batch             Batch @relation(fields: [batchId], references: [id])
   distributor       DistributorProfile @relation(fields: [distributorId], references: [id])

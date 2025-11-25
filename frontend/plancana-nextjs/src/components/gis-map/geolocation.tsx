@@ -6,12 +6,11 @@ import { loadModules } from 'esri-loader';
 interface ArcGISMapProps {
   lat: number;
   lng: number;
-  onLatitudeChange? : (lat :number) => void;
-  onLongitudeChange? : (lng :number) => void;
-  onLocationChange? : (locationName :string) => void;
+  onLatitudeChange : (lat :number) => void;
+  onLongitudeChange : (lng :number) => void;
 }
 
-export default function ArcGISMap({ lat, lng,onLocationChange, onLatitudeChange, onLongitudeChange }: ArcGISMapProps) {
+export default function ArcGISMap({ lat, lng, onLatitudeChange, onLongitudeChange }: ArcGISMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<any>(null);
   const [form, setForm] = useState({ lat: 0.0, lng: 0.0 });
@@ -19,8 +18,8 @@ export default function ArcGISMap({ lat, lng,onLocationChange, onLatitudeChange,
   useEffect(() => {
     let Graphic: any;
 
-    loadModules(['esri/Map', 'esri/views/MapView', 'esri/widgets/Search', 'esri/Graphic','esri/WebMap'], { css: true }).then(
-      ([Map, MapView, Search, GraphicModule,WebMapModule]) => {
+    loadModules(['esri/Map', 'esri/views/MapView', 'esri/widgets/Search', 'esri/Graphic'], { css: true }).then(
+      ([Map, MapView, Search, GraphicModule]) => {
         Graphic = GraphicModule;
 
         const map = new Map({ basemap: 'streets-navigation-vector' });
@@ -41,9 +40,6 @@ export default function ArcGISMap({ lat, lng,onLocationChange, onLatitudeChange,
           // Handle search result
           search.on('select-result', (event: any) => {
             const { latitude, longitude } = event.result.feature.geometry;
-            const locationName = event.result.name;
-            onLocationChange?.(locationName);
-            console.log('locationName',locationName);
             setForm({
               lat: latitude.toFixed(6),
               lng: longitude.toFixed(6),
@@ -88,13 +84,9 @@ export default function ArcGISMap({ lat, lng,onLocationChange, onLatitudeChange,
 
   // Send data back to parent
   useEffect(() => {
-    // Only call the functions if they are defined
-    onLatitudeChange?.(form.lat);
-    onLongitudeChange?.(form.lng);
-  }, [form, onLatitudeChange, onLongitudeChange,]);
-
-
-
+    onLatitudeChange(form.lat);
+    onLongitudeChange(form.lng);
+  }, [form]);
 
   return (
     <div className='mb-5'>

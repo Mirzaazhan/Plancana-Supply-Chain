@@ -321,44 +321,44 @@ const ArcGISMap: React.FC<ArcGISMapProps> = ({
   };
 
   // Fetch crops data - either all crops or a specific crop
-  // useEffect(() => {
-  //   const fetchCrops = async () => {
-  //     try {
-  //       setIsLoadingCrop(true);
-  //       let url = '/api/crop';
+  useEffect(() => {
+    const fetchCrops = async () => {
+      try {
+        setIsLoadingCrop(true);
+        let url = '/api/crop';
         
-  //       if (cropId) {
-  //         url = `/api/crop/${cropId}`;
-  //       }
+        if (cropId) {
+          url = `/api/crop/${cropId}`;
+        }
         
-  //       const response = await fetch(url);
-  //       if (response.ok) {
-  //         const cropsData = await response.json();
-  //         console.log('Fetched crops data:', cropsData);
+        const response = await fetch(url);
+        if (response.ok) {
+          const cropsData = await response.json();
+          console.log('Fetched crops data:', cropsData);
           
-  //         if (cropId) {
-  //           setCrops([cropsData]);
-  //           setFilteredCrops([cropsData]);
-  //         } else {
-  //           setCrops(cropsData);
-  //           setFilteredCrops(cropsData);
-  //         }
-  //       } else {
-  //         console.error('Failed to fetch crops:', response.status);
-  //         setCrops([]);
-  //         setFilteredCrops([]);
-  //       }
-  //     } catch (error) {
-  //       console.error('Error fetching crops:', error);
-  //       setCrops([]);
-  //       setFilteredCrops([]);
-  //     } finally {
-  //       setIsLoadingCrop(false);
-  //     }
-  //   };
+          if (cropId) {
+            setCrops([cropsData]);
+            setFilteredCrops([cropsData]);
+          } else {
+            setCrops(cropsData);
+            setFilteredCrops(cropsData);
+          }
+        } else {
+          console.error('Failed to fetch crops:', response.status);
+          setCrops([]);
+          setFilteredCrops([]);
+        }
+      } catch (error) {
+        console.error('Error fetching crops:', error);
+        setCrops([]);
+        setFilteredCrops([]);
+      } finally {
+        setIsLoadingCrop(false);
+      }
+    };
 
-  //   fetchCrops();
-  // }, [cropId]);
+    fetchCrops();
+  }, [cropId]);
 
   // Calculate map center based on crop stages
   const calculateMapCenter = (crops: Crop[]): [number, number] => {

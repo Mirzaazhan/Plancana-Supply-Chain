@@ -1,46 +1,16 @@
 // prisma/seed.js
-const { PrismaClient, Prisma } = require('@prisma/client');
+const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 
-// --- Initialize Prisma and define raw SQL helper ---
 const prisma = new PrismaClient();
 
-// NOTE: This MUST be defined here to execute raw PostGIS SQL
-async function updateGeometryPoint(tableName, id, lat, lng) {
-    if (lat === undefined || lng === undefined || lat === null || lng === null) {
-        return; 
-    }
-    const srid = 4326; 
-
-    try {
-                // ✅ CRITICAL FIX: Explicitly cast the SRID parameter to INTEGER 
-                // and ensure ST_MakePoint result is cast to GEOMETRY before ST_SetSRID.
-                await prisma.$executeRaw(Prisma.sql`
-                    UPDATE ${Prisma.raw(tableName)}
-                    SET geom_point = public.ST_SetSRID(
-                        public.ST_MakePoint(${lng}::double precision, ${lat}::double precision)::geometry, 
-                        ${srid}::integer
-                    )::geography
-                    WHERE id = ${id}
-                `);
-                console.log(`✅ PostGIS: Updated geometry for ${tableName} ID ${id}`);
-            } catch (error) {
-                // This MUST re-throw so the main route can catch the error and respond once.
-                console.error(`❌ PostGIS Error updating ${tableName}:`, error.message);
-                throw error; 
-            }
-}
-
-
-
-// --- MAIN SEEDING FUNCTION ---
 async function main() {
   console.log('🌱 Seeding database...');
   
   try {
-    // --- 1. ADMIN USER ---
+    // Create admin user
     const adminPassword = await bcrypt.hash('admin123', 12);
-    await prisma.user.upsert({
+    const admin = await prisma.user.upsert({
       where: { email: 'admin@agricultural.com' },
       update: {},
       create: {
@@ -49,11 +19,25 @@ async function main() {
         password: adminPassword,
         role: 'ADMIN',
         status: 'ACTIVE',
-        adminProfile: { create: { firstName: 'System', lastName: 'Administrator' } }
+        isEmailVerified: true,
+        adminProfile: {
+          create: {
+            firstName: 'System',
+            lastName: 'Administrator',
+            phone: '+60123456789',
+            adminLevel: 'SUPER_ADMIN',
+            permissions: [
+              'user_management',
+              'system_config',
+              'blockchain_admin',
+              'data_export'
+            ]
+          }
+        }
       }
     });
     
-    // --- 2. FARMER USER AND LOCATION (Origin Node) ---
+    // Create sample farmer
     const farmerPassword = await bcrypt.hash('farmer123', 12);
     const farmer = await prisma.user.upsert({
       where: { email: 'ahmad@farm.com' },
@@ -64,36 +48,61 @@ async function main() {
         password: farmerPassword,
         role: 'FARMER',
         status: 'ACTIVE',
+        isEmailVerified: true,
         farmerProfile: {
           create: {
-            firstName: 'Ahmad', lastName: 'Rahman', farmName: 'Rahman Organic Farm', farmSize: 50.5,
-            primaryCrops: ['RICE'], address: 'Lot 123, Jalan Pertanian, Sungai Besar, Selangor', state: 'Selangor',
+            firstName: 'Ahmad',
+            lastName: 'Rahman',
+            phone: '+60123456789',
+            farmName: 'Rahman Organic Farm',
+            farmSize: 50.5,
+            farmingType: ['ORGANIC', 'CONVENTIONAL'],
+            primaryCrops: ['RICE', 'CORN', 'VEGETABLES'],
+            certifications: ['ORGANIC_MALAYSIA', 'HALAL'],
+            address: 'Lot 123, Jalan Pertanian, Sungai Besar, Selangor',
+            state: 'Selangor',
+            isVerified: true,
+            verifiedAt: new Date()
           }
         }
       }
     });
     
-    const farmerProfile = await prisma.farmerProfile.findUnique({ where: { userId: farmer.id } });
+    // Create farm location for farmer
+    const farmerProfile = await prisma.farmerProfile.findUnique({
+      where: { userId: farmer.id }
+    });
     
-    let farmLocationRecord = null;
     if (farmerProfile) {
-      farmLocationRecord = await prisma.farmLocation.upsert({
-        where: { id: 'farm-location-1' }, 
-        update: { latitude: 3.6891, longitude: 101.5210 },
+      const farmLocation = await prisma.farmLocation.upsert({
+        where: { id: 'existing-farm-location' }, // This will fail and go to create
+        update: {},
         create: {
-          id: 'farm-location-1',
           farmerId: farmerProfile.id,
           farmName: 'Main Paddy Field',
           latitude: 3.6891,
           longitude: 101.5210,
+          elevation: 25.5,
           soilType: 'Clay',
+          soilPh: 6.5,
+          farmBoundary: {
+            type: 'Polygon',
+            coordinates: [[
+              [101.5200, 3.6880],
+              [101.5220, 3.6880],
+              [101.5220, 3.6900],
+              [101.5200, 3.6900],
+              [101.5200, 3.6880]
+            ]]
+          }
         }
+      }).catch(() => {
+        // Farm location might already exist, that's fine
+        return null;
       });
-      // ⭐ GIS WRITE: Populate geom_point column for Farm Location
-      await updateGeometryPoint('"farm_locations"', farmLocationRecord.id, farmLocationRecord.latitude, farmLocationRecord.longitude);
     }
     
-    // --- 3. PROCESSOR USER AND FACILITY (Transformation Node) ---
+    // Create sample processor
     const processorPassword = await bcrypt.hash('processor123', 12);
     const processor = await prisma.user.upsert({
       where: { email: 'mill@processor.com' },
@@ -104,24 +113,35 @@ async function main() {
         password: processorPassword,
         role: 'PROCESSOR',
         status: 'ACTIVE',
+        isEmailVerified: true,
         processorProfile: {
           create: {
-            companyName: 'Selangor Rice Mill Sdn Bhd', contactPerson: 'Lim Wei Ming', processingCapacity: 100.0,
-            address: 'Industrial Area Klang, Selangor', state: 'Selangor',
+            companyName: 'Selangor Rice Mill Sdn Bhd',
+            contactPerson: 'Lim Wei Ming',
+            phone: '+60387654321',
+            email: 'operations@selangormill.com',
+            facilityType: ['MILL', 'WAREHOUSE'],
+            processingCapacity: 100.0,
+            certifications: ['HACCP', 'ISO22000', 'HALAL'],
+            licenseNumber: 'MILL2024001',
+            address: 'Industrial Area Klang, Selangor',
+            state: 'Selangor',
+            isVerified: true
           }
         }
       }
     });
     
-    const processorProfile = await prisma.processorProfile.findUnique({ where: { userId: processor.id } });
+    // Create processing facility
+    const processorProfile = await prisma.processorProfile.findUnique({
+      where: { userId: processor.id }
+    });
     
-    let processorFacilityRecord = null;
     if (processorProfile) {
-      processorFacilityRecord = await prisma.processingFacility.upsert({
-        where: { id: 'processor-facility-1' }, 
-        update: { latitude: 3.0319, longitude: 101.4078 },
+      await prisma.processingFacility.upsert({
+        where: { id: 'existing-facility' }, // This will fail and go to create
+        update: {},
         create: {
-          id: 'processor-facility-1',
           processorId: processorProfile.id,
           facilityName: 'Main Rice Mill',
           facilityType: 'MILL',
@@ -129,15 +149,19 @@ async function main() {
           longitude: 101.4078,
           address: 'Lot 456, Kawasan Perindustrian Klang',
           capacity: 100.0,
+          certifications: ['HACCP', 'HALAL'],
+          equipmentList: ['Husking Machine', 'Polishing Machine', 'Grading Machine'],
+          isActive: true
         }
+      }).catch(() => {
+        // Facility might already exist
+        return null;
       });
-      // ⭐ GIS WRITE: Populate geom_point column for Processor Facility
-      await updateGeometryPoint('"processing_facilities"', processorFacilityRecord.id, processorFacilityRecord.latitude, processorFacilityRecord.longitude);
     }
     
-    // --- 4. DISTRIBUTOR USER (Logistics Node) ---
+    // Create sample distributor
     const distributorPassword = await bcrypt.hash('distributor123', 12);
-    const distributor = await prisma.user.upsert({
+    await prisma.user.upsert({
       where: { email: 'logistics@distributor.com' },
       update: {},
       create: {
@@ -146,103 +170,60 @@ async function main() {
         password: distributorPassword,
         role: 'DISTRIBUTOR',
         status: 'ACTIVE',
+        isEmailVerified: true,
         distributorProfile: {
           create: {
-            companyName: 'KL Logistics Sdn Bhd', contactPerson: 'Rajesh Kumar', storageCapacity: 5000.0,
-            address: 'Shah Alam, Selangor', state: 'Selangor', 
+            companyName: 'KL Logistics Sdn Bhd',
+            contactPerson: 'Rajesh Kumar',
+            phone: '+60312345678',
+            email: 'dispatch@kllogistics.com',
+            distributionType: ['REGIONAL', 'NATIONAL'],
+            vehicleTypes: ['TRUCK', 'VAN'],
+            storageCapacity: 5000.0,
+            licenseNumber: 'DIST2024001',
+            address: 'Shah Alam, Selangor',
+            state: 'Selangor',
+            isVerified: true
           }
         }
       }
     });
     
-    const distributorProfile = await prisma.distributorProfile.findUnique({ where: { userId: distributor.id } });
-
-    // --- 5. RETAILER (Destination Node - Requires Geocoding/Manual Coordinates) ---
-    const retailerPassword = await bcrypt.hash('retailer123', 12);
-    const retailer = await prisma.user.upsert({
-      where: { email: 'store@retail.com' },
+    // Create sample regulator
+    const regulatorPassword = await bcrypt.hash('regulator123', 12);
+    await prisma.user.upsert({
+      where: { email: 'inspector@mardi.gov.my' },
       update: {},
       create: {
-        email: 'store@retail.com',
-        username: 'city_supermarket',
-        password: retailerPassword,
-        role: 'RETAILER',
+        email: 'inspector@mardi.gov.my',
+        username: 'mardi_inspector',
+        password: regulatorPassword,
+        role: 'REGULATOR',
         status: 'ACTIVE',
-        retailerProfile: {
+        isEmailVerified: true,
+        regulatorProfile: {
           create: {
-            businessName: 'City Grocer KLCC', contactPerson: 'Susan Lee', 
-            address: 'Jalan Ampang, Kuala Lumpur', state: 'Kuala Lumpur',
-            // Manually setting coordinates for map visualization
-            latitude: 3.1578, 
-            longitude: 101.7119
+            firstName: 'Siti',
+            lastName: 'Aminah',
+            agency: 'MARDI',
+            position: 'Senior Inspector',
+            phone: '+60387654321',
+            email: 'siti.aminah@mardi.gov.my',
+            jurisdiction: ['SELANGOR', 'KUALA_LUMPUR'],
+            authorities: ['INSPECTION', 'CERTIFICATION', 'ENFORCEMENT'],
+            employeeId: 'MARDI2024001'
           }
         }
       }
     });
-
-    const retailerProfile = await prisma.retailerProfile.findUnique({ where: { userId: retailer.id } });
-    
-    if (retailerProfile) {
-        // ⭐ GIS WRITE: Populate geom_point column for Retailer
-        await updateGeometryPoint('"retailer_profiles"', retailerProfile.id, retailerProfile.latitude, retailerProfile.longitude);
-    }
-    
-    // --- 6. SAMPLE BATCH JOURNEY (Farm -> Processor) ---
-    let sampleBatch = null;
-    if (farmerProfile) {
-        sampleBatch = await prisma.batch.upsert({
-            where: { batchId: 'RICE-2025-ROUTE' },
-            update: { status: 'PROCESSED' },
-            create: {
-                batchId: 'RICE-2025-ROUTE',
-                farmerId: farmerProfile.id,
-                farmLocationId: farmLocationRecord?.id,
-                productType: 'RICE', quantity: 5000.0, unit: 'kg', harvestDate: new Date('2025-10-01'),
-                status: 'PROCESSED', pricePerUnit: 2.50, currency: 'MYR', totalBatchValue: 12500.00,
-                blockchainHash: 'dummy_hash_for_route_demo', dataHash: 'dummy_data_hash_for_route_demo'
-            }
-        });
-    }
-
-    // --- 7. SAMPLE PROCESSING RECORD ---
-    if (sampleBatch && processorFacilityRecord && processorProfile) {
-        await prisma.processingRecord.upsert({
-            where: { id: 'sample-processing-route-record' },
-            update: {},
-            create: {
-                id: 'sample-processing-route-record', batchId: sampleBatch.id, processorId: processorProfile.id,
-                facilityId: processorFacilityRecord.id, processingDate: new Date('2025-10-10'), processingType: 'MILLING_AND_PACKAGING',
-                inputQuantity: sampleBatch.quantity, outputQuantity: sampleBatch.quantity, operatorName: 'mill_operator'
-            }
-        });
-    }
-
-    // --- 8. SAMPLE TRANSPORT ROUTE (Processor Mill -> Retailer) ---
-    if (distributorProfile && sampleBatch && processorFacilityRecord && retailerProfile) {
-        const originLat = processorFacilityRecord.latitude;   // Mill: 3.0319
-        const originLng = processorFacilityRecord.longitude;  // Mill: 101.4078
-        const destinationLat = retailerProfile.latitude;      // Retailer: 3.1578
-        const destinationLng = retailerProfile.longitude;     // Retailer: 101.7119
-
-        // Dummy Encoded Polyline string (ArcGIS Pro will decode this to draw a line)
-        const dummyPolyline = 'y~_c@gxtbTehG?g@y{O?_@gq@?k@';
-
-        await prisma.transportRoute.upsert({
-            where: { id: 'sample-transport-route' },
-            update: {},
-            create: {
-                id: 'sample-transport-route', batchId: sampleBatch.id, distributorId: distributorProfile.id,
-                originLat: originLat, originLng: originLng, destinationLat: destinationLat, destinationLng: destinationLng,
-                departureTime: new Date('2025-10-11T10:00:00Z'), estimatedTime: 65, distance: 58.2, transportCost: 180.00,
-                routePolyline: dummyPolyline, status: 'IN_TRANSIT'
-            }
-        });
-        
-        // ⭐ GIS WRITE: You would update the geom_route column here if needed, but we rely on routePolyline.
-    }
     
     console.log('✅ Database seeded successfully!');
-    // ... console logs ...
+    console.log('📋 Sample users created:');
+    console.log('   👑 Admin: admin@agricultural.com / admin123');
+    console.log('   🌾 Farmer: ahmad@farm.com / farmer123');
+    console.log('   🏭 Processor: mill@processor.com / processor123');
+    console.log('   🚛 Distributor: logistics@distributor.com / distributor123');
+    console.log('   🏛️ Regulator: inspector@mardi.gov.my / regulator123');
     
   } catch (error) {
     console.error('❌ Seeding error:', error);

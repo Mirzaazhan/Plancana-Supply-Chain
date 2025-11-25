@@ -28,10 +28,8 @@ const AutocompleteInput = ({
         .toLowerCase()
         .includes(inputValue.toLowerCase())
     );
-    if (filtered.length !== filteredOptions.length || JSON.stringify(filtered) !== JSON.stringify(filteredOptions)) {
-        setFilteredOptions(filtered);
-    }
-  }, [inputValue, options,filteredOptions]);
+    setFilteredOptions(filtered);
+  }, [inputValue, options]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {

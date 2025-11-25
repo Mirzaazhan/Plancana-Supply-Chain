@@ -9,37 +9,12 @@ require('dotenv').config();
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { PrismaClient, Prisma } = require('@prisma/client');
+const { PrismaClient } = require('@prisma/client');
 const multer = require('multer');
 const nodemailer = require('nodemailer');
 
 // Initialize Prisma
 const prisma = new PrismaClient();
-async function updateGeometryPoint(tableName, id, lat, lng) {
-    // Check if coordinates exist
-    if (lat === undefined || lng === undefined || lat === null || lng === null) {
-        return; 
-    }
-    const srid = 4326; // WGS 84 spatial reference system
-
-    try {
-            // ✅ CRITICAL FIX: Explicitly cast the SRID parameter to INTEGER 
-            // and ensure ST_MakePoint result is cast to GEOMETRY before ST_SetSRID.
-            await prisma.$executeRaw(Prisma.sql`
-                UPDATE ${Prisma.raw(tableName)}
-                SET geom_point = public.ST_SetSRID(
-                    public.ST_MakePoint(${lng}::double precision, ${lat}::double precision)::geometry, 
-                    ${srid}::integer
-                )::geography
-                WHERE id = ${id}
-            `);
-            console.log(`✅ PostGIS: Updated geometry for ${tableName} ID ${id}`);
-        } catch (error) {
-            // This MUST re-throw so the main route can catch the error and respond once.
-            console.error(`❌ PostGIS Error updating ${tableName}:`, error.message);
-            throw error; 
-        }
-}
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -1065,7 +1040,7 @@ app.get('/', async (req, res) => {
 app.post('/api/batch/create', authenticate, authorize(['FARMER']), async (req, res) => {
     try {
         const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
-        const { farmer, crop, quantity, location, customBatchId,latitude,longitude, ...additionalData } = req.body;       
+        const { farmer, crop, quantity, location, customBatchId, ...additionalData } = req.body;
 
         // DEBUG: Log received data
         console.log('📥 Received batch creation request:');
@@ -1202,34 +1177,8 @@ app.post('/api/batch/create', authenticate, authorize(['FARMER']), async (req, r
             const qrCode = await blockchainService.generateQRCode(batchId);
 
             await gateway.disconnect();
-            // STEP 6: Execute PostGIS logic to update FarmLocation
-            // 1. Get the Farmer's active Farm Location (or the one being used)
-            const activeFarmLocation = farmerProfile.farmLocations[0];
 
-            if (activeFarmLocation) {
-                // Use optional chaining just in case, though it should exist if farmerProfile does
-                const farmLocationId = activeFarmLocation.id; 
-
-                // 2. Update the Farm Location coordinates in the database (latitude/longitude columns)
-                const updatedFarmLocation = await prisma.farmLocation.update({
-                    where: { id: farmLocationId },
-                    data: {
-                        latitude: latitude ? parseFloat(latitude) : activeFarmLocation.latitude,
-                        longitude: longitude ? parseFloat(longitude) : activeFarmLocation.longitude,
-                    }
-                });
-
-                // 3. ⭐ EXECUTE RAW SQL TO POPULATE POSTGIS GEOMETRY
-                if (updatedFarmLocation.latitude && updatedFarmLocation.longitude) {
-                    await updateGeometryPoint(
-                        '"farm_locations"',
-                        farmLocationId, // Use the ID of the location, not the batch
-                        updatedFarmLocation.latitude,
-                        updatedFarmLocation.longitude
-                    );
-                }
-            }
-            // STEP 7: Log activity
+            // STEP 6: Log activity
             await prisma.activityLog.create({
                 data: {
                     userId: req.user.id,
@@ -1819,37 +1768,6 @@ app.put('/api/auth/profile', authenticate, async (req, res) => {
                         licenseNumber: profileData.licenseNumber
                     }
                 });
-                        // ⭐ GEOCoding Logic: Check if address changed
-                if (profileData.address) {
-                    const geocodeResult = await geocodeAddress(
-                        profileData.address, 
-                        profileData.state, 
-                        profileData.country
-                    );
-
-                    if (geocodeResult) {
-                        // Store coordinates in standard columns
-                        updateData.latitude = geocodeResult.latitude;
-                        updateData.longitude = geocodeResult.longitude;
-                    }
-                }
-
-                const modelToUpdate = req.user.role === 'PROCESSOR' ? prisma.processorProfile : prisma.retailerProfile;
-                
-                updatedProfile = await modelToUpdate.update({
-                    where: { userId: userId },
-                    data: updateData
-                });
-                
-                // ⭐ POSTGIS LOGIC: Update geometry column
-                if (updatedProfile.latitude && updatedProfile.longitude) {
-                    await updateGeometryPoint(
-                        `"${req.user.role.toLowerCase()}_profiles"`,
-                        updatedProfile.id,
-                        updatedProfile.latitude,
-                        updatedProfile.longitude
-                    );
-                }
                 break;
 
             case 'ADMIN':
@@ -2744,125 +2662,6 @@ app.put('/api/processor/complete/:batchId', authenticate, authorize(['PROCESSOR'
         });
     }
 });
-
-// ===============================
-// GIS & ROUTING ENDPOINT
-// ===============================
-
-app.post('/api/distributor/transport-route', authenticate, authorize(['DISTRIBUTOR']), async (req, res) => {
-    // 1. Destructure and validate input coordinates
-    const { batchId, originLat, originLng, destinationLat, destinationLng } = req.body;
-    const distributorId = req.user.id;
-    
-    if (!batchId || !originLat || !originLng || !destinationLat || !destinationLng) {
-        return res.status(400).json({ success: false, error: 'Missing coordinates or batchId for routing.' });
-    }
-    
-    try {
-        const ARC_GIS_API_KEY = process.env.ARC_GIS_API_KEY;
-        const ROUTE_URL = process.env.ARCGIS_ROUTE_URL;
-        
-        // ArcGIS Route API requires coordinates as "lng,lat"
-        const stops = `${originLng},${originLat};${destinationLng},${destinationLat}`;
-        
-        // 2. Call the ArcGIS Route Service
-        const apiResponse = await axios.get(ROUTE_URL, {
-            params: {
-                f: 'json',
-                token: ARC_GIS_API_KEY,
-                stops: stops,
-                travelMode: 'Driving Time', // Optimizes for time
-                returnRoutes: true,
-                returnDirections: false,
-                // Request the geometry in Esri's Encoded Polyline format for compact storage
-                directionsOutputType: 'esriDIRNAEncodedPolyline' 
-            }
-        });
-
-        const routeResult = apiResponse.data.routes?.features?.[0];
-        if (!routeResult) {
-             // ❌ Failures often occur if coordinates are in the ocean or on private roads
-            return res.status(500).json({ success: false, error: 'ArcGIS could not calculate a feasible route.' });
-        }
-        
-        // 3. Extract key data
-        const distanceKm = routeResult.attributes.Total_Kilometers;
-        const totalTimeMinutes = routeResult.attributes.Total_Time;
-        // The Encoded Polyline string is located in the geometry path
-        const encodedPolyline = routeResult.geometry.compressedGeometry.paths[0]; 
-        
-        // 4. Find Distributor Profile ID
-        const distributorProfile = await prisma.distributorProfile.findUnique({
-            where: { userId: distributorId }
-        });
-        
-        // 5. Create new TransportRoute record
-        const newRoute = await prisma.transportRoute.create({
-            data: {
-                batchId: batchId,
-                distributorId: distributorProfile.id,
-                originLat: parseFloat(originLat),
-                originLng: parseFloat(originLng),
-                destinationLat: parseFloat(destinationLat),
-                destinationLng: parseFloat(destinationLng),
-                distance: distanceKm,
-                estimatedTime: totalTimeMinutes,
-                routePolyline: encodedPolyline, // Stored as string for ArcGIS Pro/Online
-                status: 'PLANNED'
-            }
-        });
-
-        res.status(201).json({ 
-            success: true, 
-            route: newRoute,
-            message: 'Route calculated and stored successfully.' 
-        });
-
-    } catch (error) {
-        console.error('Routing API error:', error.response?.data?.error?.message || error.message);
-        res.status(500).json({ success: false, error: 'Failed to calculate route.', details: error.message });
-    }
-});
-
-const geocodeAddress = async (address, state, country) => {
-    const GEOCODE_URL = process.env.ARCGIS_GEOCODE_URL;
-    const ARC_GIS_API_KEY = process.env.ARC_GIS_API_KEY;
-    
-    if (!address) {
-        return null;
-    }
-    
-    // Concatenate address for best results
-    const fullAddress = `${address}, ${state || ''}, ${country || 'Malaysia'}`;
-
-    try {
-        const response = await axios.get(GEOCODE_URL, {
-            params: {
-                f: 'json',
-                token: ARC_GIS_API_KEY,
-                singleLine: fullAddress,
-                outFields: 'Addr_type', // Optional field to get address type
-                forStorage: false // Ensure compliance with service terms
-            }
-        });
-
-        const candidates = response.data.candidates;
-        
-        if (candidates && candidates.length > 0) {
-            const bestMatch = candidates[0];
-            return {
-                latitude: bestMatch.location.y,
-                longitude: bestMatch.location.x,
-                score: bestMatch.score
-            };
-        }
-        return null;
-
-    } catch (error) {
-        console.error('❌ ArcGIS Geocoding failed:', error.message);
-        return null;
-    }
-};
 
 // Error handling middleware
 app.use((err, req, res, next) => {

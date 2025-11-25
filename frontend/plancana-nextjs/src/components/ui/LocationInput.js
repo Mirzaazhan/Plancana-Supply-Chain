@@ -60,18 +60,48 @@ const LocationInput = ({
     // based on known locations or use geocoding API
   };
   
+  useEffect(() =>{
+    console.log("test", latitudeValue)
+  }, [LocationInput])
   return (
     <div className={`space-y-4 ${className}`}>
       {/* Location Name/Address */}
-
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <label className="block text-sm font-medium text-gray-700">
+            Farm Location
+            {required && <span className="text-red-500 ml-1">*</span>}
+          </label>
+          {/* <button
+            type="button"
+            onClick={getCurrentLocation}
+            disabled={loading}
+            className="inline-flex items-center px-3 py-1.5 text-xs font-medium text-blue-600 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <MapPinIcon className="h-3 w-3 mr-1" />
+            {loading ? 'Getting GPS...' : 'Use GPS'}
+          </button> */}
+        </div>
+        
+        <AutocompleteInput
+          value={locationValue}
+          onChange={handleLocationSelect}
+          options={commonLocations}
+          placeholder="Enter farm location or address..."
+          required={required}
+        />
+        
+        <p className="text-xs text-gray-500 mt-1">
+          Enter your farm address or use GPS to get precise coordinates
+        </p>
+      </div>
 
       {/* GPS Coordinates */}
       <div className="bg-gray-50 rounded-lg p-0">
         <div className="flex items-center mb-3">
           <GlobeAltIcon className="h-4 w-4 text-gray-600 mr-2" />
           <span className="text-sm font-medium text-gray-700">GPS Coordinates</span>
-          {required && <span className="text-red-500 ml-1">*</span>}
-          {/* <span className="text-xs text-gray-500 ml-2">(Optional but recommended)</span> */}
+          <span className="text-xs text-gray-500 ml-2">(Optional but recommended)</span>
         </div>
 
         <div className="flex-1">
@@ -80,7 +110,6 @@ const LocationInput = ({
                 lng={longitudeValue}
                 onLatitudeChange = {(val) => onLatitudeChange(val)}
                 onLongitudeChange = {(val) => onLongitudeChange(val)}
-                onLocationChange = {(val) => onLocationChange(val)}
               />
         </div>
         
