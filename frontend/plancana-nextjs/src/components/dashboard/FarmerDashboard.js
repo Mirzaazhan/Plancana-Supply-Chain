@@ -25,8 +25,11 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import ArcGISMap from '@/components/gis-map/testMap';
 
 const FarmerDashboard = () => {
+  const [currentLat, setCurrentLat] = useState(0); // Use a default, or user's farm lat
+  const [currentLng, setCurrentLng] = useState(0);
   const { user } = useAuth();
   const [dashboardData, setDashboardData] = useState(null);
   const [batches, setBatches] = useState([]);
@@ -504,15 +507,11 @@ const FarmerDashboard = () => {
           </div>
 
           <div className="relative">
-            <div className="h-80 bg-gradient-to-br from-green-50 to-blue-50 rounded-xl mb-4 flex items-center justify-center border-2 border-dashed border-gray-200">
-              <div className="text-center">
-                <MapPin className="mx-auto h-16 w-16 text-green-600 mb-3" />
-                <p className="text-lg font-semibold text-gray-900 mb-2">GIS Map Integration</p>
-                <p className="text-sm text-gray-500 mb-4">Connect your mapping service to view real-time locations</p>
-                <button className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-medium transition-colors">
-                  Configure Map
-                </button>
-              </div>
+            <div className="h-80 rounded-xl mb-4 overflow-hidden cursor-pointer" onClick={() => router.push("/farmer/gis")}>
+              <ArcGISMap
+                webMapId={"0684120dd13147bba92ca897ddd65dc4"}
+                dragable={true}
+              />
             </div>
 
             <div className="flex items-center space-x-6 text-sm">

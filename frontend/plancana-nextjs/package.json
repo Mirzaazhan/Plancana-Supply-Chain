@@ -9,10 +9,12 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@arcgis/core": "^4.34.8",
     "@headlessui/react": "^2.2.7",
     "@heroicons/react": "^2.2.0",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-slot": "^1.2.3",
+    "@react-spring/web": "^10.0.3",
     "@tailwindcss/forms": "^0.5.10",
     "axios": "^1.11.0",
     "chart.js": "^4.5.0",
@@ -32,9 +34,11 @@
     "react-hook-form": "^7.62.0",
     "react-hot-toast": "^2.5.2",
     "react-qr-code": "^2.0.18",
+    "react-use-measure": "^2.1.7",
     "recharts": "^3.5.0",
     "tailwind-merge": "^3.3.1",
     "tailwindcss-animate": "^1.0.7",
+    "utils": "^0.3.1",
     "uuid": "^11.1.0",
     "web-vitals": "^5.1.0"
   },

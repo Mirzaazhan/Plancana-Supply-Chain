@@ -101,6 +101,9 @@ const BatchRegistration = () => {
   }, [user]);
 
   const handleInputChange = (field, value) => {
+    if (formData[field] === value) {
+      return; 
+    }
     setFormData(prev => {
       const updated = {
         ...prev,

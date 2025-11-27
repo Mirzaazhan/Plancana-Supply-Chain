@@ -114,4 +114,4 @@ screenshots/
 
 # Azure deployment files
 deploy/
-*.pem
+*.pem*:Zone.Identifier
