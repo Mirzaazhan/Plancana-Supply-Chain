@@ -289,7 +289,8 @@ model Batch {
   qualityTests      QualityTest[]
   transactions      Transaction[]
   weatherData       WeatherData[]
-  
+  // batchTransfers and distributionRecords use batchId as string reference (hybrid storage)
+
   @@map("batches")
 }
 
@@ -298,6 +299,7 @@ enum BatchStatus {
   PROCESSING
   PROCESSED
   IN_TRANSIT
+  IN_DISTRIBUTION
   DELIVERED
   RETAIL_READY
   SOLD
@@ -412,10 +414,120 @@ model Transaction {
   paymentStatus     String   @default("PENDING")
   invoiceNumber     String?
   blockchainHash    String?
-  
+
   batch             Batch @relation(fields: [batchId], references: [id])
-  
+
   @@map("transactions")
+}
+
+model BatchTransfer {
+  id                String   @id @default(cuid())
+  batchId           String
+
+  // Transfer parties
+  fromActorId       String
+  fromActorRole     UserRole
+  toActorId         String
+  toActorRole       UserRole
+
+  // Transfer details
+  transferType      String   @default("OWNERSHIP_TRANSFER")
+  transferDate      DateTime @default(now())
+
+  // Location & conditions
+  transferLocation  String?
+  latitude          Float?
+  longitude         Float?
+  conditions        Json?    // Storage/transport conditions
+
+  // Documentation
+  documents         String[] // URLs to transfer documents
+  signature         String?  // Digital signature
+  notes             String?
+
+  // Status tracking
+  status            TransferStatus @default(PENDING)
+  statusBefore      BatchStatus
+  statusAfter       BatchStatus
+
+  // Blockchain reference
+  blockchainTxId    String?
+  blockchainHash    String?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // No relation - batch might only exist on blockchain (hybrid storage)
+  // Use batchId as a string reference only
+
+  @@map("batch_transfers")
+}
+
+enum TransferStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+model DistributionRecord {
+  id                  String   @id @default(cuid())
+  batchId             String
+  distributorId       String
+
+  // Distribution details
+  distributionType    String?  // local, regional, national, export
+  warehouseLocation   String?
+  warehouseLat        Float?
+  warehouseLng        Float?
+
+  // Storage conditions
+  storageConditions   String?
+  temperatureControl  String?
+  humidity            Float?
+
+  // Logistics
+  vehicleType         String?
+  vehicleId           String?
+  driverName          String?
+  route               Json?    // Array of route points
+
+  // Quantities
+  quantityReceived    Float?
+  quantityDistributed Float?
+  unit                String   @default("kg")
+
+  // Costs
+  distributionCost    Float?
+  storageCost         Float?
+  handlingCost        Float?
+  currency            String   @default("MYR")
+
+  // Quality check
+  qualityCheckPassed  Boolean?
+  qualityNotes        String?
+
+  // Documentation
+  documents           String[] // URLs to documents
+  notes               String?
+
+  // Destination
+  destinationType     String?  // retailer, export, industrial
+  destination         String?
+
+  // Blockchain reference
+  blockchainTxId      String?
+  blockchainHash      String?
+
+  distributionDate    DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // No relation - batch might only exist on blockchain (hybrid storage)
+  // Use batchId as a string reference only
+
+  @@map("distribution_records")
 }
 
 model WeatherData {

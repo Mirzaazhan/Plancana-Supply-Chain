@@ -19,6 +19,25 @@ const prisma = new PrismaClient();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Helper function: Retry logic for MVCC conflicts
+async function retryOnMVCCConflict(fn, maxRetries = 3, delayMs = 500) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            return await fn();
+        } catch (error) {
+            const isMVCCConflict = error.message && error.message.includes('MVCC_READ_CONFLICT');
+            const isLastAttempt = attempt === maxRetries;
+
+            if (isMVCCConflict && !isLastAttempt) {
+                console.warn(`MVCC conflict detected, retrying... (attempt ${attempt}/${maxRetries})`);
+                await new Promise(resolve => setTimeout(resolve, delayMs * attempt)); // Exponential backoff
+                continue;
+            }
+            throw error; // Re-throw if not MVCC or if last attempt
+        }
+    }
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -2659,6 +2678,939 @@ app.put('/api/processor/complete/:batchId', authenticate, authorize(['PROCESSOR'
         res.status(500).json({
             success: false,
             error: 'Failed to complete batch processing'
+        });
+    }
+});
+
+// ============================================
+// PRICING ENDPOINTS
+// ============================================
+
+// Add pricing record (for PROCESSOR, DISTRIBUTOR, RETAILER)
+app.post('/api/pricing/add', authenticate, authorize(['PROCESSOR', 'DISTRIBUTOR', 'RETAILER', 'ADMIN']), async (req, res) => {
+    try {
+        const { batchId, level, pricePerUnit, totalValue, breakdown, notes } = req.body;
+
+        // Validate required fields
+        if (!batchId || !level || !pricePerUnit || !totalValue) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: batchId, level, pricePerUnit, totalValue'
+            });
+        }
+
+        // Validate level
+        const validLevels = ['PROCESSOR', 'DISTRIBUTOR', 'RETAILER'];
+        if (!validLevels.includes(level)) {
+            return res.status(400).json({
+                success: false,
+                error: `Invalid level. Must be one of: ${validLevels.join(', ')}`
+            });
+        }
+
+        // Check if batch exists in database
+        const batch = await prisma.batch.findUnique({
+            where: { batchId: batchId }
+        });
+
+        if (!batch) {
+            return res.status(404).json({
+                success: false,
+                error: 'Batch not found'
+            });
+        }
+
+        // Prepare pricing data
+        const pricingData = {
+            level,
+            pricePerUnit: parseFloat(pricePerUnit),
+            totalValue: parseFloat(totalValue),
+            breakdown: breakdown || {},
+            notes: notes || ''
+        };
+
+        // Submit to blockchain (with retry for MVCC conflicts)
+        const { gateway, contract } = await blockchainService.connectToNetwork();
+
+        const result = await retryOnMVCCConflict(async () => {
+            return await contract.submitTransaction(
+                'addPricingRecord',
+                batchId,
+                JSON.stringify(pricingData)
+            );
+        });
+
+        await gateway.disconnect();
+
+        const pricingRecord = JSON.parse(result.toString());
+
+        res.json({
+            success: true,
+            pricing: pricingRecord,
+            message: `Pricing record added successfully for ${level}`
+        });
+
+    } catch (error) {
+        console.error('Add pricing record error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to add pricing record',
+            details: error.message
+        });
+    }
+});
+
+// Get pricing history for a batch (public endpoint)
+app.get('/api/pricing/history/:batchId', async (req, res) => {
+    try {
+        const { batchId } = req.params;
+
+        // Check if batch exists
+        const batch = await prisma.batch.findUnique({
+            where: { batchId: batchId }
+        });
+
+        if (!batch) {
+            return res.status(404).json({
+                success: false,
+                error: 'Batch not found'
+            });
+        }
+
+        // Query blockchain for pricing history
+        const { gateway, contract } = await blockchainService.connectToNetwork();
+
+        const result = await contract.evaluateTransaction(
+            'getPricingHistory',
+            batchId
+        );
+
+        await gateway.disconnect();
+
+        const pricingHistory = JSON.parse(result.toString());
+
+        res.json({
+            success: true,
+            data: pricingHistory
+        });
+
+    } catch (error) {
+        console.error('Get pricing history error:', error);
+
+        // If chaincode returns error about no pricing records, return empty history
+        if (error.message.includes('No pricing records found')) {
+            return res.json({
+                success: true,
+                data: {
+                    batchId: req.params.batchId,
+                    currentPrice: null,
+                    pricingHistory: [],
+                    priceIncrease: null,
+                    totalLevels: 0
+                }
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get pricing history',
+            details: error.message
+        });
+    }
+});
+
+// Get price markup calculation for a batch (public endpoint)
+app.get('/api/pricing/markup/:batchId', async (req, res) => {
+    try {
+        const { batchId } = req.params;
+
+        // Check if batch exists
+        const batch = await prisma.batch.findUnique({
+            where: { batchId: batchId }
+        });
+
+        if (!batch) {
+            return res.status(404).json({
+                success: false,
+                error: 'Batch not found'
+            });
+        }
+
+        // Query blockchain for markup calculation
+        const { gateway, contract } = await blockchainService.connectToNetwork();
+
+        const result = await contract.evaluateTransaction(
+            'calculatePriceMarkup',
+            batchId
+        );
+
+        await gateway.disconnect();
+
+        const markupData = JSON.parse(result.toString());
+
+        res.json({
+            success: true,
+            data: markupData
+        });
+
+    } catch (error) {
+        console.error('Get price markup error:', error);
+
+        // If chaincode returns error about insufficient pricing records
+        if (error.message.includes('at least 2 pricing records')) {
+            return res.json({
+                success: true,
+                data: {
+                    batchId: req.params.batchId,
+                    markups: [],
+                    totalMarkup: 0,
+                    averageMarkupPercentage: "0.00"
+                }
+            });
+        }
+
+        res.status(500).json({
+            success: false,
+            error: 'Failed to calculate price markup',
+            details: error.message
+        });
+    }
+});
+
+// ===== BATCH TRANSFER & OWNERSHIP ENDPOINTS =====
+
+// Transfer batch ownership between supply chain actors
+app.post('/api/batch/transfer', authenticate, authorize(['FARMER', 'PROCESSOR', 'DISTRIBUTOR', 'RETAILER', 'ADMIN']), async (req, res) => {
+    try {
+        const {
+            batchId,
+            toActorId,
+            toActorRole,
+            transferLocation,
+            latitude,
+            longitude,
+            notes,
+            conditions,
+            documents,
+            signature
+        } = req.body;
+
+        // Validation
+        if (!batchId || !toActorId || !toActorRole) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: batchId, toActorId, toActorRole'
+            });
+        }
+
+        // Validate role
+        const validRoles = ['FARMER', 'PROCESSOR', 'DISTRIBUTOR', 'RETAILER'];
+        if (!validRoles.includes(toActorRole)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid toActorRole. Must be FARMER, PROCESSOR, DISTRIBUTOR, or RETAILER'
+            });
+        }
+
+        // Get batch to verify ownership
+        const { gateway, contract } = await blockchainService.connectToNetwork();
+
+        const batchResult = await contract.evaluateTransaction('getBatch', batchId);
+        const batch = JSON.parse(batchResult.toString());
+
+        // Current actor info
+        const fromActorId = req.user.id;
+        const fromActorRole = req.user.role;
+
+        // Prepare transfer data
+        const transferData = {
+            transferLocation: transferLocation || null,
+            latitude: latitude || null,
+            longitude: longitude || null,
+            notes: notes || '',
+            conditions: conditions || null,
+            documents: documents || [],
+            signature: signature || null
+        };
+
+        // Call blockchain transferBatch function
+        const timestamp = new Date().toISOString();
+        const result = await contract.submitTransaction(
+            'transferBatch',
+            batchId,
+            fromActorId,
+            fromActorRole,
+            toActorId,
+            toActorRole,
+            JSON.stringify(transferData)
+        );
+
+        const transferRecord = JSON.parse(result.toString());
+
+        // Store in database
+        const dbTransfer = await prisma.batchTransfer.create({
+            data: {
+                batchId: batchId,
+                fromActorId: fromActorId,
+                fromActorRole: fromActorRole,
+                toActorId: toActorId,
+                toActorRole: toActorRole,
+                transferType: 'OWNERSHIP_TRANSFER',
+                transferLocation: transferLocation || null,
+                latitude: latitude || null,
+                longitude: longitude || null,
+                conditions: conditions ? conditions : null,
+                documents: documents || [],
+                signature: signature || null,
+                notes: notes || '',
+                status: 'COMPLETED',
+                statusBefore: batch.status || 'REGISTERED',
+                statusAfter: transferRecord.statusAfter || batch.status,
+                blockchainTxId: transferRecord.txId || null,
+                blockchainHash: null // You can add hash calculation if needed
+            }
+        });
+
+        // Update batch status in database if it exists
+        const dbBatch = await prisma.batch.findUnique({
+            where: { batchId: batchId }
+        });
+
+        if (dbBatch) {
+            await prisma.batch.update({
+                where: { batchId: batchId },
+                data: {
+                    status: transferRecord.statusAfter || dbBatch.status
+                }
+            });
+        }
+
+        await gateway.disconnect();
+
+        // Log activity
+        await prisma.activityLog.create({
+            data: {
+                userId: req.user.id,
+                action: 'TRANSFER_BATCH',
+                resource: batchId,
+                ipAddress: req.ip,
+                userAgent: req.get('user-agent'),
+                metadata: {
+                    fromRole: fromActorRole,
+                    toActorId: toActorId,
+                    toRole: toActorRole,
+                    transferId: dbTransfer.id
+                }
+            }
+        });
+
+        res.json({
+            success: true,
+            message: `Batch ${batchId} successfully transferred to ${toActorRole}`,
+            data: {
+                blockchainRecord: transferRecord,
+                databaseRecord: dbTransfer
+            }
+        });
+
+    } catch (error) {
+        console.error('Batch transfer error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to transfer batch',
+            details: error.message
+        });
+    }
+});
+
+// Add transport/logistics record
+app.post('/api/transport/add', authenticate, authorize(['DISTRIBUTOR', 'PROCESSOR', 'ADMIN']), async (req, res) => {
+    try {
+        const {
+            batchId,
+            origin,
+            originCoordinates,
+            destination,
+            destinationCoordinates,
+            carrier,
+            vehicleType,
+            vehicleId,
+            driverName,
+            departureTime,
+            estimatedArrival,
+            transportCost,
+            currency,
+            fuelCost,
+            tollFees,
+            waybillNumber,
+            notes,
+            updateStatus
+        } = req.body;
+
+        // Validation
+        if (!batchId) {
+            return res.status(400).json({
+                success: false,
+                error: 'batchId is required'
+            });
+        }
+
+        // Prepare transport data
+        const transportData = {
+            origin: origin || null,
+            originCoordinates: originCoordinates || null,
+            destination: destination || null,
+            destinationCoordinates: destinationCoordinates || null,
+            carrier: carrier || null,
+            vehicleType: vehicleType || null,
+            vehicleId: vehicleId || null,
+            driverName: driverName || null,
+            departureTime: departureTime || null,
+            estimatedArrival: estimatedArrival || null,
+            transportCost: transportCost || null,
+            currency: currency || 'MYR',
+            fuelCost: fuelCost || null,
+            tollFees: tollFees || null,
+            waybillNumber: waybillNumber || null,
+            notes: notes || '',
+            updateStatus: updateStatus || false
+        };
+
+        // Call blockchain addTransportRecord function
+        const { gateway, contract } = await blockchainService.connectToNetwork();
+
+        const result = await contract.submitTransaction(
+            'addTransportRecord',
+            batchId,
+            JSON.stringify(transportData)
+        );
+
+        const transportRecord = JSON.parse(result.toString());
+
+        // Store in database (TransportRoute table)
+        const dbTransport = await prisma.transportRoute.create({
+            data: {
+                batchId: batchId,
+                distributorId: req.user.id,
+                vehicleId: vehicleId || null,
+                originLat: originCoordinates?.latitude || 0,
+                originLng: originCoordinates?.longitude || 0,
+                destinationLat: destinationCoordinates?.latitude || 0,
+                destinationLng: destinationCoordinates?.longitude || 0,
+                departureTime: departureTime ? new Date(departureTime) : null,
+                estimatedTime: estimatedArrival ? new Date(estimatedArrival) : null,
+                transportCost: transportCost ? parseFloat(transportCost) : null,
+                status: updateStatus ? 'IN_TRANSIT' : 'PLANNED',
+                blockchainHash: transportRecord.txId || null
+            }
+        });
+
+        await gateway.disconnect();
+
+        // Log activity
+        await prisma.activityLog.create({
+            data: {
+                userId: req.user.id,
+                action: 'ADD_TRANSPORT_RECORD',
+                resource: batchId,
+                ipAddress: req.ip,
+                userAgent: req.get('user-agent'),
+                metadata: {
+                    transportId: transportRecord.transportId,
+                    origin: origin,
+                    destination: destination
+                }
+            }
+        });
+
+        res.json({
+            success: true,
+            message: 'Transport record added successfully',
+            data: {
+                blockchainRecord: transportRecord,
+                databaseRecord: dbTransport
+            }
+        });
+
+    } catch (error) {
+        console.error('Add transport record error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to add transport record',
+            details: error.message
+        });
+    }
+});
+
+// Get transport history for a batch
+app.get('/api/transport/:batchId', authenticate, async (req, res) => {
+    try {
+        const { batchId } = req.params;
+
+        // Get from blockchain
+        const { gateway, contract } = await blockchainService.connectToNetwork();
+
+        const result = await contract.evaluateTransaction(
+            'getTransportHistory',
+            batchId
+        );
+
+        const transportHistory = JSON.parse(result.toString());
+
+        // Get from database
+        const dbTransports = await prisma.transportRoute.findMany({
+            where: { batchId: batchId },
+            orderBy: { departureTime: 'desc' }
+        });
+
+        // Get batch transfers from database
+        const dbTransfers = await prisma.batchTransfer.findMany({
+            where: { batchId: batchId },
+            orderBy: { createdAt: 'desc' }
+        });
+
+        await gateway.disconnect();
+
+        res.json({
+            success: true,
+            data: {
+                blockchain: transportHistory,
+                database: {
+                    transportRecords: dbTransports,
+                    batchTransfers: dbTransfers
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get transport history error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get transport history',
+            details: error.message
+        });
+    }
+});
+
+// Get ownership history for a batch
+app.get('/api/ownership/:batchId', authenticate, async (req, res) => {
+    try {
+        const { batchId } = req.params;
+
+        // Get from blockchain
+        const { gateway, contract } = await blockchainService.connectToNetwork();
+
+        const result = await contract.evaluateTransaction(
+            'getOwnershipHistory',
+            batchId
+        );
+
+        const ownershipHistory = JSON.parse(result.toString());
+
+        // Get from database
+        const dbTransfers = await prisma.batchTransfer.findMany({
+            where: { batchId: batchId },
+            orderBy: { createdAt: 'asc' }
+        });
+
+        await gateway.disconnect();
+
+        res.json({
+            success: true,
+            data: {
+                blockchain: ownershipHistory,
+                database: dbTransfers
+            }
+        });
+
+    } catch (error) {
+        console.error('Get ownership history error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get ownership history',
+            details: error.message
+        });
+    }
+});
+
+// ===== DISTRIBUTOR ENDPOINTS =====
+
+// Get batches available for distribution (PROCESSED status)
+app.get('/api/distributor/available-batches', authenticate, authorize(['DISTRIBUTOR', 'ADMIN']), async (req, res) => {
+    try {
+        const { gateway, contract } = await blockchainService.connectToNetwork();
+
+        const result = await contract.evaluateTransaction('getAvailableBatchesForDistributor');
+        const availableBatches = JSON.parse(result.toString());
+
+        await gateway.disconnect();
+
+        res.json({
+            success: true,
+            data: availableBatches,
+            count: availableBatches.length
+        });
+
+    } catch (error) {
+        console.error('Get available batches for distributor error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get available batches',
+            details: error.message
+        });
+    }
+});
+
+// Receive batch from processor (transfer ownership) - BLOCKCHAIN + DATABASE
+app.post('/api/distributor/receive/:batchId', authenticate, authorize(['DISTRIBUTOR', 'ADMIN']), async (req, res) => {
+    try {
+        const { batchId } = req.params;
+        const { fromProcessorId, transferLocation, latitude, longitude, notes, conditions, documents, signature } = req.body;
+
+        const distributorId = req.user.id;
+        console.log('🚛 Receive batch - User:', { id: distributorId, email: req.user.email, role: req.user.role });
+
+        const { gateway, contract } = await blockchainService.connectToNetwork();
+
+        // Get batch to determine current owner
+        console.log('📦 Fetching batch from blockchain:', batchId);
+        const batchResult = await contract.evaluateTransaction('getBatch', batchId);
+        const batch = JSON.parse(batchResult.toString());
+        console.log('✅ Batch current owner:', batch.currentOwner);
+
+        // Determine fromActorId
+        let fromActorId = batch.currentOwner?.actorId || fromProcessorId;
+        let fromActorRole = batch.currentOwner?.actorRole || 'PROCESSOR';
+
+        // If currentOwner is not set, try to get from processing records or farmer
+        if (!fromActorId) {
+            if (batch.processingRecords && batch.processingRecords.length > 0) {
+                // Get the last processor
+                const lastProcessing = batch.processingRecords[batch.processingRecords.length - 1];
+                fromActorId = lastProcessing.processorId;
+                fromActorRole = 'PROCESSOR';
+                console.log('⚠️ No currentOwner, using last processor:', fromActorId);
+            } else {
+                // Fallback to farmer
+                fromActorId = batch.farmer;
+                fromActorRole = 'FARMER';
+                console.log('⚠️ No currentOwner or processor, using farmer:', fromActorId);
+            }
+        }
+
+        const transferData = {
+            transferLocation: transferLocation || null,
+            latitude: latitude || null,
+            longitude: longitude || null,
+            notes: notes || 'Batch received by distributor',
+            conditions: conditions || null,
+            documents: documents || [],
+            signature: signature || null
+        };
+
+        console.log('🔄 Transfer params:', { batchId, fromActorId, fromActorRole, toActorId: distributorId, toActorRole: 'DISTRIBUTOR' });
+
+        // BLOCKCHAIN: Transfer batch
+        const result = await contract.submitTransaction('transferBatch', batchId, fromActorId, fromActorRole, distributorId, 'DISTRIBUTOR', JSON.stringify(transferData));
+        const transferRecord = JSON.parse(result.toString());
+
+        // DATABASE: Store transfer record
+        const dbTransfer = await prisma.batchTransfer.create({
+            data: {
+                batchId: batchId,
+                fromActorId: fromActorId,
+                fromActorRole: fromActorRole,
+                toActorId: distributorId,
+                toActorRole: 'DISTRIBUTOR',
+                transferType: 'OWNERSHIP_TRANSFER',
+                transferLocation: transferLocation || null,
+                latitude: latitude || null,
+                longitude: longitude || null,
+                conditions: conditions ? conditions : null,
+                documents: documents || [],
+                signature: signature || null,
+                notes: notes || 'Batch received by distributor',
+                status: 'COMPLETED',
+                statusBefore: batch.status || 'PROCESSED',
+                statusAfter: 'IN_DISTRIBUTION',
+                blockchainTxId: transferRecord.txId || null,
+                blockchainHash: null
+            }
+        });
+
+        // Update batch status in database if exists
+        const dbBatch = await prisma.batch.findUnique({ where: { batchId: batchId } });
+        if (dbBatch) {
+            await prisma.batch.update({
+                where: { batchId: batchId },
+                data: { status: 'IN_DISTRIBUTION' }
+            });
+        }
+
+        await gateway.disconnect();
+
+        // Log activity
+        await prisma.activityLog.create({
+            data: {
+                userId: req.user.id,
+                action: 'RECEIVE_BATCH',
+                resource: batchId,
+                ipAddress: req.ip,
+                userAgent: req.get('user-agent'),
+                metadata: { fromActorId: fromActorId, fromRole: fromActorRole, transferId: dbTransfer.id }
+            }
+        });
+
+        res.json({
+            success: true,
+            message: `Batch ${batchId} successfully received by distributor`,
+            data: { blockchainRecord: transferRecord, databaseRecord: dbTransfer }
+        });
+
+    } catch (error) {
+        console.error('❌ Receive batch error:', error);
+        console.error('Error details:', {
+            message: error.message,
+            stack: error.stack,
+            endorsements: error.endorsements,
+            responses: error.responses
+        });
+        res.status(500).json({
+            success: false,
+            error: 'Failed to receive batch',
+            details: error.message,
+            hint: 'Check backend logs for detailed error information'
+        });
+    }
+});
+
+// Get batches owned by current distributor
+app.get('/api/distributor/my-batches', authenticate, authorize(['DISTRIBUTOR', 'ADMIN']), async (req, res) => {
+    try {
+        const distributorId = req.user.id;
+        const { gateway, contract } = await blockchainService.connectToNetwork();
+
+        const result = await contract.evaluateTransaction('getBatchesByDistributor', distributorId);
+        const distributorBatches = JSON.parse(result.toString());
+
+        await gateway.disconnect();
+
+        res.json({
+            success: true,
+            data: distributorBatches,
+            count: distributorBatches.length
+        });
+
+    } catch (error) {
+        console.error('Get distributor batches error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get distributor batches',
+            details: error.message
+        });
+    }
+});
+
+// Add distribution record - BLOCKCHAIN + DATABASE
+app.post('/api/distributor/add-distribution/:batchId', authenticate, authorize(['DISTRIBUTOR', 'ADMIN']), async (req, res) => {
+    try {
+        const { batchId } = req.params;
+        const {
+            distributionType, warehouseLocation, warehouseCoordinates, storageConditions,
+            temperatureControl, humidity, vehicleType, vehicleId, driverName, route,
+            quantityReceived, quantityDistributed, distributionCost, storageCost,
+            handlingCost, currency, qualityCheckPassed, qualityNotes, documents,
+            notes, destinationType, destination
+        } = req.body;
+
+        const distributorId = req.user.id;
+
+        const distributionData = {
+            distributionType: distributionType || null,
+            warehouseLocation: warehouseLocation || null,
+            warehouseCoordinates: warehouseCoordinates || null,
+            storageConditions: storageConditions || null,
+            temperatureControl: temperatureControl || null,
+            humidity: humidity || null,
+            vehicleType: vehicleType || null,
+            vehicleId: vehicleId || null,
+            driverName: driverName || null,
+            route: route || [],
+            quantityReceived: quantityReceived || null,
+            quantityDistributed: quantityDistributed || null,
+            distributionCost: distributionCost || null,
+            storageCost: storageCost || null,
+            handlingCost: handlingCost || null,
+            currency: currency || 'MYR',
+            qualityCheckPassed: qualityCheckPassed || null,
+            qualityNotes: qualityNotes || '',
+            documents: documents || [],
+            notes: notes || '',
+            destinationType: destinationType || null,
+            destination: destination || null
+        };
+
+        const { gateway, contract } = await blockchainService.connectToNetwork();
+
+        // BLOCKCHAIN: Add distribution record (with retry for MVCC conflicts)
+        const distributionRecord = await retryOnMVCCConflict(async () => {
+            const result = await contract.submitTransaction('addDistributionRecord', batchId, distributorId, JSON.stringify(distributionData));
+            return JSON.parse(result.toString());
+        });
+
+        // DATABASE: Store distribution record
+        const dbDistribution = await prisma.distributionRecord.create({
+            data: {
+                batchId: batchId,
+                distributorId: distributorId,
+                distributionType: distributionType || null,
+                warehouseLocation: warehouseLocation || null,
+                warehouseLat: warehouseCoordinates?.latitude || null,
+                warehouseLng: warehouseCoordinates?.longitude || null,
+                storageConditions: storageConditions || null,
+                temperatureControl: temperatureControl || null,
+                humidity: humidity ? parseFloat(humidity) : null,
+                vehicleType: vehicleType || null,
+                vehicleId: vehicleId || null,
+                driverName: driverName || null,
+                route: route ? route : null,
+                quantityReceived: quantityReceived ? parseFloat(quantityReceived) : null,
+                quantityDistributed: quantityDistributed ? parseFloat(quantityDistributed) : null,
+                distributionCost: distributionCost ? parseFloat(distributionCost) : null,
+                storageCost: storageCost ? parseFloat(storageCost) : null,
+                handlingCost: handlingCost ? parseFloat(handlingCost) : null,
+                currency: currency || 'MYR',
+                qualityCheckPassed: qualityCheckPassed || null,
+                qualityNotes: qualityNotes || null,
+                documents: documents || [],
+                notes: notes || null,
+                destinationType: destinationType || null,
+                destination: destination || null,
+                blockchainTxId: distributionRecord.txId || null,
+                blockchainHash: null
+            }
+        });
+
+        await gateway.disconnect();
+
+        // Log activity
+        await prisma.activityLog.create({
+            data: {
+                userId: req.user.id,
+                action: 'ADD_DISTRIBUTION_RECORD',
+                resource: batchId,
+                ipAddress: req.ip,
+                userAgent: req.get('user-agent'),
+                metadata: { distributionId: dbDistribution.id, distributionType: distributionType }
+            }
+        });
+
+        res.json({
+            success: true,
+            message: 'Distribution record added successfully',
+            data: { blockchainRecord: distributionRecord, databaseRecord: dbDistribution }
+        });
+
+    } catch (error) {
+        console.error('Add distribution record error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to add distribution record',
+            details: error.message
+        });
+    }
+});
+
+// Transfer batch to retailer - BLOCKCHAIN + DATABASE
+app.post('/api/distributor/transfer-to-retailer/:batchId', authenticate, authorize(['DISTRIBUTOR', 'ADMIN']), async (req, res) => {
+    try {
+        const { batchId } = req.params;
+        const { toRetailerId, transferLocation, latitude, longitude, notes, conditions, documents, signature } = req.body;
+
+        if (!toRetailerId) {
+            return res.status(400).json({
+                success: false,
+                error: 'toRetailerId is required'
+            });
+        }
+
+        const distributorId = req.user.id;
+
+        const transferData = {
+            transferLocation: transferLocation || null,
+            latitude: latitude || null,
+            longitude: longitude || null,
+            notes: notes || 'Transfer to retailer',
+            conditions: conditions || null,
+            documents: documents || [],
+            signature: signature || null
+        };
+
+        const { gateway, contract } = await blockchainService.connectToNetwork();
+
+        // BLOCKCHAIN: Transfer batch
+        const result = await contract.submitTransaction('transferBatch', batchId, distributorId, 'DISTRIBUTOR', toRetailerId, 'RETAILER', JSON.stringify(transferData));
+        const transferRecord = JSON.parse(result.toString());
+
+        // DATABASE: Store transfer record
+        const dbTransfer = await prisma.batchTransfer.create({
+            data: {
+                batchId: batchId,
+                fromActorId: distributorId,
+                fromActorRole: 'DISTRIBUTOR',
+                toActorId: toRetailerId,
+                toActorRole: 'RETAILER',
+                transferType: 'OWNERSHIP_TRANSFER',
+                transferLocation: transferLocation || null,
+                latitude: latitude || null,
+                longitude: longitude || null,
+                conditions: conditions ? conditions : null,
+                documents: documents || [],
+                signature: signature || null,
+                notes: notes || 'Transfer to retailer',
+                status: 'COMPLETED',
+                statusBefore: 'IN_DISTRIBUTION',
+                statusAfter: 'RETAIL_READY',
+                blockchainTxId: transferRecord.txId || null,
+                blockchainHash: null
+            }
+        });
+
+        // Update batch status in database if exists
+        const dbBatch = await prisma.batch.findUnique({ where: { batchId: batchId } });
+        if (dbBatch) {
+            await prisma.batch.update({
+                where: { batchId: batchId },
+                data: { status: 'RETAIL_READY' }
+            });
+        }
+
+        await gateway.disconnect();
+
+        // Log activity
+        await prisma.activityLog.create({
+            data: {
+                userId: req.user.id,
+                action: 'TRANSFER_TO_RETAILER',
+                resource: batchId,
+                ipAddress: req.ip,
+                userAgent: req.get('user-agent'),
+                metadata: { toRetailerId: toRetailerId, transferId: dbTransfer.id }
+            }
+        });
+
+        res.json({
+            success: true,
+            message: `Batch ${batchId} successfully transferred to retailer`,
+            data: { blockchainRecord: transferRecord, databaseRecord: dbTransfer }
+        });
+
+    } catch (error) {
+        console.error('Transfer to retailer error:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to transfer to retailer',
+            details: error.message
         });
     }
 });

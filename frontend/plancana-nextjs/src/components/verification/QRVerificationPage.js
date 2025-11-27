@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { verificationService } from '../../services/api';
+import { verificationService, pricingService } from '../../services/api';
 import { toast } from 'react-hot-toast';
+import PricingDisplay from './PricingDisplay';
 
 const QRVerificationPage = ({ batchId: propBatchId }) => {
   const router = useRouter();
@@ -12,6 +13,11 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showJourney, setShowJourney] = useState(false);
+
+  // Pricing state
+  const [pricingHistory, setPricingHistory] = useState(null);
+  const [priceMarkup, setPriceMarkup] = useState(null);
+  const [loadingPricing, setLoadingPricing] = useState(false);
 
   useEffect(() => {
     if (batchId) {
@@ -23,10 +29,13 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
     try {
       setLoading(true);
       const response = await verificationService.verifyBatch(batchId);
-      
+
       if (response.data.success) {
         setVerificationData(response.data);
         toast.success('Batch verified successfully!');
+
+        // Fetch pricing data after successful verification
+        fetchPricingData();
       } else {
         setError(response.data.error || 'Verification failed');
         toast.error('Batch verification failed');
@@ -37,6 +46,31 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
       toast.error('Verification failed - Potential fraud detected');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPricingData = async () => {
+    try {
+      setLoadingPricing(true);
+
+      // Fetch pricing history and markup in parallel
+      const [historyRes, markupRes] = await Promise.all([
+        pricingService.getPricingHistory(batchId),
+        pricingService.getPriceMarkup(batchId)
+      ]);
+
+      if (historyRes.data.success) {
+        setPricingHistory(historyRes.data.data);
+      }
+
+      if (markupRes.data.success) {
+        setPriceMarkup(markupRes.data.data);
+      }
+    } catch (error) {
+      console.error('Pricing fetch error:', error);
+      // Don't show error toast - pricing is optional
+    } finally {
+      setLoadingPricing(false);
     }
   };
 
@@ -176,21 +210,21 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
       </nav>
 
       {/* Hero Section */}
-      <div className="relative bg-gradient-to-r from-green-50 to-blue-50 py-16">
+      <div className="relative bg-gradient-to-r from-green-50 to-blue-50 py-12">
         <div className="absolute inset-0 bg-white bg-opacity-50"></div>
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="relative w-full px-8 lg:px-16">
           <div className="text-center">
             <h1 className="text-4xl font-bold text-gray-900 mb-4">
               Batch #{batchId}
             </h1>
-            <div className="flex items-center justify-center space-x-2 mb-6">
+            <div className="flex items-center justify-center space-x-2 mb-4">
               <svg className="h-6 w-6 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <span className="text-lg font-medium text-green-700">Verified Product</span>
             </div>
-            <p className="text-gray-600 max-w-2xl mx-auto">
-              This product has been verified through our blockchain-powered supply chain tracking system. 
+            <p className="text-gray-600 max-w-3xl mx-auto">
+              This product has been verified through our blockchain-powered supply chain tracking system.
               All information below is authentic and tamper-proof.
             </p>
           </div>
@@ -198,14 +232,14 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
       </div>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="w-full px-6 lg:px-12 xl:px-16 py-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
           
           {/* Left Column - Main Info */}
-          <div className="lg:col-span-2 space-y-6">
-            
+          <div className="xl:col-span-2 space-y-6">
+
             {/* Origin Farm Information */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className="bg-white rounded-lg shadow-md p-5">
               <h2 className="text-xl font-semibold text-gray-900 mb-4">Origin Farm Information</h2>
               <div className="space-y-4">
                 <div className="flex items-start space-x-3">
@@ -443,70 +477,88 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
           <div className="space-y-6">
             
             {/* Farm-Gate Pricing */}
-            {verificationData?.verification?.blockchain?.pricingInformation && (
-              <div className="bg-white rounded-lg shadow-sm p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Farm-Gate Pricing</h3>
+            {(verificationData?.verification?.blockchain?.pricingInformation ||
+              verificationData?.batchInfo?.pricePerUnit ||
+              verificationData?.batchInfo?.totalBatchValue) && (
+              <div className="bg-white rounded-lg shadow-md p-5">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center">
+                  <span className="mr-2">🌾</span>
+                  Farm-Gate Pricing
+                </h3>
                 <div className="space-y-4">
-                  {verificationData.verification.blockchain.pricingInformation.pricePerUnit && (
-                    <>
-                      <div className="flex justify-between items-center pb-3 border-b">
-                        <div>
-                          <p className="text-sm text-gray-600">Price per Unit</p>
-                          <p className="text-2xl font-bold text-gray-900">
-                            {verificationData.verification.blockchain.pricingInformation.currency || 'MYR'}{' '}
-                            {parseFloat(verificationData.verification.blockchain.pricingInformation.pricePerUnit).toFixed(2)}
-                          </p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            per {verificationData.verification.blockchain.traceability.unit || 'kg'}
-                          </p>
-                        </div>
-                      </div>
+                  {/* Get price from either location */}
+                  {(() => {
+                    const priceData = verificationData.verification?.blockchain?.pricingInformation || verificationData.batchInfo || {};
+                    const traceData = verificationData.verification?.blockchain?.traceability || verificationData.batchInfo || {};
 
-                      {verificationData.verification.blockchain.pricingInformation.totalBatchValue && (
-                        <div className="flex justify-between items-center pb-3 border-b">
-                          <div>
-                            <p className="text-sm text-gray-600">Total Batch Value</p>
-                            <p className="text-2xl font-bold text-green-600">
-                              {verificationData.verification.blockchain.pricingInformation.currency || 'MYR'}{' '}
-                              {parseFloat(verificationData.verification.blockchain.pricingInformation.totalBatchValue).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </p>
-                            <p className="text-xs text-gray-500 mt-1">
-                              {verificationData.verification.blockchain.traceability.quantity}{' '}
-                              {verificationData.verification.blockchain.traceability.unit || 'kg'} × {' '}
-                              {verificationData.verification.blockchain.pricingInformation.currency || 'MYR'}{' '}
-                              {parseFloat(verificationData.verification.blockchain.pricingInformation.pricePerUnit).toFixed(2)}
-                            </p>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="space-y-2">
-                        {verificationData.verification.blockchain.pricingInformation.paymentMethod && (
-                          <div className="flex justify-between text-sm">
-                            <span className="text-gray-600">Payment Method:</span>
-                            <span className="font-medium text-gray-900 capitalize">
-                              {verificationData.verification.blockchain.pricingInformation.paymentMethod.replace('-', ' ')}
-                            </span>
+                    return (
+                      <>
+                        {priceData.pricePerUnit && (
+                          <div className="bg-gradient-to-r from-green-50 to-blue-50 rounded-lg p-4 border border-green-200">
+                            <div className="text-center">
+                              <p className="text-sm text-gray-600 mb-1">Price per Unit</p>
+                              <p className="text-3xl font-bold text-green-700">
+                                {priceData.currency || 'MYR'}{' '}
+                                {parseFloat(priceData.pricePerUnit).toFixed(2)}
+                              </p>
+                              <p className="text-xs text-gray-500 mt-1">
+                                per {traceData.unit || 'kg'}
+                              </p>
+                            </div>
                           </div>
                         )}
 
-                        {verificationData.verification.blockchain.pricingInformation.buyerName && (
-                          <div className="flex justify-between text-sm">
-                            <span className="text-gray-600">Buyer:</span>
-                            <span className="font-medium text-gray-900">
-                              {verificationData.verification.blockchain.pricingInformation.buyerName}
-                            </span>
+                        {priceData.totalBatchValue && (
+                          <div className="pt-3 border-t border-gray-200">
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-gray-600">Total Batch Value:</span>
+                              <span className="text-xl font-bold text-green-600">
+                                {priceData.currency || 'MYR'}{' '}
+                                {parseFloat(priceData.totalBatchValue).toLocaleString('en-MY', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1 text-right">
+                              {traceData.quantity || priceData.quantity}{' '}
+                              {traceData.unit || 'kg'} × {' '}
+                              {priceData.currency || 'MYR'}{' '}
+                              {parseFloat(priceData.pricePerUnit).toFixed(2)}
+                            </p>
                           </div>
                         )}
-                      </div>
 
-                      <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                        <p className="text-xs text-blue-800">
-                          <strong>💰 Price Transparency:</strong> Farm-gate prices are recorded on blockchain to ensure fair pricing throughout the supply chain.
-                        </p>
-                      </div>
-                    </>
-                  )}
+                        <div className="space-y-2 pt-3 border-t border-gray-200">
+                          {priceData.paymentMethod && (
+                            <div className="flex justify-between text-sm">
+                              <span className="text-gray-600">Payment Method:</span>
+                              <span className="font-medium text-gray-900 capitalize">
+                                {priceData.paymentMethod.replace('-', ' ')}
+                              </span>
+                            </div>
+                          )}
+
+                          {priceData.buyerName && (
+                            <div className="flex justify-between text-sm">
+                              <span className="text-gray-600">Buyer:</span>
+                              <span className="font-medium text-gray-900">
+                                {priceData.buyerName}
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="flex justify-between text-sm pt-2">
+                            <span className="text-gray-600">Source:</span>
+                            <span className="font-medium text-green-700">🚜 Farmer</span>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+                          <p className="text-xs text-blue-800">
+                            <strong>💰 Price Transparency:</strong> Farm-gate prices are recorded on blockchain to ensure fair pricing throughout the supply chain.
+                          </p>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             )}
@@ -636,6 +688,19 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
               </div>
             </div>
 
+            {/* Pricing Information */}
+            {loadingPricing ? (
+              <div className="bg-white rounded-lg shadow-sm p-6 text-center">
+                <div className="animate-pulse">
+                  <div className="h-4 bg-gray-200 rounded w-3/4 mx-auto mb-4"></div>
+                  <div className="h-4 bg-gray-200 rounded w-1/2 mx-auto"></div>
+                </div>
+                <p className="text-gray-500 text-sm mt-4">Loading pricing information...</p>
+              </div>
+            ) : (
+              <PricingDisplay pricingHistory={pricingHistory} markup={priceMarkup} />
+            )}
+
             {/* Action Buttons */}
             <div className="space-y-3">
               <button
@@ -679,8 +744,8 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
       </div>
 
       {/* Footer */}
-      <footer className="bg-white border-t mt-12">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <footer className="bg-white border-t mt-8">
+        <div className="w-full px-6 lg:px-12 xl:px-16 py-6">
           <div className="text-center">
             <p className="text-sm text-gray-600 mb-2">
               Powered by Agricultural Supply Chain Blockchain System

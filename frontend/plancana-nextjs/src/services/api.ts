@@ -154,29 +154,44 @@ export const processorService = {
 
 // Distributor service (for distributor users)
 export const distributorService = {
-  // Get batches ready for distribution
-  getReadyBatches: () => api.get('/distributor/ready-batches'),
-  
-  // Create transport route
-  createTransportRoute: (routeData: RouteData) => api.post('/distributor/transport-route', routeData),
-  
-  // Update delivery status
-  updateDeliveryStatus: (routeId: string, statusData: StatusData) => api.put(`/distributor/delivery/${routeId}/status`, statusData),
-  
-  // Get transport history
-  getTransportHistory: () => api.get('/distributor/my-routes')
+  // Get batches available for distribution (PROCESSED status)
+  getAvailableBatches: () => api.get('/distributor/available-batches'),
+
+  // Receive batch from processor (transfer ownership)
+  receiveBatch: (batchId: string, transferData: any) => api.post(`/distributor/receive/${batchId}`, transferData),
+
+  // Get batches owned by current distributor
+  getMyBatches: () => api.get('/distributor/my-batches'),
+
+  // Add distribution record
+  addDistributionRecord: (batchId: string, distributionData: any) => api.post(`/distributor/add-distribution/${batchId}`, distributionData),
+
+  // Transfer batch to retailer
+  transferToRetailer: (batchId: string, transferData: any) => api.post(`/distributor/transfer-to-retailer/${batchId}`, transferData)
 };
 
 // Verification service (public endpoints)
 export const verificationService = {
   // Verify batch by QR scan (public)
   verifyBatch: (batchId: string) => api.get(`/verify/${batchId}`),
-  
+
   // Get public batch information
   getPublicBatchInfo: (batchId: string) => api.get(`/public/batch/${batchId}`),
-  
+
   // Check batch authenticity
   checkAuthenticity: (batchId: string, hash: string) => api.post('/verify/authenticity', { batchId, hash })
+};
+
+// Pricing service (for pricing transparency)
+export const pricingService = {
+  // Add pricing record (requires auth - PROCESSOR, DISTRIBUTOR, RETAILER)
+  addPricing: (batchId: string, pricingData: any) => api.post('/pricing/add', { batchId, ...pricingData }),
+
+  // Get pricing history (public)
+  getPricingHistory: (batchId: string) => api.get(`/pricing/history/${batchId}`),
+
+  // Get price markup calculation (public)
+  getPriceMarkup: (batchId: string) => api.get(`/pricing/markup/${batchId}`)
 };
 
 // System service

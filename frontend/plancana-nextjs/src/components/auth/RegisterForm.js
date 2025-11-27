@@ -90,12 +90,12 @@ const RegisterForm = () => {
       {/* Left Side - Agricultural Background */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-green-400 via-green-500 to-green-600 relative overflow-hidden">
         {/* Background Image Overlay */}
-        <div className="absolute inset-0 bg-green-800 bg-opacity-60">      
+        <div className="absolute inset-0 bg-green-800 bg-opacity-40">
         </div>
-        <div 
-          className="absolute inset-0 opacity-30"         
+        <div
+          className="absolute inset-0 opacity-20"
         >
-          <Image src="/agri-pic2.jpeg" alt="plancana logo" fill className="object-cover" />
+          <Image src="/agri-pic.svg" alt="agricultural background" fill className="object-cover" />
         </div>
         
         {/* Content */}

@@ -67,10 +67,10 @@ const LoginForm = () => {
       {/* Left Side - Agricultural Background */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-green-400 via-green-500 to-green-600 relative overflow-hidden">
         {/* Background Pattern/Overlay */}
-        <div className="absolute inset-0 bg-green-800 bg-opacity-60"></div>
-        <div 
-          className="absolute inset-0 opacity-30">
-        <Image src="/agri-pic2.jpeg" alt="plancana logo" fill className="object-cover" />
+        <div className="absolute inset-0 bg-green-800 bg-opacity-40"></div>
+        <div
+          className="absolute inset-0 opacity-20">
+        <Image src="/agri-pic.svg" alt="agricultural background" fill className="object-cover" />
 
         </div>
         
@@ -159,14 +159,14 @@ const LoginForm = () => {
                   type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
                   required
-                  className="appearance-none relative block w-full px-4 py-3 pr-12 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 focus:z-10 sm:text-sm transition-colors"
+                  className="appearance-none relative block w-full px-4 py-3 pr-12 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 sm:text-sm transition-colors"
                   placeholder="Enter your password"
                   value={formData.password}
                   onChange={handleChange}
                 />
                 <button
                   type="button"
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center z-10 cursor-pointer"
                   onClick={() => setShowPassword(!showPassword)}
                 >
                   {showPassword ? (

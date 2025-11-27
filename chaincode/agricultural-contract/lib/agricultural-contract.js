@@ -150,21 +150,18 @@ class AgriculturalContract extends Contract {
     // Get batch with comprehensive data
     async getBatch(ctx, batchId) {
         console.info(`Getting batch: ${batchId}`);
-        
+
         const batchAsBytes = await ctx.stub.getState(batchId);
         if (!batchAsBytes || batchAsBytes.length === 0) {
             throw new Error(`Batch ${batchId} does not exist`);
         }
-        
+
         const batch = JSON.parse(batchAsBytes.toString());
-        
-        // Add blockchain metadata
-        batch.blockchainMetadata = {
-            retrievedAt: new Date().toISOString(),
-            network: 'mychannel',
-            mspId: batch.mspId || 'unknown'
-        };
-        
+
+        // Note: Do not add non-deterministic data here as this function
+        // is used in both queries and transactions. Non-deterministic data
+        // like timestamps will cause endorsement mismatches.
+
         return JSON.stringify(batch);
     }
 
@@ -389,6 +386,155 @@ class AgriculturalContract extends Contract {
         return JSON.stringify(financialTransaction);
     }
 
+    // Add pricing record for supply chain transparency
+    async addPricingRecord(ctx, batchId, pricingData) {
+        console.info(`============= START : Add Pricing Record ${batchId} ===========`);
+
+        const batchAsBytes = await ctx.stub.getState(batchId);
+        if (!batchAsBytes || batchAsBytes.length === 0) {
+            throw new Error(`Batch ${batchId} does not exist`);
+        }
+
+        const batch = JSON.parse(batchAsBytes.toString());
+        const timestamp = ctx.stub.getTxTimestamp();
+        const txId = ctx.stub.getTxID();
+
+        // Parse pricing data
+        const pricing = typeof pricingData === 'string' ? JSON.parse(pricingData) : pricingData;
+
+        // Initialize pricing history if not exists
+        if (!batch.pricingHistory) {
+            batch.pricingHistory = [];
+        }
+
+        // Create pricing record
+        const pricingRecord = {
+            level: pricing.level, // FARMER, PROCESSOR, DISTRIBUTOR, RETAILER
+            timestamp: timestamp.seconds.low + "." + timestamp.nanos,
+            actorName: pricing.actorName || '',
+            actorId: pricing.actorId || '',
+            pricePerUnit: parseFloat(pricing.pricePerUnit),
+            totalValue: parseFloat(pricing.totalValue),
+            quantity: pricing.quantity ? parseFloat(pricing.quantity) : batch.quantity,
+            unit: pricing.unit || batch.unit || 'kg',
+            currency: pricing.currency || 'MYR',
+            breakdown: pricing.breakdown || {},
+            notes: pricing.notes || '',
+            txId: txId,
+            metadata: pricing.metadata || {}
+        };
+
+        // Add to pricing history
+        batch.pricingHistory.push(pricingRecord);
+        batch.lastUpdated = timestamp.seconds.low + "." + timestamp.nanos;
+
+        // Update current price to latest
+        batch.currentPricePerUnit = pricingRecord.pricePerUnit;
+        batch.currentTotalValue = pricingRecord.totalValue;
+        batch.currentLevel = pricingRecord.level;
+
+        await ctx.stub.putState(batchId, Buffer.from(JSON.stringify(batch)));
+
+        // Emit event for database synchronization
+        ctx.stub.setEvent('PricingRecordAdded', Buffer.from(JSON.stringify({
+            batchId: batchId,
+            level: pricing.level,
+            pricePerUnit: pricingRecord.pricePerUnit,
+            totalValue: pricingRecord.totalValue,
+            timestamp: pricingRecord.timestamp,
+            txId: txId
+        })));
+
+        console.info(`============= END : Add Pricing Record ${batchId} ===========`);
+        return JSON.stringify(pricingRecord);
+    }
+
+    // Get pricing history for a batch
+    async getPricingHistory(ctx, batchId) {
+        console.info(`============= START : Get Pricing History ${batchId} ===========`);
+
+        const batchAsBytes = await ctx.stub.getState(batchId);
+        if (!batchAsBytes || batchAsBytes.length === 0) {
+            throw new Error(`Batch ${batchId} does not exist`);
+        }
+
+        const batch = JSON.parse(batchAsBytes.toString());
+
+        // Calculate price increase if history exists
+        let priceIncrease = null;
+        if (batch.pricingHistory && batch.pricingHistory.length >= 2) {
+            const farmPrice = batch.pricingHistory.find(p => p.level === 'FARMER')?.pricePerUnit || 0;
+            const currentPrice = batch.pricingHistory[batch.pricingHistory.length - 1].pricePerUnit;
+
+            if (farmPrice > 0) {
+                const increase = currentPrice - farmPrice;
+                const percentageIncrease = (increase / farmPrice) * 100;
+
+                priceIncrease = {
+                    absoluteIncrease: increase,
+                    percentageIncrease: percentageIncrease.toFixed(2),
+                    farmPrice: farmPrice,
+                    currentPrice: currentPrice
+                };
+            }
+        }
+
+        const result = {
+            batchId: batchId,
+            currentPrice: {
+                pricePerUnit: batch.currentPricePerUnit || null,
+                totalValue: batch.currentTotalValue || null,
+                level: batch.currentLevel || null,
+                currency: batch.currency || 'MYR'
+            },
+            pricingHistory: batch.pricingHistory || [],
+            priceIncrease: priceIncrease,
+            totalLevels: batch.pricingHistory ? batch.pricingHistory.length : 0
+        };
+
+        console.info(`============= END : Get Pricing History ${batchId} ===========`);
+        return JSON.stringify(result);
+    }
+
+    // Calculate price markup at each level
+    async calculatePriceMarkup(ctx, batchId) {
+        console.info(`============= START : Calculate Price Markup ${batchId} ===========`);
+
+        const historyResult = await this.getPricingHistory(ctx, batchId);
+        const history = JSON.parse(historyResult);
+
+        if (!history.pricingHistory || history.pricingHistory.length === 0) {
+            return JSON.stringify({ message: 'No pricing history available' });
+        }
+
+        const markups = [];
+        for (let i = 1; i < history.pricingHistory.length; i++) {
+            const previous = history.pricingHistory[i - 1];
+            const current = history.pricingHistory[i];
+
+            const markup = current.pricePerUnit - previous.pricePerUnit;
+            const markupPercentage = (markup / previous.pricePerUnit) * 100;
+
+            markups.push({
+                fromLevel: previous.level,
+                toLevel: current.level,
+                previousPrice: previous.pricePerUnit,
+                currentPrice: current.pricePerUnit,
+                markup: markup,
+                markupPercentage: markupPercentage.toFixed(2),
+                currency: current.currency
+            });
+        }
+
+        console.info(`============= END : Calculate Price Markup ${batchId} ===========`);
+        return JSON.stringify({
+            batchId: batchId,
+            markups: markups,
+            totalMarkup: markups.reduce((sum, m) => sum + m.markup, 0),
+            averageMarkupPercentage: (markups.reduce((sum, m) => sum + parseFloat(m.markupPercentage), 0) / markups.length).toFixed(2)
+        });
+    }
+
     // Enhanced verification with comprehensive checks
     async verifyBatch(ctx, batchId) {
         console.info(`============= START : Verify Batch ${batchId} ===========`);
@@ -433,13 +579,24 @@ class AgriculturalContract extends Contract {
                 customCertification: batch.customCertification || null
             },
 
-            // Pricing Transparency (Farm-gate level)
+            // Pricing Transparency (Full Supply Chain)
             pricingInformation: {
-                pricePerUnit: batch.pricePerUnit,
-                currency: batch.currency,
-                totalBatchValue: batch.totalBatchValue,
-                paymentMethod: batch.paymentMethod,
-                buyerName: batch.buyerName
+                farmGatePrice: {
+                    pricePerUnit: batch.pricePerUnit,
+                    currency: batch.currency,
+                    totalBatchValue: batch.totalBatchValue,
+                    paymentMethod: batch.paymentMethod,
+                    buyerName: batch.buyerName
+                },
+                currentPrice: {
+                    pricePerUnit: batch.currentPricePerUnit || batch.pricePerUnit,
+                    totalValue: batch.currentTotalValue || batch.totalBatchValue,
+                    level: batch.currentLevel || 'FARMER',
+                    currency: batch.currency
+                },
+                pricingHistory: batch.pricingHistory || [],
+                priceIncrease: batch.pricingHistory && batch.pricingHistory.length >= 2 ?
+                    this.calculatePriceIncreaseInline(batch.pricingHistory, batch.currency) : null
             },
             
             supplyChainSummary: {
@@ -655,7 +812,7 @@ class AgriculturalContract extends Contract {
     checkRecordCompleteness(batch) {
         const requiredFields = ['batchId', 'farmer', 'crop', 'quantity', 'location', 'status'];
         const missingFields = requiredFields.filter(field => !batch[field]);
-        
+
         return {
             complete: missingFields.length === 0,
             completionPercentage: ((requiredFields.length - missingFields.length) / requiredFields.length) * 100,
@@ -668,6 +825,478 @@ class AgriculturalContract extends Contract {
                 certifications: !!(batch.certifications && batch.certifications.length > 0)
             }
         };
+    }
+
+    // Helper function to calculate price increase inline (for verifyBatch)
+    calculatePriceIncreaseInline(pricingHistory, currency) {
+        if (!pricingHistory || pricingHistory.length < 2) {
+            return null;
+        }
+
+        const farmPrice = pricingHistory.find(p => p.level === 'FARMER')?.pricePerUnit || 0;
+        const currentPrice = pricingHistory[pricingHistory.length - 1].pricePerUnit;
+
+        if (farmPrice === 0) {
+            return null;
+        }
+
+        const increase = currentPrice - farmPrice;
+        const percentageIncrease = (increase / farmPrice) * 100;
+
+        return {
+            absoluteIncrease: parseFloat(increase.toFixed(2)),
+            percentageIncrease: percentageIncrease.toFixed(2) + '%',
+            farmPrice: farmPrice,
+            currentPrice: currentPrice,
+            currency: currency || 'MYR',
+            levels: pricingHistory.length
+        };
+    }
+
+    // ===== BATCH TRANSFER & OWNERSHIP FUNCTIONS =====
+
+    // Transfer batch ownership between supply chain actors
+    async transferBatch(ctx, batchId, fromActorId, fromActorRole, toActorId, toActorRole, transferData) {
+        console.info(`============= START : Transfer Batch ${batchId} ===========`);
+
+        const exists = await this.batchExists(ctx, batchId);
+        if (!exists) {
+            throw new Error(`The batch ${batchId} does not exist`);
+        }
+
+        const batch = await this.getBatch(ctx, batchId);
+        const batchData = JSON.parse(batch);
+        const timestamp = ctx.stub.getTxTimestamp();
+        const txId = ctx.stub.getTxID();
+
+        // Parse transfer data
+        let transfer = {};
+        try {
+            transfer = typeof transferData === 'string' ? JSON.parse(transferData) : transferData;
+        } catch (error) {
+            console.warn('Invalid transfer data provided');
+        }
+
+        // Initialize ownership history if not exists
+        if (!batchData.ownershipHistory) {
+            batchData.ownershipHistory = [];
+        }
+
+        // Create transfer record
+        const transferRecord = {
+            fromActorId: fromActorId,
+            fromActorRole: fromActorRole,
+            toActorId: toActorId,
+            toActorRole: toActorRole,
+            timestamp: timestamp.seconds.low + "." + timestamp.nanos,
+            txId: txId,
+            transferType: transfer.transferType || 'OWNERSHIP_TRANSFER',
+            transferLocation: transfer.transferLocation || null,
+            latitude: transfer.latitude || null,
+            longitude: transfer.longitude || null,
+            notes: transfer.notes || '',
+            conditions: transfer.conditions || null,
+            documents: transfer.documents || [],
+            signature: transfer.signature || null
+        };
+
+        // Add to ownership history
+        batchData.ownershipHistory.push(transferRecord);
+
+        // Update current owner
+        batchData.currentOwner = {
+            actorId: toActorId,
+            actorRole: toActorRole,
+            since: timestamp.seconds.low + "." + timestamp.nanos
+        };
+
+        // Update status based on role transition
+        const previousStatus = batchData.status;
+        let newStatus = batchData.status;
+
+        switch (toActorRole.toUpperCase()) {
+            case 'PROCESSOR':
+                newStatus = 'PROCESSING';
+                break;
+            case 'DISTRIBUTOR':
+                newStatus = 'IN_DISTRIBUTION';
+                break;
+            case 'RETAILER':
+                newStatus = 'RETAIL_READY';
+                break;
+        }
+
+        // Add status update to history
+        if (newStatus !== batchData.status) {
+            if (!batchData.statusHistory) batchData.statusHistory = [];
+            batchData.statusHistory.push({
+                status: newStatus,
+                updatedBy: toActorId,
+                timestamp: timestamp.seconds.low + "." + timestamp.nanos,
+                previousStatus: batchData.status,
+                txId: txId,
+                notes: `Batch transferred to ${toActorRole}`,
+                location: transfer.transferLocation || null
+            });
+            batchData.status = newStatus;
+        }
+
+        batchData.lastUpdated = timestamp.seconds.low + "." + timestamp.nanos;
+        batchData.lastUpdatedBy = toActorId;
+
+        await ctx.stub.putState(batchId, Buffer.from(JSON.stringify(batchData)));
+
+        // Emit event for database synchronization
+        ctx.stub.setEvent('BatchTransferred', Buffer.from(JSON.stringify({
+            batchId: batchId,
+            fromActorId: fromActorId,
+            fromActorRole: fromActorRole,
+            toActorId: toActorId,
+            toActorRole: toActorRole,
+            previousStatus: previousStatus,
+            newStatus: newStatus,
+            timestamp: transferRecord.timestamp,
+            txId: txId
+        })));
+
+        console.info(`============= END : Transfer Batch ${batchId} ===========`);
+        return JSON.stringify(transferRecord);
+    }
+
+    // Add transport/logistics record
+    async addTransportRecord(ctx, batchId, transportData) {
+        console.info(`============= START : Add Transport Record ${batchId} ===========`);
+
+        const exists = await this.batchExists(ctx, batchId);
+        if (!exists) {
+            throw new Error(`The batch ${batchId} does not exist`);
+        }
+
+        const batch = await this.getBatch(ctx, batchId);
+        const batchData = JSON.parse(batch);
+        const timestamp = ctx.stub.getTxTimestamp();
+        const txId = ctx.stub.getTxID();
+
+        // Initialize transport records if not exists
+        if (!batchData.transportRecords) {
+            batchData.transportRecords = [];
+        }
+
+        // Parse transport data
+        let transport = {};
+        try {
+            transport = typeof transportData === 'string' ? JSON.parse(transportData) : transportData;
+        } catch (error) {
+            console.warn('Invalid transport data provided');
+        }
+
+        const transportRecord = {
+            transportId: transport.transportId || `TRANS${Date.now()}`,
+            timestamp: timestamp.seconds.low + "." + timestamp.nanos,
+            txId: txId,
+
+            // Route information
+            origin: transport.origin || null,
+            originCoordinates: transport.originCoordinates || null,
+            destination: transport.destination || null,
+            destinationCoordinates: transport.destinationCoordinates || null,
+            route: transport.route || [],
+
+            // Transport details
+            carrier: transport.carrier || null,
+            vehicleType: transport.vehicleType || null,
+            vehicleId: transport.vehicleId || null,
+            driverName: transport.driverName || null,
+
+            // Timing
+            departureTime: transport.departureTime || null,
+            estimatedArrival: transport.estimatedArrival || null,
+            actualArrival: transport.actualArrival || null,
+
+            // Conditions
+            transportConditions: transport.transportConditions || null,
+            temperatureControl: transport.temperatureControl || null,
+            weatherConditions: transport.weatherConditions || null,
+
+            // Costs
+            transportCost: transport.transportCost ? parseFloat(transport.transportCost) : null,
+            currency: transport.currency || 'MYR',
+            fuelCost: transport.fuelCost ? parseFloat(transport.fuelCost) : null,
+            tollFees: transport.tollFees ? parseFloat(transport.tollFees) : null,
+
+            // Documentation
+            waybillNumber: transport.waybillNumber || null,
+            documents: transport.documents || [],
+            notes: transport.notes || '',
+
+            // Tracking
+            trackingUpdates: transport.trackingUpdates || [],
+            currentStatus: transport.currentStatus || 'IN_TRANSIT'
+        };
+
+        batchData.transportRecords.push(transportRecord);
+        batchData.lastUpdated = timestamp.seconds.low + "." + timestamp.nanos;
+
+        // Update batch status to IN_TRANSIT if appropriate
+        if (transport.updateStatus && batchData.status !== 'IN_TRANSIT') {
+            if (!batchData.statusHistory) batchData.statusHistory = [];
+            batchData.statusHistory.push({
+                status: 'IN_TRANSIT',
+                updatedBy: transport.carrier || 'system',
+                timestamp: timestamp.seconds.low + "." + timestamp.nanos,
+                previousStatus: batchData.status,
+                txId: txId,
+                notes: `Transport started from ${transport.origin} to ${transport.destination}`,
+                location: transport.origin || null
+            });
+            batchData.status = 'IN_TRANSIT';
+        }
+
+        await ctx.stub.putState(batchId, Buffer.from(JSON.stringify(batchData)));
+
+        // Emit event for database synchronization
+        ctx.stub.setEvent('TransportRecordAdded', Buffer.from(JSON.stringify({
+            batchId: batchId,
+            transportId: transportRecord.transportId,
+            origin: transport.origin,
+            destination: transport.destination,
+            carrier: transport.carrier,
+            timestamp: transportRecord.timestamp,
+            txId: txId
+        })));
+
+        console.info(`============= END : Add Transport Record ${batchId} ===========`);
+        return JSON.stringify(transportRecord);
+    }
+
+    // Get transport history for a batch
+    async getTransportHistory(ctx, batchId) {
+        console.info(`============= START : Get Transport History ${batchId} ===========`);
+
+        const batchAsBytes = await ctx.stub.getState(batchId);
+        if (!batchAsBytes || batchAsBytes.length === 0) {
+            throw new Error(`Batch ${batchId} does not exist`);
+        }
+
+        const batch = JSON.parse(batchAsBytes.toString());
+
+        const result = {
+            batchId: batchId,
+            currentOwner: batch.currentOwner || null,
+            currentStatus: batch.status,
+            transportRecords: batch.transportRecords || [],
+            ownershipHistory: batch.ownershipHistory || [],
+            totalTransportSteps: batch.transportRecords ? batch.transportRecords.length : 0,
+            totalOwnershipChanges: batch.ownershipHistory ? batch.ownershipHistory.length : 0
+        };
+
+        console.info(`============= END : Get Transport History ${batchId} ===========`);
+        return JSON.stringify(result);
+    }
+
+    // Get ownership history for a batch
+    async getOwnershipHistory(ctx, batchId) {
+        console.info(`============= START : Get Ownership History ${batchId} ===========`);
+
+        const batchAsBytes = await ctx.stub.getState(batchId);
+        if (!batchAsBytes || batchAsBytes.length === 0) {
+            throw new Error(`Batch ${batchId} does not exist`);
+        }
+
+        const batch = JSON.parse(batchAsBytes.toString());
+
+        const result = {
+            batchId: batchId,
+            currentOwner: batch.currentOwner || {
+                actorId: batch.farmer,
+                actorRole: 'FARMER',
+                since: batch.createdDate
+            },
+            ownershipHistory: batch.ownershipHistory || [],
+            totalTransfers: batch.ownershipHistory ? batch.ownershipHistory.length : 0
+        };
+
+        console.info(`============= END : Get Ownership History ${batchId} ===========`);
+        return JSON.stringify(result);
+    }
+
+    // ===== DISTRIBUTOR FUNCTIONS =====
+
+    // Get batches available for distribution (PROCESSED status)
+    async getAvailableBatchesForDistributor(ctx) {
+        console.info('============= START : Get Available Batches For Distributor ===========');
+
+        const allResults = [];
+
+        // Get all batches with status PROCESSED (ready for distribution)
+        const iterator = await ctx.stub.getStateByRange('', '');
+        let result = await iterator.next();
+
+        while (!result.done) {
+            const strValue = Buffer.from(result.value.value.toString()).toString('utf8');
+            let record;
+            try {
+                record = JSON.parse(strValue);
+                // Only include batches that are PROCESSED and NOT yet owned by a distributor
+                if (record && record.batchId && record.docType === 'batch') {
+                    if (record.status === 'PROCESSED' &&
+                        (!record.currentOwner || record.currentOwner.actorRole !== 'DISTRIBUTOR')) {
+                        allResults.push(record);
+                    }
+                }
+            } catch (err) {
+                console.log('Error parsing record:', err);
+            }
+            result = await iterator.next();
+        }
+
+        await iterator.close();
+
+        // Sort by last updated (newest first)
+        allResults.sort((a, b) => {
+            const aTime = parseFloat(a.lastUpdated) || 0;
+            const bTime = parseFloat(b.lastUpdated) || 0;
+            return bTime - aTime;
+        });
+
+        console.info(`Found ${allResults.length} batches available for distribution`);
+        console.info('============= END : Get Available Batches For Distributor ===========');
+        return JSON.stringify(allResults);
+    }
+
+    // Add distribution record
+    async addDistributionRecord(ctx, batchId, distributorId, distributionData) {
+        console.info(`============= START : Add Distribution Record ${batchId} ===========`);
+
+        const exists = await this.batchExists(ctx, batchId);
+        if (!exists) {
+            throw new Error(`The batch ${batchId} does not exist`);
+        }
+
+        const batch = await this.getBatch(ctx, batchId);
+        const batchData = JSON.parse(batch);
+        const timestamp = ctx.stub.getTxTimestamp();
+        const txId = ctx.stub.getTxID();
+
+        // Initialize distribution records if not exists
+        if (!batchData.distributionRecords) {
+            batchData.distributionRecords = [];
+        }
+
+        // Parse distribution data
+        let distribution = {};
+        try {
+            distribution = typeof distributionData === 'string' ? JSON.parse(distributionData) : distributionData;
+        } catch (error) {
+            console.warn('Invalid distribution data provided');
+        }
+
+        const distributionRecord = {
+            distributorId: distributorId,
+            timestamp: timestamp.seconds.low + "." + timestamp.nanos,
+            txId: txId,
+
+            // Distribution details
+            distributionType: distribution.distributionType || null, // local, regional, national, export
+            warehouseLocation: distribution.warehouseLocation || null,
+            warehouseCoordinates: distribution.warehouseCoordinates || null,
+
+            // Storage conditions
+            storageConditions: distribution.storageConditions || null,
+            temperatureControl: distribution.temperatureControl || null,
+            humidity: distribution.humidity || null,
+
+            // Logistics
+            vehicleType: distribution.vehicleType || null,
+            vehicleId: distribution.vehicleId || null,
+            driverName: distribution.driverName || null,
+            route: distribution.route || [],
+
+            // Quantities
+            quantityReceived: distribution.quantityReceived ? parseFloat(distribution.quantityReceived) : batchData.quantity,
+            quantityDistributed: distribution.quantityDistributed ? parseFloat(distribution.quantityDistributed) : null,
+            unit: distribution.unit || batchData.unit || 'kg',
+
+            // Costs
+            distributionCost: distribution.distributionCost ? parseFloat(distribution.distributionCost) : null,
+            storageCost: distribution.storageCost ? parseFloat(distribution.storageCost) : null,
+            handlingCost: distribution.handlingCost ? parseFloat(distribution.handlingCost) : null,
+            currency: distribution.currency || 'MYR',
+
+            // Quality check
+            qualityCheckPassed: distribution.qualityCheckPassed || null,
+            qualityNotes: distribution.qualityNotes || '',
+
+            // Documentation
+            documents: distribution.documents || [],
+            notes: distribution.notes || '',
+
+            // Destination
+            destinationType: distribution.destinationType || null, // retailer, export, industrial
+            destination: distribution.destination || null
+        };
+
+        batchData.distributionRecords.push(distributionRecord);
+        batchData.lastUpdated = timestamp.seconds.low + "." + timestamp.nanos;
+        batchData.lastUpdatedBy = distributorId;
+
+        await ctx.stub.putState(batchId, Buffer.from(JSON.stringify(batchData)));
+
+        // Emit event for database synchronization
+        ctx.stub.setEvent('DistributionRecordAdded', Buffer.from(JSON.stringify({
+            batchId: batchId,
+            distributorId: distributorId,
+            distributionType: distribution.distributionType,
+            destination: distribution.destination,
+            timestamp: distributionRecord.timestamp,
+            txId: txId
+        })));
+
+        console.info(`============= END : Add Distribution Record ${batchId} ===========`);
+        return JSON.stringify(distributionRecord);
+    }
+
+    // Get batches by distributor (owned by distributor)
+    async getBatchesByDistributor(ctx, distributorId) {
+        console.info(`============= START : Get Batches By Distributor ${distributorId} ===========`);
+
+        const allResults = [];
+
+        // Get all batches owned by this distributor
+        const iterator = await ctx.stub.getStateByRange('', '');
+        let result = await iterator.next();
+
+        while (!result.done) {
+            const strValue = Buffer.from(result.value.value.toString()).toString('utf8');
+            let record;
+            try {
+                record = JSON.parse(strValue);
+                if (record && record.batchId && record.docType === 'batch') {
+                    // Check if current owner is this distributor
+                    if (record.currentOwner &&
+                        record.currentOwner.actorId === distributorId &&
+                        record.currentOwner.actorRole === 'DISTRIBUTOR') {
+                        allResults.push(record);
+                    }
+                }
+            } catch (err) {
+                console.log('Error parsing record:', err);
+            }
+            result = await iterator.next();
+        }
+
+        await iterator.close();
+
+        // Sort by last updated (newest first)
+        allResults.sort((a, b) => {
+            const aTime = parseFloat(a.lastUpdated) || 0;
+            const bTime = parseFloat(b.lastUpdated) || 0;
+            return bTime - aTime;
+        });
+
+        console.info(`Found ${allResults.length} batches for distributor ${distributorId}`);
+        console.info(`============= END : Get Batches By Distributor ${distributorId} ===========`);
+        return JSON.stringify(allResults);
     }
 }
 
