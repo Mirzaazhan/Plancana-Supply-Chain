@@ -255,6 +255,7 @@ model Batch {
   batchId           String       @unique // BATCH_2024_001
   farmerId          String
   farmLocationId    String?
+  cropType          String?      // Fruit, Vegetable, Cash Crop, Herb/Spice, Industrial Crop
   productType       String
   variety           String?
   quantity          Float
@@ -287,6 +288,7 @@ model Batch {
   // Certifications & Compliance
   certifications    String[]     // Organic, Halal, MyGAP, GLOBALG.A.P, etc.
   customCertification String?    // Custom certification if not in dropdown
+  myGapCertNumber   String?      // myGAP Certificate Number (database only, not on blockchain)
 
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
@@ -314,6 +316,7 @@ enum BatchStatus {
   IN_DISTRIBUTION
   DELIVERED
   RETAIL_READY
+  IN_RETAIL
   SOLD
   RECALLED
 }
@@ -354,11 +357,16 @@ model ProcessingRecord {
   energyUsage       Float?   // kWh
   waterUsage        Float?   // liters
   blockchainHash    String?
-  
+
+  // Location tracking at processing level
+  processingLocation String? // Address or location name
+  latitude          Float?   // Processing location coordinates
+  longitude         Float?
+
   batch             Batch @relation(fields: [batchId], references: [id])
   processor         ProcessorProfile @relation(fields: [processorId], references: [id])
   facility          ProcessingFacility @relation(fields: [facilityId], references: [id])
-  
+
   @@map("processing_records")
 }
 

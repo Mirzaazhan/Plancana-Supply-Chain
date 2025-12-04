@@ -2,39 +2,69 @@
 
 'use client'; 
 
-import React, { useEffect, useRef } from 'react';
-import { loadModules } from 'esri-loader';
-import config from '@arcgis/core/config'; 
+import React, { useEffect, useRef, useState } from 'react';
+import { loadModules } from 'esri-loader'; 
 
 const TestMap = ({ webMapId, dragable }: any) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<any>(null);
+  const [token, setToken] = useState(null);
 
+  async function fetchToken() {
+  const res = await fetch("/api/refresh-token");
+  const data = await res.json();
+  return data.access_token;
+  }
+
+  // Auto-refresh token every 55 minutes
   useEffect(() => {
-    // 1. SET API KEY GLOBALLY (Must be done before loadModules)
-    const apiKey = process.env.NEXT_PUBLIC_ARCGIS_API_KEY;
-    if (typeof window !== 'undefined') {
-      (window as any).esriConfig = {
-        apiKey: apiKey
-      };
+    async function initTokenCycle() {
+      const newToken = await fetchToken();
+      setToken(newToken);
+
+      const interval = setInterval(async () => {
+        const refreshed = await fetchToken();
+        setToken(refreshed);
+      }, 55 * 60 * 1000);
+
+      return () => clearInterval(interval);
     }
 
+    initTokenCycle();
+  }, []);
+
+  // useEffect(()=>{
+  //   const apiKey = process.env.NEXT_PUBLIC_ARCGIS_API_KEY;
+  //   if (typeof window !== 'undefined') {
+  //     (window as any).esriConfig = {
+  //       apiKey: apiKey
+  //     };
+  //   }
+  // })
+  useEffect(() => {
+    if (!token) return;
+
+    let view;
+
     // 2. Load modules using esri-loader
-    loadModules(['esri/views/MapView', 'esri/WebMap','esri/widgets/Legend'], { css: true }).then(
-      ([MapView, WebMapModule,LegendModule]) => { 
+    loadModules(['esri/views/MapView', 'esri/WebMap','esri/widgets/Legend','esri/identity/IdentityManager'], { css: true }).then(
+      ([MapView, WebMapModule,LegendModule,IdentityManager]) => { 
         
         const WebMap = WebMapModule;
+
+        IdentityManager.registerToken({
+        server: "https://www.arcgis.com",
+        token: token,   
+        });
         
         // 3. Initialize WebMap with the ID
         const webmap = new WebMap({
           portalItem: {
             id: webMapId, 
-            // The API Key set in config handles the authentication automatically 
-            // for the item and its layers.
           }
         });
 
-        // 4. Initialize the Map View
+        webmap.load().then(() =>{
         const view = new MapView({
           container: mapRef.current,
           map: webmap, 
@@ -63,12 +93,13 @@ const TestMap = ({ webMapId, dragable }: any) => {
                 event.stopPropagation();
             });            
           }                   
-        });
-
-        console.log("✅ Map View Initialized, authenticating via API Key.");
+        });          
+        })
+        // 4. Initialize the Map View
+        console.log("Map View Initialized, authenticating via API Key.");
       }
     ).catch(error => {
-      console.error("❌ Map Initialization Error:", error);
+      console.error("Map Initialization Error:", error);
     });
 
     return () => {
@@ -77,7 +108,7 @@ const TestMap = ({ webMapId, dragable }: any) => {
         viewRef.current = null;
       }
     };
-  }, [webMapId]);
+  }, [webMapId,token]);
 
   return (
     <>

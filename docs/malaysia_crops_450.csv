@@ -1,0 +1,451 @@
+crop_type,product,variety
+Fruit,Banana,Pisang Berangan
+Fruit,Banana,Pisang Emas
+Fruit,Banana,Pisang Cavendish
+Fruit,Banana,Pisang Raja
+Fruit,Banana,Pisang Nangka
+Fruit,Banana,Pisang Abu
+Fruit,Banana,Pisang Tanduk
+Fruit,Banana,Pisang Rastali
+Fruit,Durian,D197 Musang King
+Fruit,Durian,D24
+Fruit,Durian,D101
+Fruit,Durian,Udang Merah
+Fruit,Durian,XO
+Fruit,Durian,Tekka
+Fruit,Durian,Kampung
+Fruit,Mango,Harumanis
+Fruit,Mango,Chokanan
+Fruit,Mango,Sala
+Fruit,Mango,Nam Dok Mai
+Fruit,Mango,Golden Lily
+Fruit,Mango,Lurpak
+Fruit,Papaya,Eksotika I
+Fruit,Papaya,Eksotika II
+Fruit,Papaya,Hawaii
+Fruit,Papaya,Sekaki
+Fruit,Pineapple,MD2
+Fruit,Pineapple,N36
+Fruit,Pineapple,Moris
+Fruit,Pineapple,Josapine
+Fruit,Pineapple,Gandul
+Fruit,Pineapple,Sarawak
+Vegetable,Sawi,Sawi Bunga
+Vegetable,Sawi,Sawi Hijau
+Vegetable,Sawi,Sawi Paichai
+Vegetable,Sawi,Sawi Taiwan
+Vegetable,Kangkung,Kangkung Darat
+Vegetable,Kangkung,Kangkung Air
+Vegetable,Kailan,Kailan Lokal
+Vegetable,Kailan,Kailan Taiwan
+Vegetable,Bayam,Bayam Hijau
+Vegetable,Bayam,Bayam Merah
+Vegetable,Bayam,Bayam Brazil
+Vegetable,Cili,Cili Merah
+Vegetable,Cili,Cili Hijau
+Vegetable,Cili,Cili Padi
+Vegetable,Cili,Cili Bara
+Vegetable,Terung,Terung Ungu
+Vegetable,Terung,Terung Putih
+Vegetable,Terung,Terung Panjang
+Vegetable,Terung,Terung Bulat
+Cash Crop,Cassava,Ubi Kayu Putih
+Cash Crop,Cassava,Ubi Kayu Kuning
+Cash Crop,Cassava,Ubi Kayu Merah
+Cash Crop,Sweet Potato,Keledek Oren
+Cash Crop,Sweet Potato,Keledek Ungu
+Cash Crop,Sweet Potato,Keledek Putih
+Cash Crop,Yam,Keladi Cina
+Cash Crop,Yam,Keladi Kampung
+Cash Crop,Yam,Keladi Hitam
+Cash Crop,Sugarcane,Tebu Hitam
+Cash Crop,Sugarcane,Tebu Kuning
+Cash Crop,Sugarcane,Tebu Cina
+Herb/Spice,Ginger,Halia Bara
+Herb/Spice,Ginger,Halia Bentong
+Herb/Spice,Ginger,Halia Tua
+Herb/Spice,Ginger,Halia Merah
+Herb/Spice,Turmeric,Kunyit Hidup
+Herb/Spice,Turmeric,Kunyit Putih
+Herb/Spice,Turmeric,Kunyit Hitam
+Herb/Spice,Pandan,Pandan Wangi
+Herb/Spice,Pandan,Pandan Serani
+Herb/Spice,Serai,Serai Wangi
+Herb/Spice,Serai,Serai Kampung
+Industrial Crop,Coconut,Matag
+Industrial Crop,Coconut,Malayan Tall
+Industrial Crop,Coconut,Malayan Dwarf
+Industrial Crop,Coconut,Kelapa Pandan
+Industrial Crop,Coffee,Liberica
+Industrial Crop,Coffee,Robusta
+Industrial Crop,Coffee,Arabica
+Industrial Crop,Tea,Assamica
+Industrial Crop,Tea,Sinensis
+Industrial Crop,Oil Palm,DxP Hybrid
+Industrial Crop,Oil Palm,Tenera
+Vegetable,Sweet Potato,Select Sweet Potato Var153
+Cash Crop,Coconut,Elite Coconut Var86
+Herb/Spice,Sweet Potato,Local Sweet Potato Var191
+Cash Crop,Serai,Hybrid Serai Var26
+Fruit,Yam,Local Yam Var142
+Herb/Spice,Turmeric,Hybrid Turmeric Var85
+Cash Crop,Papaya,Hybrid Papaya Var138
+Cash Crop,Sawi,Super Sawi Var190
+Industrial Crop,Cili,Hybrid Cili Var75
+Cash Crop,Banana,Premium Banana Var39
+Herb/Spice,Pandan,A1 Pandan Var93
+Fruit,Bayam,Super Bayam Var90
+Herb/Spice,Durian,Select Durian Var180
+Vegetable,Cassava,Super Cassava Var115
+Cash Crop,Sawi,Hybrid Sawi Var181
+Vegetable,Oil Palm,Hybrid Oil Palm Var5
+Vegetable,Yam,Premium Yam Var156
+Fruit,Papaya,Local Papaya Var91
+Fruit,Sawi,Local Sawi Var176
+Industrial Crop,Cassava,Elite Cassava Var107
+Industrial Crop,Turmeric,Local Turmeric Var71
+Industrial Crop,Serai,Hybrid Serai Var182
+Vegetable,Yam,Hybrid Yam Var192
+Fruit,Mango,A2 Mango Var66
+Herb/Spice,Ginger,A3 Ginger Var125
+Industrial Crop,Turmeric,Elite Turmeric Var121
+Fruit,Banana,Super Banana Var61
+Industrial Crop,Durian,A1 Durian Var193
+Herb/Spice,Turmeric,A3 Turmeric Var17
+Cash Crop,Turmeric,Select Turmeric Var14
+Fruit,Bayam,Elite Bayam Var35
+Fruit,Mango,A2 Mango Var140
+Vegetable,Oil Palm,A3 Oil Palm Var30
+Herb/Spice,Bayam,A1 Bayam Var67
+Fruit,Pineapple,Super Pineapple Var104
+Industrial Crop,Kailan,A2 Kailan Var161
+Cash Crop,Sugarcane,Elite Sugarcane Var132
+Industrial Crop,Mango,Elite Mango Var79
+Fruit,Sawi,A1 Sawi Var195
+Vegetable,Tea,Hybrid Tea Var79
+Fruit,Sugarcane,A2 Sugarcane Var163
+Industrial Crop,Coffee,Hybrid Coffee Var73
+Industrial Crop,Oil Palm,Elite Oil Palm Var38
+Fruit,Banana,Select Banana Var38
+Cash Crop,Pandan,Local Pandan Var100
+Herb/Spice,Coffee,A2 Coffee Var169
+Herb/Spice,Yam,Select Yam Var72
+Vegetable,Kangkung,Local Kangkung Var121
+Herb/Spice,Durian,Premium Durian Var8
+Industrial Crop,Sugarcane,A1 Sugarcane Var82
+Industrial Crop,Pineapple,A2 Pineapple Var104
+Fruit,Papaya,A2 Papaya Var187
+Cash Crop,Ginger,Super Ginger Var179
+Fruit,Oil Palm,Elite Oil Palm Var24
+Fruit,Sawi,A1 Sawi Var124
+Fruit,Pandan,Premium Pandan Var170
+Fruit,Yam,Select Yam Var28
+Cash Crop,Tea,Elite Tea Var107
+Industrial Crop,Bayam,A1 Bayam Var116
+Herb/Spice,Terung,Elite Terung Var98
+Cash Crop,Sawi,Premium Sawi Var52
+Herb/Spice,Sawi,Local Sawi Var20
+Herb/Spice,Terung,Super Terung Var176
+Fruit,Papaya,Premium Papaya Var188
+Industrial Crop,Mango,A1 Mango Var30
+Fruit,Tea,Super Tea Var84
+Herb/Spice,Ginger,Premium Ginger Var159
+Fruit,Cassava,A2 Cassava Var120
+Cash Crop,Pineapple,A1 Pineapple Var81
+Herb/Spice,Durian,Local Durian Var25
+Herb/Spice,Banana,Select Banana Var36
+Industrial Crop,Cassava,A2 Cassava Var8
+Vegetable,Sweet Potato,Super Sweet Potato Var172
+Industrial Crop,Ginger,Super Ginger Var89
+Cash Crop,Coconut,Local Coconut Var121
+Cash Crop,Pineapple,Premium Pineapple Var119
+Fruit,Pandan,A1 Pandan Var125
+Industrial Crop,Pandan,A3 Pandan Var115
+Industrial Crop,Serai,Premium Serai Var109
+Cash Crop,Sugarcane,A2 Sugarcane Var19
+Industrial Crop,Tea,Super Tea Var162
+Industrial Crop,Kangkung,A2 Kangkung Var97
+Herb/Spice,Serai,Premium Serai Var176
+Industrial Crop,Sweet Potato,Local Sweet Potato Var45
+Industrial Crop,Banana,Local Banana Var49
+Industrial Crop,Durian,A2 Durian Var163
+Herb/Spice,Serai,Select Serai Var73
+Cash Crop,Pineapple,Select Pineapple Var158
+Vegetable,Serai,Local Serai Var6
+Vegetable,Serai,A2 Serai Var109
+Fruit,Kailan,Select Kailan Var111
+Cash Crop,Papaya,A3 Papaya Var104
+Vegetable,Sawi,Local Sawi Var113
+Herb/Spice,Sugarcane,Elite Sugarcane Var92
+Fruit,Sweet Potato,Premium Sweet Potato Var25
+Herb/Spice,Banana,Hybrid Banana Var117
+Vegetable,Serai,A3 Serai Var121
+Vegetable,Bayam,Select Bayam Var164
+Vegetable,Kailan,Select Kailan Var119
+Herb/Spice,Turmeric,Select Turmeric Var194
+Cash Crop,Kangkung,Super Kangkung Var3
+Cash Crop,Sweet Potato,Premium Sweet Potato Var148
+Herb/Spice,Serai,Elite Serai Var153
+Cash Crop,Sweet Potato,Hybrid Sweet Potato Var9
+Herb/Spice,Mango,Premium Mango Var8
+Industrial Crop,Ginger,Premium Ginger Var119
+Cash Crop,Pandan,A2 Pandan Var181
+Vegetable,Bayam,A1 Bayam Var13
+Vegetable,Pandan,A1 Pandan Var47
+Vegetable,Kailan,Super Kailan Var57
+Herb/Spice,Papaya,Elite Papaya Var71
+Fruit,Turmeric,Local Turmeric Var145
+Herb/Spice,Sugarcane,A3 Sugarcane Var103
+Vegetable,Cassava,Premium Cassava Var91
+Fruit,Serai,Local Serai Var74
+Industrial Crop,Durian,Hybrid Durian Var19
+Industrial Crop,Sugarcane,Local Sugarcane Var169
+Cash Crop,Coconut,Super Coconut Var70
+Cash Crop,Tea,Premium Tea Var43
+Fruit,Yam,Super Yam Var32
+Cash Crop,Banana,Premium Banana Var46
+Industrial Crop,Serai,Premium Serai Var26
+Herb/Spice,Sawi,Local Sawi Var7
+Cash Crop,Serai,Hybrid Serai Var191
+Fruit,Cili,Hybrid Cili Var126
+Vegetable,Papaya,Elite Papaya Var106
+Herb/Spice,Pineapple,A3 Pineapple Var49
+Fruit,Papaya,Select Papaya Var183
+Fruit,Mango,Premium Mango Var156
+Fruit,Cili,A1 Cili Var19
+Fruit,Kangkung,Super Kangkung Var197
+Fruit,Oil Palm,Premium Oil Palm Var61
+Vegetable,Serai,A2 Serai Var45
+Cash Crop,Sweet Potato,A2 Sweet Potato Var155
+Industrial Crop,Papaya,Premium Papaya Var184
+Fruit,Pandan,Select Pandan Var167
+Industrial Crop,Kangkung,Elite Kangkung Var79
+Fruit,Ginger,Select Ginger Var180
+Industrial Crop,Mango,A2 Mango Var51
+Vegetable,Pineapple,A2 Pineapple Var1
+Industrial Crop,Ginger,Premium Ginger Var89
+Herb/Spice,Mango,Local Mango Var30
+Cash Crop,Coffee,Elite Coffee Var167
+Herb/Spice,Cassava,A1 Cassava Var7
+Vegetable,Pineapple,Select Pineapple Var2
+Vegetable,Coconut,Super Coconut Var77
+Industrial Crop,Serai,Elite Serai Var64
+Industrial Crop,Papaya,A1 Papaya Var82
+Industrial Crop,Ginger,Local Ginger Var183
+Industrial Crop,Sugarcane,A2 Sugarcane Var99
+Cash Crop,Papaya,Super Papaya Var63
+Fruit,Pineapple,A1 Pineapple Var59
+Industrial Crop,Papaya,Premium Papaya Var146
+Industrial Crop,Sweet Potato,Super Sweet Potato Var33
+Vegetable,Kailan,A2 Kailan Var98
+Vegetable,Banana,Super Banana Var41
+Cash Crop,Turmeric,A3 Turmeric Var50
+Fruit,Cili,Premium Cili Var181
+Fruit,Sawi,Select Sawi Var50
+Herb/Spice,Sweet Potato,Elite Sweet Potato Var147
+Cash Crop,Pineapple,A2 Pineapple Var103
+Cash Crop,Pandan,Select Pandan Var187
+Vegetable,Kangkung,A1 Kangkung Var27
+Industrial Crop,Tea,Hybrid Tea Var85
+Vegetable,Terung,A3 Terung Var193
+Industrial Crop,Papaya,Super Papaya Var121
+Fruit,Papaya,Local Papaya Var5
+Vegetable,Sweet Potato,Local Sweet Potato Var164
+Herb/Spice,Sugarcane,Local Sugarcane Var171
+Industrial Crop,Banana,Select Banana Var23
+Fruit,Cili,Hybrid Cili Var86
+Fruit,Cili,A1 Cili Var166
+Cash Crop,Mango,A2 Mango Var179
+Herb/Spice,Terung,Premium Terung Var42
+Vegetable,Papaya,Premium Papaya Var59
+Herb/Spice,Serai,Elite Serai Var77
+Fruit,Cassava,Select Cassava Var63
+Cash Crop,Pineapple,Local Pineapple Var190
+Cash Crop,Sugarcane,Elite Sugarcane Var48
+Fruit,Cili,Local Cili Var140
+Cash Crop,Mango,A3 Mango Var12
+Herb/Spice,Terung,Hybrid Terung Var106
+Cash Crop,Pandan,Hybrid Pandan Var150
+Vegetable,Kangkung,A3 Kangkung Var185
+Herb/Spice,Yam,Hybrid Yam Var127
+Cash Crop,Sugarcane,A3 Sugarcane Var8
+Cash Crop,Coconut,A2 Coconut Var8
+Industrial Crop,Mango,A3 Mango Var116
+Fruit,Pineapple,Hybrid Pineapple Var17
+Vegetable,Ginger,A3 Ginger Var169
+Herb/Spice,Papaya,Hybrid Papaya Var104
+Industrial Crop,Cassava,Elite Cassava Var67
+Cash Crop,Serai,A2 Serai Var67
+Fruit,Terung,Hybrid Terung Var125
+Vegetable,Oil Palm,Elite Oil Palm Var183
+Cash Crop,Coffee,Local Coffee Var88
+Herb/Spice,Cili,A3 Cili Var3
+Fruit,Terung,Select Terung Var74
+Cash Crop,Cassava,Select Cassava Var79
+Vegetable,Kangkung,Hybrid Kangkung Var9
+Industrial Crop,Coffee,Hybrid Coffee Var198
+Industrial Crop,Yam,Hybrid Yam Var195
+Fruit,Sweet Potato,A2 Sweet Potato Var13
+Fruit,Sawi,Select Sawi Var36
+Fruit,Coconut,Hybrid Coconut Var172
+Vegetable,Banana,Elite Banana Var77
+Cash Crop,Sweet Potato,Elite Sweet Potato Var102
+Vegetable,Coffee,Local Coffee Var182
+Herb/Spice,Sawi,Elite Sawi Var17
+Vegetable,Yam,A2 Yam Var191
+Cash Crop,Banana,Local Banana Var14
+Fruit,Pandan,A3 Pandan Var14
+Industrial Crop,Terung,Premium Terung Var13
+Industrial Crop,Pandan,A2 Pandan Var198
+Vegetable,Ginger,Elite Ginger Var169
+Cash Crop,Coconut,A1 Coconut Var1
+Fruit,Banana,Elite Banana Var183
+Cash Crop,Papaya,A1 Papaya Var95
+Cash Crop,Coffee,Elite Coffee Var105
+Cash Crop,Bayam,Hybrid Bayam Var23
+Vegetable,Yam,Local Yam Var83
+Cash Crop,Yam,Select Yam Var166
+Vegetable,Papaya,A2 Papaya Var116
+Fruit,Coffee,Hybrid Coffee Var152
+Herb/Spice,Terung,Select Terung Var153
+Industrial Crop,Durian,Local Durian Var111
+Cash Crop,Turmeric,A2 Turmeric Var157
+Cash Crop,Pandan,Super Pandan Var73
+Industrial Crop,Sawi,Select Sawi Var41
+Vegetable,Cassava,Local Cassava Var40
+Vegetable,Bayam,Elite Bayam Var98
+Vegetable,Pineapple,A2 Pineapple Var5
+Industrial Crop,Sweet Potato,A3 Sweet Potato Var89
+Herb/Spice,Turmeric,A3 Turmeric Var161
+Vegetable,Oil Palm,Elite Oil Palm Var2
+Cash Crop,Serai,Local Serai Var93
+Cash Crop,Kailan,Elite Kailan Var112
+Fruit,Yam,Local Yam Var83
+Industrial Crop,Papaya,Elite Papaya Var53
+Industrial Crop,Ginger,Local Ginger Var11
+Herb/Spice,Kailan,Super Kailan Var33
+Vegetable,Serai,A1 Serai Var141
+Herb/Spice,Kailan,A1 Kailan Var48
+Vegetable,Coconut,Hybrid Coconut Var119
+Cash Crop,Mango,A2 Mango Var187
+Cash Crop,Sawi,A3 Sawi Var137
+Vegetable,Pineapple,Elite Pineapple Var89
+Fruit,Kailan,A1 Kailan Var44
+Cash Crop,Sawi,Local Sawi Var68
+Vegetable,Bayam,A2 Bayam Var120
+Fruit,Pandan,Super Pandan Var124
+Herb/Spice,Sugarcane,Premium Sugarcane Var1
+Industrial Crop,Turmeric,A3 Turmeric Var178
+Vegetable,Serai,Super Serai Var198
+Fruit,Ginger,Super Ginger Var95
+Fruit,Turmeric,Super Turmeric Var175
+Vegetable,Pineapple,A1 Pineapple Var107
+Fruit,Sweet Potato,Local Sweet Potato Var115
+Fruit,Sawi,Local Sawi Var61
+Fruit,Pandan,A3 Pandan Var98
+Cash Crop,Cili,A3 Cili Var10
+Herb/Spice,Sawi,Select Sawi Var14
+Cash Crop,Ginger,A1 Ginger Var162
+Herb/Spice,Oil Palm,A1 Oil Palm Var52
+Industrial Crop,Coconut,A3 Coconut Var64
+Herb/Spice,Kangkung,Premium Kangkung Var195
+Industrial Crop,Tea,Select Tea Var113
+Cash Crop,Terung,A3 Terung Var48
+Herb/Spice,Sugarcane,Elite Sugarcane Var69
+Vegetable,Sugarcane,Local Sugarcane Var114
+Fruit,Oil Palm,Local Oil Palm Var37
+Herb/Spice,Pineapple,A2 Pineapple Var62
+Cash Crop,Kailan,Select Kailan Var72
+Vegetable,Durian,Super Durian Var10
+Cash Crop,Kangkung,Premium Kangkung Var63
+Vegetable,Cassava,A2 Cassava Var1
+Cash Crop,Cili,A3 Cili Var97
+Fruit,Yam,Super Yam Var165
+Fruit,Serai,Select Serai Var13
+Vegetable,Papaya,Select Papaya Var167
+Fruit,Sawi,A1 Sawi Var10
+Fruit,Sawi,Hybrid Sawi Var132
+Industrial Crop,Cili,A2 Cili Var142
+Cash Crop,Tea,Select Tea Var28
+Herb/Spice,Kailan,Local Kailan Var29
+Fruit,Bayam,Hybrid Bayam Var156
+Herb/Spice,Tea,Local Tea Var145
+Vegetable,Ginger,Local Ginger Var4
+Herb/Spice,Sugarcane,Select Sugarcane Var29
+Industrial Crop,Coffee,A1 Coffee Var100
+Herb/Spice,Terung,Select Terung Var145
+Herb/Spice,Durian,Hybrid Durian Var117
+Herb/Spice,Bayam,A1 Bayam Var50
+Industrial Crop,Terung,Premium Terung Var42
+Vegetable,Terung,Local Terung Var168
+Herb/Spice,Bayam,Premium Bayam Var180
+Vegetable,Yam,Premium Yam Var99
+Herb/Spice,Kailan,Premium Kailan Var2
+Fruit,Cili,A2 Cili Var108
+Herb/Spice,Coconut,Local Coconut Var141
+Herb/Spice,Oil Palm,Local Oil Palm Var200
+Industrial Crop,Ginger,Premium Ginger Var43
+Industrial Crop,Terung,A1 Terung Var39
+Fruit,Cili,A3 Cili Var34
+Vegetable,Terung,A2 Terung Var175
+Cash Crop,Sawi,A3 Sawi Var61
+Herb/Spice,Sugarcane,A2 Sugarcane Var55
+Fruit,Terung,Premium Terung Var77
+Fruit,Sweet Potato,A3 Sweet Potato Var41
+Fruit,Bayam,A3 Bayam Var113
+Vegetable,Cili,A1 Cili Var167
+Vegetable,Banana,Hybrid Banana Var125
+Herb/Spice,Tea,Premium Tea Var90
+Fruit,Bayam,Premium Bayam Var80
+Industrial Crop,Kangkung,Elite Kangkung Var77
+Industrial Crop,Banana,A3 Banana Var57
+Vegetable,Durian,Local Durian Var184
+Industrial Crop,Durian,A3 Durian Var146
+Herb/Spice,Tea,Select Tea Var19
+Vegetable,Sugarcane,Super Sugarcane Var54
+Vegetable,Sawi,A3 Sawi Var52
+Vegetable,Ginger,Super Ginger Var63
+Industrial Crop,Sweet Potato,Hybrid Sweet Potato Var104
+Vegetable,Oil Palm,Local Oil Palm Var72
+Fruit,Sawi,A2 Sawi Var47
+Vegetable,Sugarcane,Hybrid Sugarcane Var189
+Fruit,Cili,Hybrid Cili Var19
+Industrial Crop,Cassava,Hybrid Cassava Var98
+Fruit,Terung,Premium Terung Var196
+Fruit,Terung,Elite Terung Var153
+Herb/Spice,Sawi,Hybrid Sawi Var71
+Fruit,Turmeric,Hybrid Turmeric Var113
+Fruit,Cili,A3 Cili Var164
+Fruit,Banana,Hybrid Banana Var30
+Vegetable,Cassava,Elite Cassava Var12
+Fruit,Coconut,A3 Coconut Var144
+Fruit,Coffee,A1 Coffee Var80
+Industrial Crop,Sweet Potato,Super Sweet Potato Var22
+Cash Crop,Cili,Elite Cili Var67
+Industrial Crop,Kailan,Elite Kailan Var151
+Industrial Crop,Terung,Select Terung Var65
+Cash Crop,Sugarcane,Select Sugarcane Var55
+Fruit,Cili,Local Cili Var169
+Cash Crop,Banana,Hybrid Banana Var128
+Industrial Crop,Papaya,Premium Papaya Var40
+Fruit,Serai,A2 Serai Var169
+Vegetable,Durian,A1 Durian Var150
+Cash Crop,Durian,A2 Durian Var102
+Fruit,Pandan,Super Pandan Var150
+Cash Crop,Ginger,Elite Ginger Var1
+Herb/Spice,Sugarcane,A1 Sugarcane Var10
+Herb/Spice,Ginger,Select Ginger Var76
+Industrial Crop,Sugarcane,Local Sugarcane Var127
+Herb/Spice,Durian,Super Durian Var58
+Herb/Spice,Oil Palm,A3 Oil Palm Var179
+Fruit,Durian,Select Durian Var126
+Herb/Spice,Sawi,A2 Sawi Var182
+Herb/Spice,Serai,Select Serai Var24
+Fruit,Sawi,Local Sawi Var103
+Fruit,Turmeric,Premium Turmeric Var148
+Vegetable,Cassava,Select Cassava Var87
+Industrial Crop,Pineapple,Premium Pineapple Var20
+Fruit,Sugarcane,A2 Sugarcane Var35
+Vegetable,Oil Palm,A3 Oil Palm Var131
+Cash Crop,Mango,Elite Mango Var73
+Cash Crop,Mango,Super Mango Var47

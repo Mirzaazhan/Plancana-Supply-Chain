@@ -28,7 +28,7 @@ const page = () => {
         
         <div className='w-full h-full pb-10'>
       <ArcGISMap
-      webMapId={"0684120dd13147bba92ca897ddd65dc4"}
+      webMapId={process.env.NEXT_PUBLIC_ARCGIS_TOKEN_ID_WEBMAP || "a24b5bc059d2478e843f4c1968e47860"}
       dragable={false}
         // apiKey={process.env.NEXT_PUBLIC_ARCGIS_API_KEY || ''}
         // center = {[101.9758, 4.2105]}

@@ -73,6 +73,7 @@ class AgriculturalContract extends Contract {
         const batch = {
             batchId: batchId,
             farmer: farmer,
+            cropType: extraData.cropType || null,
             crop: crop,
             variety: extraData.variety || null,
             quantity: parseFloat(quantity),
@@ -217,16 +218,44 @@ class AgriculturalContract extends Contract {
         // Update specific records based on status
         switch (status.toUpperCase()) {
             case 'PROCESSING':
-                if (extraData.processingData) {
+                // Accept processing data either nested or directly in extraData
+                const processingData = extraData.processingData || extraData;
+                if (processingData && (processingData.processorId || processingData.processingType)) {
                     if (!batchData.processingRecords) batchData.processingRecords = [];
                     batchData.processingRecords.push({
-                        ...extraData.processingData,
+                        processorId: processingData.processorId || updatedBy,
+                        processingType: processingData.processingType || 'processing',
+                        processingLocation: processingData.processingLocation || null,
+                        latitude: processingData.latitude || null,
+                        longitude: processingData.longitude || null,
+                        inputQuantity: processingData.inputQuantity || null,
+                        outputQuantity: processingData.outputQuantity || null,
+                        wasteQuantity: processingData.wasteQuantity || null,
+                        processingTime: processingData.processingTime || null,
+                        energyUsage: processingData.energyUsage || null,
+                        waterUsage: processingData.waterUsage || null,
+                        processingDate: processingData.processingDate || timestamp,
                         timestamp: timestamp,
                         txId: txId
                     });
                 }
                 break;
-                
+
+            case 'PROCESSED':
+                // Update the most recent processing record with final quantities
+                if (batchData.processingRecords && batchData.processingRecords.length > 0) {
+                    const lastProcessingRecord = batchData.processingRecords[batchData.processingRecords.length - 1];
+                    if (extraData.outputQuantity) lastProcessingRecord.outputQuantity = extraData.outputQuantity;
+                    if (extraData.wasteQuantity) lastProcessingRecord.wasteQuantity = extraData.wasteQuantity;
+                    if (extraData.qualityGrade) lastProcessingRecord.qualityGrade = extraData.qualityGrade;
+                    if (extraData.processingLocation) lastProcessingRecord.processingLocation = extraData.processingLocation;
+                    if (extraData.latitude) lastProcessingRecord.latitude = extraData.latitude;
+                    if (extraData.longitude) lastProcessingRecord.longitude = extraData.longitude;
+                    lastProcessingRecord.completionDate = timestamp;
+                    lastProcessingRecord.completedBy = updatedBy;
+                }
+                break;
+
             case 'IN_TRANSIT':
                 if (extraData.transportData) {
                     if (!batchData.transportRecords) batchData.transportRecords = [];

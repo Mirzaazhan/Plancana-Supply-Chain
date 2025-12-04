@@ -34,6 +34,10 @@ const DistributorDashboard = () => {
   const [distributionData, setDistributionData] = useState({
     distributionType: 'regional',
     warehouseLocation: '',
+    latitude: '',
+    longitude: '',
+    quantityReceived: '',
+    quantityDistributed: '',
     distributionCost: '',
     storageCost: '',
     handlingCost: '',
@@ -116,6 +120,10 @@ const DistributorDashboard = () => {
     setDistributionData({
       distributionType: 'regional',
       warehouseLocation: '',
+      latitude: '',
+      longitude: '',
+      quantityReceived: batch?.quantity || '',
+      quantityDistributed: '',
       distributionCost: '',
       storageCost: '',
       handlingCost: '',
@@ -124,11 +132,40 @@ const DistributorDashboard = () => {
     setShowDistributionModal(true);
   };
 
+  const getCurrentLocation = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          setDistributionData(prev => ({
+            ...prev,
+            latitude: position.coords.latitude.toFixed(6),
+            longitude: position.coords.longitude.toFixed(6)
+          }));
+          toast.success('Location captured!');
+        },
+        (error) => {
+          toast.error('Unable to get current location');
+        }
+      );
+    } else {
+      toast.error('Geolocation is not supported by this browser');
+    }
+  };
+
   const submitDistributionRecord = async () => {
     try {
+      // Prepare data with warehouseCoordinates as an object
+      const payload = {
+        ...distributionData,
+        warehouseCoordinates: distributionData.latitude && distributionData.longitude ? {
+          latitude: parseFloat(distributionData.latitude),
+          longitude: parseFloat(distributionData.longitude)
+        } : null
+      };
+
       const response = await distributorService.addDistributionRecord(
         selectedBatch.batchId,
-        distributionData
+        payload
       );
 
       if (response.data.success) {
@@ -513,15 +550,86 @@ const DistributorDashboard = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Warehouse Location
+                  Warehouse Location *
                 </label>
                 <input
                   type="text"
                   value={distributionData.warehouseLocation}
                   onChange={(e) => setDistributionData({ ...distributionData, warehouseLocation: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
                   placeholder="e.g., Penang Distribution Center"
+                  required
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Latitude
+                  </label>
+                  <input
+                    type="number"
+                    step="0.000001"
+                    value={distributionData.latitude}
+                    onChange={(e) => setDistributionData({ ...distributionData, latitude: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
+                    placeholder="e.g., 5.4164"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Longitude
+                  </label>
+                  <input
+                    type="number"
+                    step="0.000001"
+                    value={distributionData.longitude}
+                    onChange={(e) => setDistributionData({ ...distributionData, longitude: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
+                    placeholder="e.g., 100.3327"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={getCurrentLocation}
+                className="flex items-center text-green-600 hover:text-green-700 text-sm font-medium"
+              >
+                <MapPin className="h-4 w-4 mr-1" />
+                Use Current Location
+              </button>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Quantity Received *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={distributionData.quantityReceived}
+                    onChange={(e) => setDistributionData({ ...distributionData, quantityReceived: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
+                    placeholder="Amount received"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">From batch: {selectedBatch?.quantity} {selectedBatch?.unit}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Quantity Distributed
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={distributionData.quantityDistributed}
+                    onChange={(e) => setDistributionData({ ...distributionData, quantityDistributed: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
+                    placeholder="Amount distributed"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Amount sent to retailers</p>
+                </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4">

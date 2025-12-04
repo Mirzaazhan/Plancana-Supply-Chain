@@ -509,7 +509,7 @@ const FarmerDashboard = () => {
           <div className="relative">
             <div className="h-80 rounded-xl mb-4 overflow-hidden cursor-pointer" onClick={() => router.push("/farmer/gis")}>
               <ArcGISMap
-                webMapId={"0684120dd13147bba92ca897ddd65dc4"}
+                webMapId={process.env.NEXT_PUBLIC_ARCGIS_TOKEN_ID_WEBMAP || "a24b5bc059d2478e843f4c1968e47860"}
                 dragable={true}
               />
             </div>

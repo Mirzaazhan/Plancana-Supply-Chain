@@ -170,6 +170,24 @@ export const distributorService = {
   transferToRetailer: (batchId: string, transferData: any) => api.post(`/distributor/transfer-to-retailer/${batchId}`, transferData)
 };
 
+// Retailer service (for retailer users)
+export const retailerService = {
+  // Get batches available for retail (RETAIL_READY status)
+  getAvailableBatches: () => api.get('/retailer/available-batches'),
+
+  // Receive batch from distributor
+  receiveBatch: (batchId: string, receiveData: any) => api.post(`/retailer/receive/${batchId}`, receiveData),
+
+  // Get batches in retailer's inventory
+  getMyBatches: () => api.get('/retailer/my-batches'),
+
+  // Mark batch as sold (close lifecycle)
+  markBatchAsSold: (batchId: string, saleData: any) => api.post(`/retailer/mark-sold/${batchId}`, saleData),
+
+  // Get sold batches
+  getSoldBatches: () => api.get('/retailer/sold-batches')
+};
+
 // Verification service (public endpoints)
 export const verificationService = {
   // Verify batch by QR scan (public)

@@ -15,7 +15,11 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
       qualityTesting: '',
       margin: ''
     },
-    notes: ''
+    notes: '',
+    // Processing completion fields (for PROCESSOR level)
+    qualityGrade: 'A',
+    outputQuantity: batch?.quantity || '',
+    wasteQuantity: '0'
   });
 
   const [calculating, setCalculating] = useState(false);
@@ -76,7 +80,11 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
       pricePerUnit: parseFloat(formData.pricePerUnit),
       totalValue: parseFloat(formData.totalValue),
       breakdown: cleanedBreakdown,
-      notes: formData.notes
+      notes: formData.notes,
+      // Include completion data for PROCESSOR level
+      qualityGrade: formData.qualityGrade,
+      outputQuantity: formData.outputQuantity,
+      wasteQuantity: formData.wasteQuantity
     };
 
     onSubmit(pricingData);
@@ -127,6 +135,67 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
+          {/* Processing Completion Section (PROCESSOR only) */}
+          {level === 'PROCESSOR' && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">
+                Processing Completion Details
+              </h3>
+
+              <div className="grid grid-cols-3 gap-4 mb-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Quality Grade *
+                  </label>
+                  <select
+                    value={formData.qualityGrade}
+                    onChange={(e) => setFormData(prev => ({ ...prev, qualityGrade: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
+                    required
+                  >
+                    <option value="A">Grade A (Premium)</option>
+                    <option value="B">Grade B (Good)</option>
+                    <option value="C">Grade C (Standard)</option>
+                    <option value="D">Grade D (Low)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Final Output Quantity *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={formData.outputQuantity}
+                    onChange={(e) => setFormData(prev => ({ ...prev, outputQuantity: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
+                    placeholder="0.00"
+                    required
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Original: {batch?.quantity} {batch?.unit}</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Waste Quantity
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={formData.wasteQuantity}
+                    onChange={(e) => setFormData(prev => ({ ...prev, wasteQuantity: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
+                    placeholder="0.00"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Loss/waste amount</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Price Per Unit */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">

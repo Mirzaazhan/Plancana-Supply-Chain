@@ -1,20 +1,49 @@
 // Agricultural form options and suggestions
+// Data sourced from malaysia_crops_450.csv
+
+// Crop type options
+export const cropTypeOptions = [
+  { value: 'fruit', label: 'Fruit' },
+  { value: 'vegetable', label: 'Vegetable' },
+  { value: 'cash-crop', label: 'Cash Crop' },
+  { value: 'herb-spice', label: 'Herb/Spice' },
+  { value: 'industrial-crop', label: 'Industrial Crop' }
+];
+
+// Organized crop data by crop type and product
 export const cropOptions = [
-  { value: 'rice', label: 'Rice', varieties: ['Basmati', 'Jasmine', 'Arborio', 'Brown Rice', 'Wild Rice'] },
-  { value: 'wheat', label: 'Wheat', varieties: ['Hard Red Winter', 'Hard Red Spring', 'Soft Red Winter', 'Durum', 'Hard White'] },
-  { value: 'corn', label: 'Corn/Maize', varieties: ['Dent Corn', 'Sweet Corn', 'Flint Corn', 'Popcorn', 'Waxy Corn'] },
-  { value: 'tomato', label: 'Tomato', varieties: ['Roma', 'Cherry', 'Beefsteak', 'Heirloom', 'Grape'] },
-  { value: 'potato', label: 'Potato', varieties: ['Russet', 'Red', 'Yukon Gold', 'Fingerling', 'Purple'] },
-  { value: 'onion', label: 'Onion', varieties: ['Yellow', 'Red', 'White', 'Sweet', 'Shallot'] },
-  { value: 'carrot', label: 'Carrot', varieties: ['Nantes', 'Imperator', 'Chantenay', 'Danvers', 'Baby'] },
-  { value: 'lettuce', label: 'Lettuce', varieties: ['Iceberg', 'Romaine', 'Butterhead', 'Leaf', 'Arugula'] },
-  { value: 'apple', label: 'Apple', varieties: ['Gala', 'Fuji', 'Granny Smith', 'Red Delicious', 'Honeycrisp'] },
-  { value: 'banana', label: 'Banana', varieties: ['Cavendish', 'Lady Finger', 'Red Banana', 'Plantain', 'Apple Banana'] },
-  { value: 'orange', label: 'Orange', varieties: ['Navel', 'Valencia', 'Blood Orange', 'Mandarin', 'Clementine'] },
-  { value: 'soybean', label: 'Soybean', varieties: ['Edamame', 'Black Soybean', 'Yellow Soybean', 'Green Soybean'] },
-  { value: 'cotton', label: 'Cotton', varieties: ['Upland Cotton', 'Pima Cotton', 'Organic Cotton', 'Colored Cotton'] },
-  { value: 'coffee', label: 'Coffee', varieties: ['Arabica', 'Robusta', 'Liberica', 'Excelsa'] },
-  { value: 'tea', label: 'Tea', varieties: ['Black Tea', 'Green Tea', 'White Tea', 'Oolong Tea'] }
+  // Fruits
+  { value: 'banana', label: 'Banana', cropType: 'fruit', varieties: ['Pisang Berangan', 'Pisang Emas', 'Pisang Cavendish', 'Pisang Raja', 'Pisang Nangka', 'Pisang Abu', 'Pisang Tanduk', 'Pisang Rastali'] },
+  { value: 'durian', label: 'Durian', cropType: 'fruit', varieties: ['D197 Musang King', 'D24', 'D101', 'Udang Merah', 'XO', 'Tekka', 'Kampung'] },
+  { value: 'mango', label: 'Mango', cropType: 'fruit', varieties: ['Harumanis', 'Chokanan', 'Sala', 'Nam Dok Mai', 'Golden Lily', 'Lurpak'] },
+  { value: 'papaya', label: 'Papaya', cropType: 'fruit', varieties: ['Eksotika I', 'Eksotika II', 'Hawaii', 'Sekaki'] },
+  { value: 'pineapple', label: 'Pineapple', cropType: 'fruit', varieties: ['MD2', 'N36', 'Moris', 'Josapine', 'Gandul', 'Sarawak'] },
+
+  // Vegetables
+  { value: 'sawi', label: 'Sawi', cropType: 'vegetable', varieties: ['Sawi Bunga', 'Sawi Hijau', 'Sawi Paichai', 'Sawi Taiwan'] },
+  { value: 'kangkung', label: 'Kangkung', cropType: 'vegetable', varieties: ['Kangkung Darat', 'Kangkung Air'] },
+  { value: 'kailan', label: 'Kailan', cropType: 'vegetable', varieties: ['Kailan Lokal', 'Kailan Taiwan'] },
+  { value: 'bayam', label: 'Bayam', cropType: 'vegetable', varieties: ['Bayam Hijau', 'Bayam Merah', 'Bayam Brazil'] },
+  { value: 'cili', label: 'Cili', cropType: 'vegetable', varieties: ['Cili Merah', 'Cili Hijau', 'Cili Padi', 'Cili Bara'] },
+  { value: 'terung', label: 'Terung', cropType: 'vegetable', varieties: ['Terung Ungu', 'Terung Putih', 'Terung Panjang', 'Terung Bulat'] },
+
+  // Cash Crops
+  { value: 'cassava', label: 'Cassava', cropType: 'cash-crop', varieties: ['Ubi Kayu Putih', 'Ubi Kayu Kuning', 'Ubi Kayu Merah'] },
+  { value: 'sweet-potato', label: 'Sweet Potato', cropType: 'cash-crop', varieties: ['Keledek Oren', 'Keledek Ungu', 'Keledek Putih'] },
+  { value: 'yam', label: 'Yam', cropType: 'cash-crop', varieties: ['Keladi Cina', 'Keladi Kampung', 'Keladi Hitam'] },
+  { value: 'sugarcane', label: 'Sugarcane', cropType: 'cash-crop', varieties: ['Tebu Hitam', 'Tebu Kuning', 'Tebu Cina'] },
+
+  // Herbs & Spices
+  { value: 'ginger', label: 'Ginger', cropType: 'herb-spice', varieties: ['Halia Bara', 'Halia Bentong', 'Halia Tua', 'Halia Merah'] },
+  { value: 'turmeric', label: 'Turmeric', cropType: 'herb-spice', varieties: ['Kunyit Hidup', 'Kunyit Putih', 'Kunyit Hitam'] },
+  { value: 'pandan', label: 'Pandan', cropType: 'herb-spice', varieties: ['Pandan Wangi', 'Pandan Serani'] },
+  { value: 'serai', label: 'Serai', cropType: 'herb-spice', varieties: ['Serai Wangi', 'Serai Kampung'] },
+
+  // Industrial Crops
+  { value: 'coconut', label: 'Coconut', cropType: 'industrial-crop', varieties: ['Matag', 'Malayan Tall', 'Malayan Dwarf', 'Kelapa Pandan'] },
+  { value: 'coffee', label: 'Coffee', cropType: 'industrial-crop', varieties: ['Liberica', 'Robusta', 'Arabica'] },
+  { value: 'tea', label: 'Tea', cropType: 'industrial-crop', varieties: ['Assamica', 'Sinensis'] },
+  { value: 'oil-palm', label: 'Oil Palm', cropType: 'industrial-crop', varieties: ['DxP Hybrid', 'Tenera'] }
 ];
 
 export const seedsSourceOptions = [

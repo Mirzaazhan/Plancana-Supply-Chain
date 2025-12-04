@@ -9,6 +9,7 @@ import AutocompleteInput from '../ui/AutocompleteInput';
 import MultiSelectInput from '../ui/MultiSelectInput';
 import LocationInput from '../ui/LocationInput';
 import {
+  cropTypeOptions,
   cropOptions,
   seedsSourceOptions,
   fertilizerOptions,
@@ -29,10 +30,12 @@ const BatchRegistration = () => {
   const [qrCode, setQrCode] = useState(null);
   const [batchId, setBatchId] = useState('');
   const [availableVarieties, setAvailableVarieties] = useState([]);
+  const [filteredCropOptions, setFilteredCropOptions] = useState([]);
 
   const [formData, setFormData] = useState({
     // Basic Info
     farmer: '',
+    cropType: '',
     crop: '',
     quantity: '',
     location: '',
@@ -67,6 +70,7 @@ const BatchRegistration = () => {
     // Certifications & Compliance
     certifications: [],
     customCertification: '',
+    myGapCertNumber: '',
 
     // Farm Details (Step 2)
     soilType: '',
@@ -102,7 +106,7 @@ const BatchRegistration = () => {
 
   const handleInputChange = (field, value) => {
     if (formData[field] === value) {
-      return; 
+      return;
     }
     setFormData(prev => {
       const updated = {
@@ -119,6 +123,20 @@ const BatchRegistration = () => {
 
       return updated;
     });
+
+    // Update filtered crop options when crop type changes
+    if (field === 'cropType') {
+      const filtered = cropOptions.filter(crop => crop.cropType === value);
+      setFilteredCropOptions(filtered);
+      // Clear crop and variety when crop type changes
+      setFormData(prev => ({
+        ...prev,
+        cropType: value,
+        crop: '',
+        variety: ''
+      }));
+      setAvailableVarieties([]);
+    }
 
     // Update available varieties when crop changes
     if (field === 'crop') {
@@ -171,7 +189,7 @@ const BatchRegistration = () => {
   const validateStep = (step) => {
     switch (step) {
       case 0: // Basic Info
-        return formData.farmer && formData.crop && formData.quantity && formData.location;
+        return formData.farmer && formData.cropType && formData.crop && formData.quantity && formData.location;
       case 1: // Farm Details (optional step)
         return true; // All fields in this step are optional
       case 2: // Verification
@@ -246,12 +264,29 @@ const BatchRegistration = () => {
                     />
                   </div>
 
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Crop Type *
+                    </label>
+                    <select
+                      value={formData.cropType}
+                      onChange={(e) => handleInputChange('cropType', e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                      required
+                    >
+                      <option value="">Select crop type</option>
+                      {cropTypeOptions.map(type => (
+                        <option key={type.value} value={type.value}>{type.label}</option>
+                      ))}
+                    </select>
+                  </div>
+
                   <AutocompleteInput
                     label="Product Name"
                     value={formData.crop}
                     onChange={(value) => handleInputChange('crop', value)}
-                    options={cropOptions.map(crop => crop.label)}
-                    placeholder="Search for crop type..."
+                    options={filteredCropOptions.length > 0 ? filteredCropOptions.map(crop => crop.label) : cropOptions.map(crop => crop.label)}
+                    placeholder={formData.cropType ? "Search for product..." : "Select crop type first"}
                     required={true}
                   />
 
@@ -557,6 +592,21 @@ const BatchRegistration = () => {
                     required={false}
                   />
 
+                  {formData.certifications.includes('MyGAP (Malaysian Good Agricultural Practice)') && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        myGAP Certificate Number / Registration Number
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Enter myGAP certificate number (No. Pensijilan myGAP)"
+                        value={formData.myGapCertNumber}
+                        onChange={(e) => handleInputChange('myGapCertNumber', e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                      />
+                    </div>
+                  )}
+
                   {formData.certifications.includes('Other (specify)') && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -754,6 +804,12 @@ const BatchRegistration = () => {
                     <span className="ml-2 font-semibold text-gray-900">{batchId || 'Not generated'}</span>
                   </div>
                   <div className="py-2">
+                    <span className="text-gray-800 font-medium">Crop Type:</span>
+                    <span className="ml-2 font-semibold text-gray-900">
+                      {formData.cropType ? cropTypeOptions.find(t => t.value === formData.cropType)?.label : 'Not specified'}
+                    </span>
+                  </div>
+                  <div className="py-2">
                     <span className="text-gray-800 font-medium">Product:</span>
                     <span className="ml-2 font-semibold text-gray-900">{formData.crop || 'Not specified'}</span>
                   </div>
@@ -833,6 +889,12 @@ const BatchRegistration = () => {
                         ))}
                       </div>
                     </div>
+                    {formData.myGapCertNumber && (
+                      <div className="py-1 mt-2">
+                        <span className="text-gray-800 font-medium">myGAP Certificate Number:</span>
+                        <span className="ml-2 text-gray-900">{formData.myGapCertNumber}</span>
+                      </div>
+                    )}
                     {formData.customCertification && (
                       <div className="py-1 mt-2">
                         <span className="text-gray-800 font-medium">Custom Certification:</span>
