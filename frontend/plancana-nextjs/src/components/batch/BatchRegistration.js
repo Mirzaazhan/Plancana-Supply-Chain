@@ -27,7 +27,9 @@ const BatchRegistration = () => {
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(0);
   const [loading, setLoading] = useState(false);
-  const [qrCode, setQrCode] = useState(null);
+  const [qrCode, setQrCode] = useState(null); // Legacy - verification QR
+  const [qrCodes, setQrCodes] = useState({ verification: null, processing: null });
+  const [qrUrls, setQrUrls] = useState({ verification: '', processing: '' });
   const [batchId, setBatchId] = useState('');
   const [availableVarieties, setAvailableVarieties] = useState([]);
   const [filteredCropOptions, setFilteredCropOptions] = useState([]);
@@ -214,11 +216,26 @@ const BatchRegistration = () => {
   const handleSubmit = async () => {
     try {
       setLoading(true);
-      
+
       const response = await batchService.createBatch(formData);
-      
+
       if (response.data.success) {
+        // Handle new QR codes structure
+        if (response.data.qrCodes) {
+          setQrCodes({
+            verification: response.data.qrCodes.verification,
+            processing: response.data.qrCodes.processing
+          });
+        }
+        // Backward compatibility
         setQrCode(response.data.qrCode);
+
+        // Store URLs
+        setQrUrls({
+          verification: response.data.verificationUrl || '',
+          processing: response.data.processingUrl || ''
+        });
+
         nextStep(); // Move to confirmation step
         toast.success('Batch registered successfully on blockchain!');
       } else {
@@ -232,13 +249,19 @@ const BatchRegistration = () => {
     }
   };
 
-  const downloadQRCode = () => {
-    if (qrCode) {
+  const downloadQRCode = (type = 'verification') => {
+    const qrData = type === 'verification' ? qrCodes.verification : qrCodes.processing;
+    if (qrData) {
       const link = document.createElement('a');
-      link.download = `${batchId}-qr-code.png`;
-      link.href = qrCode;
+      link.download = `${batchId}-${type}-qr.png`;
+      link.href = qrData;
       link.click();
     }
+  };
+
+  const downloadBothQRCodes = () => {
+    downloadQRCode('verification');
+    setTimeout(() => downloadQRCode('processing'), 100);
   };
 
   const renderStepContent = () => {
@@ -941,8 +964,8 @@ const BatchRegistration = () => {
 
       case 3: // Confirmation
         return (
-          <div className="max-w-2xl mx-auto text-center">
-            <div className="mb-6">
+          <div className="max-w-4xl mx-auto">
+            <div className="text-center mb-8">
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                 <svg className="w-8 h-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -951,41 +974,136 @@ const BatchRegistration = () => {
               <h3 className="text-xl font-semibold text-gray-900 mb-2">
                 Batch Registered Successfully!
               </h3>
-              <p className="text-gray-600">
+              <p className="text-gray-600 mb-1">
                 Your batch has been securely recorded on the blockchain.
+              </p>
+              <p className="text-sm font-semibold text-blue-600">
+                Batch ID: {batchId}
               </p>
             </div>
 
-            {qrCode && (
+            {(qrCodes.verification || qrCodes.processing) && (
               <div className="bg-white rounded-lg border-2 border-gray-200 p-6 mb-6">
-                <h4 className="font-medium text-gray-900 mb-4">Batch QR Code</h4>
-                <div className="flex justify-center mb-4">
-                  <img src={qrCode} alt="Batch QR Code" className="w-48 h-48" />
+                <div className="flex items-center justify-between mb-6">
+                  <h4 className="font-semibold text-gray-900 text-lg">QR Codes Generated</h4>
+                  <button
+                    onClick={downloadBothQRCodes}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors duration-200 flex items-center space-x-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    <span>Download Both</span>
+                  </button>
                 </div>
-                <button
-                  onClick={downloadQRCode}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition-colors duration-200 flex items-center space-x-2 mx-auto"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-4-4m4 4l4-4m-4-4V4a2 2 0 00-2-2h-8a2 2 0 00-2 2v16a2 2 0 002 2h8a2 2 0 002-2v-2" />
-                  </svg>
-                  <span>Download QR Code</span>
-                </button>
+
+                {/* Two QR Codes Side by Side */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                  {/* Verification QR Code */}
+                  {qrCodes.verification && (
+                    <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-6 border-2 border-blue-200">
+                      <div className="flex items-center justify-center mb-3">
+                        <div className="bg-blue-600 rounded-full p-2 mr-2">
+                          <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                          </svg>
+                        </div>
+                        <h5 className="font-semibold text-blue-900 text-lg">Verification QR</h5>
+                      </div>
+                      <p className="text-sm text-blue-800 text-center mb-4 font-medium">
+                        For Consumers & Public Verification
+                      </p>
+                      <div className="flex justify-center mb-4 bg-white p-4 rounded-lg">
+                        <img src={qrCodes.verification} alt="Verification QR Code" className="w-48 h-48" />
+                      </div>
+                      <button
+                        onClick={() => downloadQRCode('verification')}
+                        className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition-colors duration-200 flex items-center justify-center space-x-2"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        <span>Download</span>
+                      </button>
+                      <p className="text-xs text-blue-700 text-center mt-3">
+                        Share this QR code on product packaging for consumer verification
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Processing QR Code */}
+                  {qrCodes.processing && (
+                    <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-6 border-2 border-green-200">
+                      <div className="flex items-center justify-center mb-3">
+                        <div className="bg-green-600 rounded-full p-2 mr-2">
+                          <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                          </svg>
+                        </div>
+                        <h5 className="font-semibold text-green-900 text-lg">Processing QR</h5>
+                      </div>
+                      <p className="text-sm text-green-800 text-center mb-4 font-medium">
+                        For Supply Chain Partners
+                      </p>
+                      <div className="flex justify-center mb-4 bg-white p-4 rounded-lg">
+                        <img src={qrCodes.processing} alt="Processing QR Code" className="w-48 h-48" />
+                      </div>
+                      <button
+                        onClick={() => downloadQRCode('processing')}
+                        className="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md font-medium transition-colors duration-200 flex items-center justify-center space-x-2"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        <span>Download</span>
+                      </button>
+                      <p className="text-xs text-green-700 text-center mt-3">
+                        Attach this QR to batch packaging for processors/distributors/retailers
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Information Box */}
+                <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-4">
+                  <div className="flex items-start space-x-3">
+                    <div className="flex-shrink-0">
+                      <svg className="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <div className="flex-1">
+                      <h6 className="font-semibold text-amber-900 mb-2">How to Use These QR Codes:</h6>
+                      <ul className="text-sm text-amber-800 space-y-1 list-disc list-inside">
+                        <li><strong>Verification QR:</strong> Print and attach to final products for consumers to verify authenticity and trace origin</li>
+                        <li><strong>Processing QR:</strong> Print and attach to batch containers for supply chain partners to scan and process directly</li>
+                        <li>Partners scanning the Processing QR will be directed to the appropriate form based on their role</li>
+                        <li>Both QR codes can be scanned with any standard QR code scanner app</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
-            <div className="flex space-x-4 justify-center">
+            <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4 justify-center">
               <button
                 onClick={() => router.push('/farmer/dashboard')}
-                className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-md font-medium transition-colors duration-200"
+                className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-md font-medium transition-colors duration-200 flex items-center justify-center space-x-2"
               >
-                Back to Dashboard
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                </svg>
+                <span>Back to Dashboard</span>
               </button>
               <button
                 onClick={() => window.location.reload()}
-                className="border border-gray-300 hover:bg-gray-50 text-gray-700 px-6 py-2 rounded-md font-medium transition-colors duration-200"
+                className="border-2 border-gray-300 hover:bg-gray-50 text-gray-700 px-6 py-3 rounded-md font-medium transition-colors duration-200 flex items-center justify-center space-x-2"
               >
-                Register Another Batch
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                <span>Register Another Batch</span>
               </button>
             </div>
           </div>

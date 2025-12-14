@@ -8,8 +8,8 @@ import { toast } from 'react-hot-toast';
 import Image from 'next/image';
 import { GoogleButton } from "@/app/actions/google_SignIn"
 
-const LoginForm = () => {
-  console.log('🚀 LoginForm component loaded!');
+const LoginForm = ({ returnUrl = null }) => {
+  console.log('🚀 LoginForm component loaded with returnUrl:', returnUrl);
 
   const [formData, setFormData] = useState({
     email: '',
@@ -43,10 +43,15 @@ const LoginForm = () => {
       if (result.success) {
         toast.success('Login successful!');
 
-        // Redirect based on user role
-        const role = result.user.role.toLowerCase();
-        console.log('🔍 Redirecting to:', `/${role}/dashboard`);
-        router.push(`/${role}/dashboard`);
+        // Redirect based on returnUrl or user role
+        if (returnUrl) {
+          console.log('🔍 Redirecting to returnUrl:', returnUrl);
+          router.push(returnUrl);
+        } else {
+          const role = result.user.role.toLowerCase();
+          console.log('🔍 Redirecting to dashboard:', `/${role}/dashboard`);
+          router.push(`/${role}/dashboard`);
+        }
       } else {
         console.error('❌ Login failed:', result.error);
         toast.error(result.error);

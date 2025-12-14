@@ -1,7 +1,7 @@
 {
   "name": "agricultural-contract",
-  "version": "2.4.1",
-  "description": "Agricultural supply chain smart contract with batch transfer, transport tracking, and distribution",
+  "version": "2.4.2",
+  "description": "Agricultural supply chain smart contract with batch transfer, transport tracking, distribution, and crop type classification",
   "main": "index.js",
   "scripts": {
     "start": "fabric-chaincode-node start"

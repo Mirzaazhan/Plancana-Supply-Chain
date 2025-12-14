@@ -24,7 +24,9 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
-  const [qrCode, setQrCode] = useState(null);
+  const [qrCode, setQrCode] = useState(null); // Legacy - verification QR
+  const [qrCodes, setQrCodes] = useState({ verification: null, processing: null });
+  const [qrUrls, setQrUrls] = useState({ verification: '', processing: '' });
   const [updating, setUpdating] = useState(false);
 
   useEffect(() => {
@@ -68,26 +70,52 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
 
       if (response.ok) {
         const data = await response.json();
+        // Handle new dual QR code structure
+        if (data.qrCodes) {
+          setQrCodes({
+            verification: data.qrCodes.verification,
+            processing: data.qrCodes.processing
+          });
+        }
+        // Backward compatibility
         setQrCode(data.qrCode);
+
+        // Store URLs
+        setQrUrls({
+          verification: data.verificationUrl || '',
+          processing: data.processingUrl || ''
+        });
       }
     } catch (err) {
       console.error('Failed to fetch QR code:', err);
     }
   };
 
-  const downloadQRCode = async () => {
-    if (!qrCode) {
+  const downloadQRCode = async (type = 'verification') => {
+    // Fetch QR codes if not already loaded
+    if (!qrCodes.verification && !qrCodes.processing) {
       await fetchQRCode();
     }
-    
-    if (qrCode) {
+
+    const qrData = type === 'verification' ? qrCodes.verification : qrCodes.processing;
+    if (qrData) {
       const link = document.createElement('a');
-      link.href = qrCode;
-      link.download = `QR_${batchId}.png`;
+      link.href = qrData;
+      link.download = `${batchId}-${type}-qr.png`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
     }
+  };
+
+  const downloadBothQRCodes = async () => {
+    // Fetch QR codes if not already loaded
+    if (!qrCodes.verification && !qrCodes.processing) {
+      await fetchQRCode();
+    }
+
+    downloadQRCode('verification');
+    setTimeout(() => downloadQRCode('processing'), 100);
   };
 
   const updateBatchStatus = async (newStatus) => {
@@ -276,11 +304,11 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
               
               {/* QR Code Button */}
               <button
-                onClick={downloadQRCode}
+                onClick={downloadBothQRCodes}
                 className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
               >
                 <Download className="w-4 h-4 mr-2" />
-                QR Code
+                Download QR Codes
               </button>
             </div>
           </div>
@@ -510,49 +538,152 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
         )}
 
         {activeTab === 'qr' && (
-          <div className="max-w-2xl mx-auto">
-            <div className="bg-white rounded-lg shadow p-8 text-center">
-              <QrCode className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 mb-4">QR Code for Batch {batch.batchId}</h3>
-              
-              {qrCode ? (
-                <div className="space-y-4">
-                  <img 
-                    src={qrCode} 
-                    alt={`QR Code for ${batch.batchId}`}
-                    className="mx-auto border border-gray-200 rounded-lg"
-                    style={{ maxWidth: '256px', maxHeight: '256px' }}
-                  />
-                  <div className="flex justify-center space-x-4">
+          <div className="max-w-5xl mx-auto">
+            <div className="bg-white rounded-lg shadow p-8">
+              <div className="text-center mb-8">
+                <QrCode className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-2xl font-semibold text-gray-900 mb-2">QR Codes for Batch {batch.batchId}</h3>
+                <p className="text-gray-600">Download and print these QR codes for verification and processing</p>
+              </div>
+
+              {(qrCodes.verification || qrCodes.processing) ? (
+                <div>
+                  <div className="flex items-center justify-between mb-6">
+                    <h4 className="font-semibold text-gray-900 text-lg">Available QR Codes</h4>
                     <button
-                      onClick={downloadQRCode}
-                      className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                      onClick={downloadBothQRCodes}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors duration-200 flex items-center space-x-2"
                     >
-                      <Download className="w-4 h-4 inline mr-2" />
-                      Download PNG
+                      <Download className="w-4 h-4" />
+                      <span>Download Both</span>
                     </button>
+                  </div>
+
+                  {/* Two QR Codes Side by Side */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                    {/* Verification QR Code */}
+                    {qrCodes.verification && (
+                      <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-6 border-2 border-blue-200">
+                        <div className="flex items-center justify-center mb-3">
+                          <div className="bg-blue-600 rounded-full p-2 mr-2">
+                            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                          </div>
+                          <h5 className="font-semibold text-blue-900 text-lg">Verification QR</h5>
+                        </div>
+                        <p className="text-sm text-blue-800 text-center mb-4 font-medium">
+                          For Consumers & Public Verification
+                        </p>
+                        <div className="flex justify-center mb-4 bg-white p-4 rounded-lg">
+                          <img src={qrCodes.verification} alt="Verification QR Code" className="w-48 h-48" />
+                        </div>
+                        <button
+                          onClick={() => downloadQRCode('verification')}
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium transition-colors duration-200 flex items-center justify-center space-x-2"
+                        >
+                          <Download className="w-4 h-4" />
+                          <span>Download</span>
+                        </button>
+                        <p className="text-xs text-blue-700 text-center mt-3">
+                          Share this QR code on product packaging for consumer verification
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Processing QR Code */}
+                    {qrCodes.processing && (
+                      <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-6 border-2 border-green-200">
+                        <div className="flex items-center justify-center mb-3">
+                          <div className="bg-green-600 rounded-full p-2 mr-2">
+                            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                            </svg>
+                          </div>
+                          <h5 className="font-semibold text-green-900 text-lg">Processing QR</h5>
+                        </div>
+                        <p className="text-sm text-green-800 text-center mb-4 font-medium">
+                          For Supply Chain Partners
+                        </p>
+                        <div className="flex justify-center mb-4 bg-white p-4 rounded-lg">
+                          <img src={qrCodes.processing} alt="Processing QR Code" className="w-48 h-48" />
+                        </div>
+                        <button
+                          onClick={() => downloadQRCode('processing')}
+                          className="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md font-medium transition-colors duration-200 flex items-center justify-center space-x-2"
+                        >
+                          <Download className="w-4 h-4" />
+                          <span>Download</span>
+                        </button>
+                        <p className="text-xs text-green-700 text-center mt-3">
+                          Attach this QR to batch packaging for processors/distributors/retailers
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Information Box */}
+                  <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-4">
+                    <div className="flex items-start space-x-3">
+                      <div className="flex-shrink-0">
+                        <svg className="w-6 h-6 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                      <div className="flex-1">
+                        <h6 className="font-semibold text-amber-900 mb-2">How to Use These QR Codes:</h6>
+                        <ul className="text-sm text-amber-800 space-y-1 list-disc list-inside">
+                          <li><strong>Verification QR:</strong> Print and attach to final products for consumers to verify authenticity and trace origin</li>
+                          <li><strong>Processing QR:</strong> Print and attach to batch containers for supply chain partners to scan and process directly</li>
+                          <li>Partners scanning the Processing QR will be directed to the appropriate form based on their role</li>
+                          <li>Both QR codes can be scanned with any standard QR code scanner app</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* URLs Section */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                    <div className="p-4 bg-gray-50 rounded-lg">
+                      <h4 className="text-sm font-medium text-gray-900 mb-2 flex items-center">
+                        <svg className="w-4 h-4 mr-2 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                        </svg>
+                        Verification URL
+                      </h4>
+                      <p className="text-xs text-gray-600 break-all font-mono bg-white p-2 rounded border border-gray-200">
+                        {qrUrls.verification || `${window.location.origin}/verify/${batch.batchId}`}
+                      </p>
+                    </div>
+                    <div className="p-4 bg-gray-50 rounded-lg">
+                      <h4 className="text-sm font-medium text-gray-900 mb-2 flex items-center">
+                        <svg className="w-4 h-4 mr-2 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                        </svg>
+                        Processing URL
+                      </h4>
+                      <p className="text-xs text-gray-600 break-all font-mono bg-white p-2 rounded border border-gray-200">
+                        {qrUrls.processing || `${window.location.origin}/process-batch/${batch.batchId}`}
+                      </p>
+                    </div>
                   </div>
                 </div>
               ) : (
-                <div className="space-y-4">
-                  <div className="bg-gray-100 rounded-lg p-8">
-                    <p className="text-gray-500">QR Code not loaded</p>
+                <div className="text-center space-y-4">
+                  <div className="bg-gray-100 rounded-lg p-12">
+                    <QrCode className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-500 text-lg">QR Codes not loaded</p>
+                    <p className="text-gray-400 text-sm mt-2">Click the button below to generate QR codes</p>
                   </div>
                   <button
                     onClick={fetchQRCode}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                    className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center justify-center space-x-2 mx-auto"
                   >
-                    Generate QR Code
+                    <QrCode className="w-5 h-5" />
+                    <span>Generate QR Codes</span>
                   </button>
                 </div>
               )}
-              
-              <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-                <h4 className="text-sm font-medium text-gray-900 mb-2">Verification URL</h4>
-                <p className="text-xs text-gray-600 break-all">
-                  {`${window.location.origin}/verify/${batch.batchId}`}
-                </p>
-              </div>
             </div>
           </div>
         )}

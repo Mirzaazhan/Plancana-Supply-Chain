@@ -365,6 +365,36 @@ class BlockchainService {
         }
     }
 
+    async generateProcessingQRCode(batchId) {
+        const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
+        try {
+            const qrData = {
+                batchId: batchId,
+                processingUrl: `${FRONTEND_URL}/process-batch/${batchId}`,
+                timestamp: new Date().toISOString(),
+                network: 'agricultural-blockchain',
+                type: 'processing'
+            };
+
+            const qrCodeData = await QRCode.toDataURL(JSON.stringify(qrData), {
+                errorCorrectionLevel: 'M',
+                type: 'image/png',
+                quality: 0.92,
+                margin: 1,
+                width: 256,
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF'
+                }
+            });
+
+            return qrCodeData;
+        } catch (error) {
+            console.error('Processing QR code generation failed:', error);
+            throw error;
+        }
+    }
+
     async submitTransactionWithRetry(contract, functionName, args, retries = 3) {
         for (let i = 0; i < retries; i++) {
             try {
@@ -1220,8 +1250,9 @@ app.post('/api/batch/create', authenticate, authorize(['FARMER']), async (req, r
                 }
             });
 
-            // STEP 5: Generate QR code
-            const qrCode = await blockchainService.generateQRCode(batchId);
+            // STEP 5: Generate BOTH QR codes (verification + processing)
+            const verificationQR = await blockchainService.generateQRCode(batchId);
+            const processingQR = await blockchainService.generateProcessingQRCode(batchId);
 
             await gateway.disconnect();
             // STEP 6: Execute PostGIS logic to update FarmLocation
@@ -1268,9 +1299,15 @@ app.post('/api/batch/create', authenticate, authorize(['FARMER']), async (req, r
                 batchId: batchId,
                 batchData: JSON.parse(result.toString()),
                 databaseRecord: updatedBatch,
-                qrCode: qrCode,
+                qrCodes: {
+                    verification: verificationQR,
+                    processing: processingQR
+                },
+                // Keep backward compatibility with old 'qrCode' field
+                qrCode: verificationQR,
                 verificationUrl: `${FRONTEND_URL}/verify/${batchId}`,
-                message: 'Crop batch created successfully on blockchain and database',
+                processingUrl: `${FRONTEND_URL}/process-batch/${batchId}`,
+                message: 'Crop batch created successfully on blockchain and database with both QR codes',
                 dataIntegrity: {
                     blockchainHash: result.toString(),
                     databaseHash: dataHash
@@ -1380,6 +1417,141 @@ app.get('/api/farmer/my-batches', authenticate, authorize(['FARMER']), async (re
         res.status(500).json({
             success: false,
             error: 'Internal server error'
+        });
+    }
+});
+
+// Validate batch processing access (for mobile QR scanning)
+app.get('/api/batch/validate-access/:batchId', authenticate, async (req, res) => {
+    try {
+        const { batchId } = req.params;
+        const user = req.user;
+
+        // Fetch batch from database
+        const batch = await prisma.batch.findUnique({
+            where: { batchId: batchId },
+            select: {
+                id: true,
+                batchId: true,
+                status: true,
+                farmerId: true,
+                productType: true,
+                quantity: true,
+                farmer: {
+                    include: {
+                        user: {
+                            select: { username: true, email: true }
+                        }
+                    }
+                }
+            }
+        });
+
+        if (!batch) {
+            return res.status(404).json({
+                success: false,
+                canProcess: false,
+                reason: 'Batch not found',
+                error: `Batch ${batchId} does not exist`
+            });
+        }
+
+        // Define access matrix based on role and batch status
+        const ACCESS_MATRIX = {
+            PROCESSOR: {
+                REGISTERED: {
+                    canProcess: true,
+                    action: 'PROCESS',
+                    redirectTo: `/processor/process/${batchId}`,
+                    message: 'You can start processing this batch'
+                }
+            },
+            DISTRIBUTOR: {
+                PROCESSED: {
+                    canProcess: true,
+                    action: 'RECEIVE',
+                    redirectTo: `/distributor/receive/${batchId}`,
+                    message: 'You can receive this batch from processor'
+                },
+                IN_DISTRIBUTION: {
+                    canProcess: true,
+                    action: 'DISTRIBUTE',
+                    redirectTo: `/distributor/distribute/${batchId}`,
+                    message: 'You can add distribution records for this batch'
+                }
+            },
+            RETAILER: {
+                RETAIL_READY: {
+                    canProcess: true,
+                    action: 'RETAIL',
+                    redirectTo: `/retailer/receive/${batchId}`,
+                    message: 'You can receive this batch for retail'
+                },
+                IN_RETAIL: {
+                    canProcess: true,
+                    action: 'SET_PRICE',
+                    redirectTo: `/retailer/price/${batchId}`,
+                    message: 'You can set retail pricing for this batch'
+                }
+            }
+        };
+
+        // Check if user role has access to this batch status
+        const roleAccess = ACCESS_MATRIX[user.role];
+
+        if (!roleAccess) {
+            return res.status(403).json({
+                success: false,
+                canProcess: false,
+                reason: 'Invalid role',
+                error: `Role ${user.role} cannot process batches`
+            });
+        }
+
+        const statusAccess = roleAccess[batch.status];
+
+        if (!statusAccess) {
+            // Find what status this role CAN process
+            const validStatuses = Object.keys(roleAccess);
+
+            return res.status(403).json({
+                success: false,
+                canProcess: false,
+                reason: 'Invalid batch status for your role',
+                error: `As a ${user.role}, you can only process batches with status: ${validStatuses.join(', ')}. This batch has status: ${batch.status}`,
+                currentStatus: batch.status,
+                validStatuses: validStatuses,
+                batchInfo: {
+                    batchId: batch.batchId,
+                    product: batch.productType,
+                    farmer: batch.farmer.user.username
+                }
+            });
+        }
+
+        // User has access!
+        return res.json({
+            success: true,
+            canProcess: true,
+            action: statusAccess.action,
+            redirectTo: statusAccess.redirectTo,
+            message: statusAccess.message,
+            batchInfo: {
+                batchId: batch.batchId,
+                status: batch.status,
+                product: batch.productType,
+                quantity: batch.quantity,
+                farmer: batch.farmer.user.username
+            }
+        });
+
+    } catch (error) {
+        console.error('Error validating batch access:', error);
+        res.status(500).json({
+            success: false,
+            canProcess: false,
+            reason: 'Server error',
+            error: 'Failed to validate batch access'
         });
     }
 });
@@ -2229,14 +2401,20 @@ app.get('/api/qr/:batchId', async (req, res) => {
            });
        }
 
-       // Generate QR code
-       const qrCode = await blockchainService.generateQRCode(batchId);
+       // Generate BOTH QR codes
+       const verificationQR = await blockchainService.generateQRCode(batchId);
+       const processingQR = await blockchainService.generateProcessingQRCode(batchId);
 
        res.json({
            success: true,
            batchId: batchId,
-           qrCode: qrCode,
+           qrCode: verificationQR, // Backward compatibility
+           qrCodes: {
+               verification: verificationQR,
+               processing: processingQR
+           },
            verificationUrl: `${FRONTEND_URL}/verify/${batchId}`,
+           processingUrl: `${FRONTEND_URL}/process-batch/${batchId}`,
            batchStatus: dbBatch?.status || 'unknown',
            sources: {
                database: !!dbBatch,
