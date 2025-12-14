@@ -236,12 +236,19 @@ model FarmLocation {
   farmName          String
   latitude          Float
   longitude         Float
+  location          String?
   elevation         Float?
   farmBoundary      Json?    // GeoJSON polygon
   soilType          String?
   soilPh            Float?
   isActive          Boolean  @default(true)
   geom_point Unsupported("geography(Point, 4326)")?
+
+  //weather data
+  temperature       Float?
+  humidity          Float?
+  weather_main      String?
+  weather_desc      String?
   
   farmer            FarmerProfile @relation(fields: [farmerId], references: [id])
   batches           Batch[]
@@ -301,6 +308,10 @@ model Batch {
   qualityTests      QualityTest[]
   transactions      Transaction[]
   weatherData       WeatherData[]
+<<<<<<< Updated upstream
+=======
+  batchLocationHistory BatchLocationHistory[]
+>>>>>>> Stashed changes
   
   @@map("batches")
 }
@@ -352,7 +363,22 @@ model ProcessingRecord {
   energyUsage       Float?   // kWh
   waterUsage        Float?   // liters
   blockchainHash    String?
+<<<<<<< Updated upstream
   
+=======
+
+  // Location tracking at processing level
+  processingLocation String? // Address or location name
+  latitude          Float?   // Processing location coordinates
+  longitude         Float?
+
+  //weather data
+  temperature       Float?
+  humidity          Float?
+  weather_main      String?
+  weather_desc      String?
+
+>>>>>>> Stashed changes
   batch             Batch @relation(fields: [batchId], references: [id])
   processor         ProcessorProfile @relation(fields: [processorId], references: [id])
   facility          ProcessingFacility @relation(fields: [facilityId], references: [id])
@@ -432,6 +458,128 @@ model Transaction {
   @@map("transactions")
 }
 
+<<<<<<< Updated upstream
+=======
+model BatchTransfer {
+  id                String   @id @default(cuid())
+  batchId           String
+
+  // Transfer parties
+  fromActorId       String
+  fromActorRole     UserRole
+  toActorId         String
+  toActorRole       UserRole
+
+  // Transfer details
+  transferType      String   @default("OWNERSHIP_TRANSFER")
+  transferDate      DateTime @default(now())
+
+  // Location & conditions
+  transferLocation  String?
+  latitude          Float?
+  longitude         Float?
+  conditions        Json?    // Storage/transport conditions
+
+  //weather data
+  temperature       Float?
+  humidity          Float?
+  weather_main      String?
+  weather_desc      String?
+
+  // Documentation
+  documents         String[] // URLs to transfer documents
+  signature         String?  // Digital signature
+  notes             String?
+
+  // Status tracking
+  status            TransferStatus @default(PENDING)
+  statusBefore      BatchStatus
+  statusAfter       BatchStatus
+
+  // Blockchain reference
+  blockchainTxId    String?
+  blockchainHash    String?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // No relation - batch might only exist on blockchain (hybrid storage)
+  // Use batchId as a string reference only
+
+  @@map("batch_transfers")
+}
+
+enum TransferStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+model DistributionRecord {
+  id                  String   @id @default(cuid())
+  batchId             String
+  distributorId       String
+
+  // Distribution details
+  distributionType    String?  // local, regional, national, export
+  warehouseLocation   String?
+  warehouseLat        Float?
+  warehouseLng        Float?
+
+  // Storage conditions
+  storageConditions   String?
+  temperatureControl  String?
+  humidity            Float?
+  temperature       Float?
+  weather_main      String?
+  weather_desc      String?
+
+  // Logistics
+  vehicleType         String?
+  vehicleId           String?
+  driverName          String?
+  route               Json?    // Array of route points
+
+  // Quantities
+  quantityReceived    Float?
+  quantityDistributed Float?
+  unit                String   @default("kg")
+
+  // Costs
+  distributionCost    Float?
+  storageCost         Float?
+  handlingCost        Float?
+  currency            String   @default("MYR")
+
+  // Quality check
+  qualityCheckPassed  Boolean?
+  qualityNotes        String?
+
+  // Documentation
+  documents           String[] // URLs to documents
+  notes               String?
+
+  // Destination
+  destinationType     String?  // retailer, export, industrial
+  destination         String?
+
+  // Blockchain reference
+  blockchainTxId      String?
+  blockchainHash      String?
+
+  distributionDate    DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // No relation - batch might only exist on blockchain (hybrid storage)
+  // Use batchId as a string reference only
+
+  @@map("distribution_records")
+}
+
+>>>>>>> Stashed changes
 model WeatherData {
   id                String   @id @default(cuid())
   batchId           String?
@@ -448,6 +596,25 @@ model WeatherData {
   farmLocation      FarmLocation @relation(fields: [locationId], references: [id])
   
   @@map("weather_data")
+}
+
+model BatchLocationHistory{
+  id                String   @id @default(cuid())
+  batchId           String
+  eventType         String
+  latitude          Float
+  longitude         Float
+  timestamp         DateTime @default(now())
+  metadata          Json? //for weatherData
+
+
+  batch             Batch @relation(fields: [batchId], references: [id])
+
+  geom_point Unsupported("geography(Point, 4326)")?
+
+  @@index([batchId, timestamp])
+  @@index([geom_point], type: Gist)
+  @@map("batch_location_history")
 }
 
 model ActivityLog {
