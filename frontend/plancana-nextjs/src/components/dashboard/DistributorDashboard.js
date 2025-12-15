@@ -1,26 +1,43 @@
 // src/components/dashboard/DistributorDashboard.js
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../../context/AuthContext';
-import { distributorService, dashboardService, pricingService } from '../../services/api';
-import { toast } from 'react-hot-toast';
-import PricingModal from './PricingModal';
+import React, { useState, useEffect } from "react";
+import { useAuth } from "../../context/AuthContext";
 import {
-  Package, Truck, CheckCircle, Store, TrendingUp, BarChart3,
-  Filter, RefreshCw, ArrowRight, Eye, MapPin, Clock
-} from 'lucide-react';
+  distributorService,
+  dashboardService,
+  pricingService,
+} from "../../services/api";
+import { toast } from "react-hot-toast";
+import PricingModal from "./PricingModal";
+import LocationInput from "../ui/LocationInput";
+import {
+  Package,
+  Truck,
+  CheckCircle,
+  Store,
+  TrendingUp,
+  BarChart3,
+  Filter,
+  RefreshCw,
+  ArrowRight,
+  Eye,
+  MapPin,
+  Clock,
+} from "lucide-react";
 
 const DistributorDashboard = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('available');
+  const [activeTab, setActiveTab] = useState("available");
   const [availableBatches, setAvailableBatches] = useState([]);
   const [myBatches, setMyBatches] = useState([]);
+  const [weatherData, setWeatherData] = useState({});
+  const [weatherDataRetailer, setWeatherDataRetailer] = useState({});
   const [dashboardStats, setDashboardStats] = useState({
     availableBatches: 0,
     myBatches: 0,
     inDistribution: 0,
-    completedToday: 0
+    completedToday: 0,
   });
   const [loading, setLoading] = useState(true);
 
@@ -32,28 +49,126 @@ const DistributorDashboard = () => {
 
   // Distribution form state
   const [distributionData, setDistributionData] = useState({
-    distributionType: 'regional',
-    warehouseLocation: '',
-    latitude: '',
-    longitude: '',
-    quantityReceived: '',
-    quantityDistributed: '',
-    distributionCost: '',
-    storageCost: '',
-    handlingCost: '',
-    notes: ''
+    distributionType: "regional",
+    warehouseLocation: "",
+    latitude: "",
+    longitude: "",
+    quantityReceived: "",
+    quantityDistributed: "",
+    distributionCost: "",
+    storageCost: "",
+    handlingCost: "",
+    notes: "",
   });
 
   // Transfer to retailer form state
   const [transferData, setTransferData] = useState({
-    toRetailerId: '',
-    transferLocation: '',
-    notes: ''
+    toRetailerId: "",
+    transferLocation: "",
+    latitude: "",
+    longitude: "",
+    notes: "",
   });
+
+  const handleTransferInputChange = (field, value) => {
+    if (transferData[field] === value) {
+      return;
+    }
+    setTransferData((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handleInputChange = (field, value) => {
+    if (distributionData[field] === value) {
+      return;
+    }
+    setDistributionData((prev) => {
+      const updated = {
+        ...prev,
+        [field]: value,
+      };
+
+      // Auto-calculate total batch value when quantity or price changes
+      if (field === "quantity" || field === "pricePerUnit") {
+        const quantity =
+          parseFloat(field === "quantity" ? value : prev.quantity) || 0;
+        const pricePerUnit =
+          parseFloat(field === "pricePerUnit" ? value : prev.pricePerUnit) || 0;
+        updated.totalBatchValue = (quantity * pricePerUnit).toFixed(2);
+      }
+
+      return updated;
+    });
+  };
+
+  const handleArrayInputChange = (field, value) => {
+    const array = value
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item);
+    setFormData((prev) => ({
+      ...prev,
+      [field]: array,
+    }));
+  };
 
   useEffect(() => {
     fetchDashboardData();
   }, []);
+
+  // fetch weather data based on latitude and longitude from OpenWeather API
+  useEffect(() => {
+    if (distributionData.latitude && distributionData.longitude) {
+      fetch(
+        `/api/weather?lat=${distributionData.latitude}&lon=${distributionData.longitude}`
+      )
+        .then((response) => response.json())
+        .then((data) => {
+          setWeatherData({
+            temperature: data.weather.main.temp,
+            humidity: data.weather.main.humidity,
+            weather_main: data.weather.weather[0].main,
+            weather_description: data.weather.weather[0].description,
+          });
+          console.log("Fetching weather for distributor location", {
+            temp: data.weather.main.temp,
+          });
+        })
+        .catch((error) => {
+          console.error("Error fetching weather data for distributor:", error);
+        });
+    } else {
+      setWeatherData({});
+    }
+  }, [distributionData.latitude, distributionData.longitude]);
+
+  useEffect(() => {
+    if (transferData.latitude && transferData.longitude) {
+      fetch(
+        `/api/weather?lat=${transferData.latitude}&lon=${transferData.longitude}`
+      )
+        .then((response) => response.json())
+        .then((data) => {
+          setWeatherDataRetailer({
+            temperature: data.weather.main.temp,
+            humidity: data.weather.main.humidity,
+            weather_main: data.weather.weather[0].main,
+            weather_desc: data.weather.weather[0].description,
+          });
+          console.log("Fetching weather for retailer location", {
+            temp: data.weather.main.temp,
+          });
+        })
+        .catch((error) => {
+          console.error("Error fetching weather data for retailer:", error);
+        });
+    } else {
+      // Clear weather if coordinates are removed
+      setWeatherDataRetailer({});
+    }
+  }, [transferData.latitude, transferData.longitude]);
 
   const fetchDashboardData = async () => {
     try {
@@ -61,7 +176,7 @@ const DistributorDashboard = () => {
 
       const [availableRes, myBatchesRes] = await Promise.all([
         distributorService.getAvailableBatches(),
-        distributorService.getMyBatches()
+        distributorService.getMyBatches(),
       ]);
 
       if (availableRes.data.success) {
@@ -79,13 +194,14 @@ const DistributorDashboard = () => {
       setDashboardStats({
         availableBatches: available.length,
         myBatches: myBatchesData.length,
-        inDistribution: myBatchesData.filter(b => b.status === 'IN_DISTRIBUTION').length,
-        completedToday: 0 // Can be calculated from distribution records
+        inDistribution: myBatchesData.filter(
+          (b) => b.status === "IN_DISTRIBUTION"
+        ).length,
+        completedToday: 0, // Can be calculated from distribution records
       });
-
     } catch (error) {
-      console.error('Dashboard fetch error:', error);
-      toast.error('Failed to load dashboard data');
+      console.error("Dashboard fetch error:", error);
+      toast.error("Failed to load dashboard data");
     } finally {
       setLoading(false);
     }
@@ -93,41 +209,46 @@ const DistributorDashboard = () => {
 
   const handleReceiveBatch = async (batchId) => {
     try {
-      const confirmed = window.confirm('Are you sure you want to receive this batch?');
+      const confirmed = window.confirm(
+        "Are you sure you want to receive this batch?"
+      );
       if (!confirmed) return;
 
       const transferData = {
         notes: `Batch received by distributor ${user?.username}`,
-        transferLocation: 'Distribution Center'
+        transferLocation: "Distribution Center",
       };
 
-      const response = await distributorService.receiveBatch(batchId, transferData);
+      const response = await distributorService.receiveBatch(
+        batchId,
+        transferData
+      );
 
       if (response.data.success) {
-        toast.success('Batch received successfully!');
+        toast.success("Batch received successfully!");
         fetchDashboardData();
       } else {
-        toast.error(response.data.error || 'Failed to receive batch');
+        toast.error(response.data.error || "Failed to receive batch");
       }
     } catch (error) {
-      console.error('Receive batch error:', error);
-      toast.error('Failed to receive batch');
+      console.error("Receive batch error:", error);
+      toast.error("Failed to receive batch");
     }
   };
 
   const handleAddDistribution = (batch) => {
     setSelectedBatch(batch);
     setDistributionData({
-      distributionType: 'regional',
-      warehouseLocation: '',
-      latitude: '',
-      longitude: '',
-      quantityReceived: batch?.quantity || '',
-      quantityDistributed: '',
-      distributionCost: '',
-      storageCost: '',
-      handlingCost: '',
-      notes: ''
+      distributionType: "regional",
+      warehouseLocation: "",
+      latitude: "",
+      longitude: "",
+      quantityReceived: batch?.quantity || "",
+      quantityDistributed: "",
+      distributionCost: "",
+      storageCost: "",
+      handlingCost: "",
+      notes: "",
     });
     setShowDistributionModal(true);
   };
@@ -136,19 +257,19 @@ const DistributorDashboard = () => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          setDistributionData(prev => ({
+          setDistributionData((prev) => ({
             ...prev,
             latitude: position.coords.latitude.toFixed(6),
-            longitude: position.coords.longitude.toFixed(6)
+            longitude: position.coords.longitude.toFixed(6),
           }));
-          toast.success('Location captured!');
+          toast.success("Location captured!");
         },
         (error) => {
-          toast.error('Unable to get current location');
+          toast.error("Unable to get current location");
         }
       );
     } else {
-      toast.error('Geolocation is not supported by this browser');
+      toast.error("Geolocation is not supported by this browser");
     }
   };
 
@@ -157,28 +278,33 @@ const DistributorDashboard = () => {
       // Prepare data with warehouseCoordinates as an object
       const payload = {
         ...distributionData,
-        warehouseCoordinates: distributionData.latitude && distributionData.longitude ? {
-          latitude: parseFloat(distributionData.latitude),
-          longitude: parseFloat(distributionData.longitude)
-        } : null
+        weatherData,
+        warehouseCoordinates:
+          distributionData.latitude && distributionData.longitude
+            ? {
+                latitude: parseFloat(distributionData.latitude),
+                longitude: parseFloat(distributionData.longitude),
+              }
+            : null,
       };
 
       const response = await distributorService.addDistributionRecord(
         selectedBatch.batchId,
         payload
       );
+      console.log("Batch data in payload:", payload);
 
       if (response.data.success) {
-        toast.success('Distribution record added successfully!');
+        toast.success("Distribution record added successfully!");
         setShowDistributionModal(false);
         setSelectedBatch(null);
         fetchDashboardData();
       } else {
-        toast.error(response.data.error || 'Failed to add distribution record');
+        toast.error(response.data.error || "Failed to add distribution record");
       }
     } catch (error) {
-      console.error('Add distribution error:', error);
-      toast.error('Failed to add distribution record');
+      console.error("Add distribution error:", error);
+      toast.error("Failed to add distribution record");
     }
   };
 
@@ -189,30 +315,32 @@ const DistributorDashboard = () => {
 
   const handlePricingSubmit = async (pricingData) => {
     try {
-      const response = await pricingService.addPricing(selectedBatch.batchId, pricingData);
+      const response = await pricingService.addPricing(
+        selectedBatch.batchId,
+        pricingData
+      );
 
       if (response.data.success) {
-        toast.success('Pricing added successfully!');
+        toast.success("Pricing added successfully!");
       } else {
-        toast.error('Failed to add pricing');
+        toast.error("Failed to add pricing");
       }
 
       setShowPricingModal(false);
       setSelectedBatch(null);
       fetchDashboardData();
-
     } catch (error) {
-      console.error('Pricing error:', error);
-      toast.error('Failed to add pricing');
+      console.error("Pricing error:", error);
+      toast.error("Failed to add pricing");
     }
   };
 
   const handleTransferToRetailer = (batch) => {
     setSelectedBatch(batch);
     setTransferData({
-      toRetailerId: '',
-      transferLocation: '',
-      notes: ''
+      toRetailerId: "",
+      transferLocation: "",
+      notes: "",
     });
     setShowTransferModal(true);
   };
@@ -220,35 +348,47 @@ const DistributorDashboard = () => {
   const submitTransferToRetailer = async () => {
     try {
       if (!transferData.toRetailerId) {
-        toast.error('Please enter retailer ID');
+        toast.error("Please enter retailer ID");
         return;
       }
 
+      const payload = {
+        ...transferData,
+        weatherDataRetailer,
+      };
+
       const response = await distributorService.transferToRetailer(
         selectedBatch.batchId,
-        transferData
+        payload
       );
 
       if (response.data.success) {
-        toast.success('Batch transferred to retailer successfully!');
+        toast.success("Batch transferred to retailer successfully!");
         setShowTransferModal(false);
         setSelectedBatch(null);
         fetchDashboardData();
       } else {
-        toast.error(response.data.error || 'Failed to transfer batch');
+        toast.error(response.data.error || "Failed to transfer batch");
       }
     } catch (error) {
-      console.error('Transfer error:', error);
-      toast.error('Failed to transfer batch to retailer');
+      console.error("Transfer error:", error);
+      toast.error("Failed to transfer batch to retailer");
     }
   };
 
-  const StatCard = ({ title, value, icon: Icon, color = 'purple', description, trend }) => {
+  const StatCard = ({
+    title,
+    value,
+    icon: Icon,
+    color = "purple",
+    description,
+    trend,
+  }) => {
     const colorClasses = {
-      purple: 'bg-purple-100 text-purple-600',
-      blue: 'bg-blue-100 text-blue-600',
-      orange: 'bg-orange-100 text-orange-600',
-      green: 'bg-green-100 text-green-600'
+      purple: "bg-purple-100 text-purple-600",
+      blue: "bg-blue-100 text-blue-600",
+      orange: "bg-orange-100 text-orange-600",
+      green: "bg-green-100 text-green-600",
     };
 
     return (
@@ -284,11 +424,15 @@ const DistributorDashboard = () => {
             {batch.crop} {batch.variety && `• ${batch.variety}`}
           </p>
         </div>
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-          batch.status === 'PROCESSED' ? 'bg-blue-100 text-blue-800' :
-          batch.status === 'IN_DISTRIBUTION' ? 'bg-yellow-100 text-yellow-800' :
-          'bg-gray-100 text-gray-800'
-        }`}>
+        <span
+          className={`px-2 py-1 rounded-full text-xs font-medium ${
+            batch.status === "PROCESSED"
+              ? "bg-blue-100 text-blue-800"
+              : batch.status === "IN_DISTRIBUTION"
+              ? "bg-yellow-100 text-yellow-800"
+              : "bg-gray-100 text-gray-800"
+          }`}
+        >
           {batch.status}
         </span>
       </div>
@@ -300,7 +444,9 @@ const DistributorDashboard = () => {
         </div>
         <div>
           <p className="text-xs text-gray-500">Quantity</p>
-          <p className="text-sm font-medium text-gray-900">{batch.quantity} {batch.unit}</p>
+          <p className="text-sm font-medium text-gray-900">
+            {batch.quantity} {batch.unit}
+          </p>
         </div>
         <div>
           <p className="text-xs text-gray-500">Location</p>
@@ -309,7 +455,9 @@ const DistributorDashboard = () => {
         {batch.qualityGrade && (
           <div>
             <p className="text-xs text-gray-500">Quality Grade</p>
-            <p className="text-sm font-medium text-gray-900">{batch.qualityGrade}</p>
+            <p className="text-sm font-medium text-gray-900">
+              {batch.qualityGrade}
+            </p>
           </div>
         )}
       </div>
@@ -369,7 +517,8 @@ const DistributorDashboard = () => {
           Welcome back, {user?.username}! 🚚
         </h1>
         <p className="text-purple-50 text-lg">
-          Manage your distribution operations and coordinate deliveries across the supply chain.
+          Manage your distribution operations and coordinate deliveries across
+          the supply chain.
         </p>
       </div>
 
@@ -413,8 +562,12 @@ const DistributorDashboard = () => {
       <div className="bg-white rounded-xl shadow-sm p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Distribution Management</h3>
-            <p className="text-sm text-gray-500 mt-1">Manage batches and coordinate deliveries</p>
+            <h3 className="text-lg font-semibold text-gray-900">
+              Distribution Management
+            </h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Manage batches and coordinate deliveries
+            </p>
           </div>
           <div className="flex items-center space-x-3">
             <button className="flex items-center px-4 py-2 text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg transition-colors">
@@ -435,32 +588,40 @@ const DistributorDashboard = () => {
         <div className="border-b border-gray-200 mb-6">
           <nav className="-mb-px flex space-x-8">
             <button
-              onClick={() => setActiveTab('available')}
+              onClick={() => setActiveTab("available")}
               className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'available'
-                  ? 'border-purple-500 text-purple-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                activeTab === "available"
+                  ? "border-purple-500 text-purple-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
               }`}
             >
               Available Batches
-              <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
-                activeTab === 'available' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'
-              }`}>
+              <span
+                className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+                  activeTab === "available"
+                    ? "bg-purple-100 text-purple-700"
+                    : "bg-gray-100 text-gray-600"
+                }`}
+              >
                 {availableBatches.length}
               </span>
             </button>
             <button
-              onClick={() => setActiveTab('my-batches')}
+              onClick={() => setActiveTab("my-batches")}
               className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'my-batches'
-                  ? 'border-purple-500 text-purple-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                activeTab === "my-batches"
+                  ? "border-purple-500 text-purple-600"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
               }`}
             >
               My Batches
-              <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
-                activeTab === 'my-batches' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'
-              }`}>
+              <span
+                className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+                  activeTab === "my-batches"
+                    ? "bg-purple-100 text-purple-700"
+                    : "bg-gray-100 text-gray-600"
+                }`}
+              >
                 {myBatches.length}
               </span>
             </button>
@@ -469,20 +630,27 @@ const DistributorDashboard = () => {
 
         <div className="p-6">
           {/* Available Batches Tab */}
-          {activeTab === 'available' && (
+          {activeTab === "available" && (
             <div>
               {availableBatches.length === 0 ? (
                 <div className="text-center py-12">
-                  <CubeIcon className="mx-auto h-12 w-12 text-gray-400" />
-                  <h3 className="mt-2 text-sm font-medium text-gray-900">No available batches</h3>
+                  <Package className="mx-auto h-12 w-12 text-gray-400" />
+                  <h3 className="mt-2 text-sm font-medium text-gray-900">
+                    No available batches
+                  </h3>
                   <p className="mt-1 text-sm text-gray-500">
-                    No processed batches available for distribution at the moment.
+                    No processed batches available for distribution at the
+                    moment.
                   </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {availableBatches.map((batch) => (
-                    <BatchCard key={batch.batchId} batch={batch} isAvailable={true} />
+                    <BatchCard
+                      key={batch.batchId}
+                      batch={batch}
+                      isAvailable={true}
+                    />
                   ))}
                 </div>
               )}
@@ -490,20 +658,27 @@ const DistributorDashboard = () => {
           )}
 
           {/* My Batches Tab */}
-          {activeTab === 'my-batches' && (
+          {activeTab === "my-batches" && (
             <div>
               {myBatches.length === 0 ? (
                 <div className="text-center py-12">
-                  <TruckIcon className="mx-auto h-12 w-12 text-gray-400" />
-                  <h3 className="mt-2 text-sm font-medium text-gray-900">No batches in distribution</h3>
+                  <Package className="mx-auto h-12 w-12 text-gray-400" />
+                  <h3 className="mt-2 text-sm font-medium text-gray-900">
+                    No batches in distribution
+                  </h3>
                   <p className="mt-1 text-sm text-gray-500">
-                    Receive batches from the Available Batches tab to start distributing.
+                    Receive batches from the Available Batches tab to start
+                    distributing.
                   </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   {myBatches.map((batch) => (
-                    <BatchCard key={batch.batchId} batch={batch} isAvailable={false} />
+                    <BatchCard
+                      key={batch.batchId}
+                      batch={batch}
+                      isAvailable={false}
+                    />
                   ))}
                 </div>
               )}
@@ -538,7 +713,12 @@ const DistributorDashboard = () => {
                 </label>
                 <select
                   value={distributionData.distributionType}
-                  onChange={(e) => setDistributionData({ ...distributionData, distributionType: e.target.value })}
+                  onChange={(e) =>
+                    setDistributionData({
+                      ...distributionData,
+                      distributionType: e.target.value,
+                    })
+                  }
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                 >
                   <option value="local">Local</option>
@@ -555,15 +735,36 @@ const DistributorDashboard = () => {
                 <input
                   type="text"
                   value={distributionData.warehouseLocation}
-                  onChange={(e) => setDistributionData({ ...distributionData, warehouseLocation: e.target.value })}
+                  onChange={(e) =>
+                    setDistributionData({
+                      ...distributionData,
+                      warehouseLocation: e.target.value,
+                    })
+                  }
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
                   placeholder="e.g., Penang Distribution Center"
                   required
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-4">
                 <div>
+                  <LocationInput
+                    locationValue={distributionData.warehouseLocation}
+                    latitudeValue={distributionData.latitude}
+                    longitudeValue={distributionData.longitude}
+                    onLocationChange={(value) =>
+                      handleInputChange("warehouseLocation", value)
+                    }
+                    onLatitudeChange={(value) =>
+                      handleInputChange("latitude", value)
+                    }
+                    onLongitudeChange={(value) =>
+                      handleInputChange("longitude", value)
+                    }
+                  />
+                </div>
+                {/* <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Latitude
                   </label>
@@ -571,12 +772,17 @@ const DistributorDashboard = () => {
                     type="number"
                     step="0.000001"
                     value={distributionData.latitude}
-                    onChange={(e) => setDistributionData({ ...distributionData, latitude: e.target.value })}
+                    onChange={(e) =>
+                      setDistributionData({
+                        ...distributionData,
+                        latitude: e.target.value,
+                      })
+                    }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
                     placeholder="e.g., 5.4164"
                   />
-                </div>
-                <div>
+                </div> */}
+                {/* <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Longitude
                   </label>
@@ -584,13 +790,18 @@ const DistributorDashboard = () => {
                     type="number"
                     step="0.000001"
                     value={distributionData.longitude}
-                    onChange={(e) => setDistributionData({ ...distributionData, longitude: e.target.value })}
+                    onChange={(e) =>
+                      setDistributionData({
+                        ...distributionData,
+                        longitude: e.target.value,
+                      })
+                    }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
                     placeholder="e.g., 100.3327"
                   />
-                </div>
+                </div> */}
               </div>
-
+              {/* 
               <button
                 type="button"
                 onClick={getCurrentLocation}
@@ -598,7 +809,7 @@ const DistributorDashboard = () => {
               >
                 <MapPin className="h-4 w-4 mr-1" />
                 Use Current Location
-              </button>
+              </button> */}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -609,12 +820,19 @@ const DistributorDashboard = () => {
                     type="number"
                     step="0.01"
                     value={distributionData.quantityReceived}
-                    onChange={(e) => setDistributionData({ ...distributionData, quantityReceived: e.target.value })}
+                    onChange={(e) =>
+                      setDistributionData({
+                        ...distributionData,
+                        quantityReceived: e.target.value,
+                      })
+                    }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
                     placeholder="Amount received"
                     required
                   />
-                  <p className="text-xs text-gray-500 mt-1">From batch: {selectedBatch?.quantity} {selectedBatch?.unit}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    From batch: {selectedBatch?.quantity} {selectedBatch?.unit}
+                  </p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -624,11 +842,18 @@ const DistributorDashboard = () => {
                     type="number"
                     step="0.01"
                     value={distributionData.quantityDistributed}
-                    onChange={(e) => setDistributionData({ ...distributionData, quantityDistributed: e.target.value })}
+                    onChange={(e) =>
+                      setDistributionData({
+                        ...distributionData,
+                        quantityDistributed: e.target.value,
+                      })
+                    }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent text-gray-900"
                     placeholder="Amount distributed"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Amount sent to retailers</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Amount sent to retailers
+                  </p>
                 </div>
               </div>
 
@@ -640,7 +865,12 @@ const DistributorDashboard = () => {
                   <input
                     type="number"
                     value={distributionData.distributionCost}
-                    onChange={(e) => setDistributionData({ ...distributionData, distributionCost: e.target.value })}
+                    onChange={(e) =>
+                      setDistributionData({
+                        ...distributionData,
+                        distributionCost: e.target.value,
+                      })
+                    }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                     placeholder="500"
                   />
@@ -652,7 +882,12 @@ const DistributorDashboard = () => {
                   <input
                     type="number"
                     value={distributionData.storageCost}
-                    onChange={(e) => setDistributionData({ ...distributionData, storageCost: e.target.value })}
+                    onChange={(e) =>
+                      setDistributionData({
+                        ...distributionData,
+                        storageCost: e.target.value,
+                      })
+                    }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                     placeholder="200"
                   />
@@ -664,7 +899,12 @@ const DistributorDashboard = () => {
                   <input
                     type="number"
                     value={distributionData.handlingCost}
-                    onChange={(e) => setDistributionData({ ...distributionData, handlingCost: e.target.value })}
+                    onChange={(e) =>
+                      setDistributionData({
+                        ...distributionData,
+                        handlingCost: e.target.value,
+                      })
+                    }
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                     placeholder="100"
                   />
@@ -677,7 +917,12 @@ const DistributorDashboard = () => {
                 </label>
                 <textarea
                   value={distributionData.notes}
-                  onChange={(e) => setDistributionData({ ...distributionData, notes: e.target.value })}
+                  onChange={(e) =>
+                    setDistributionData({
+                      ...distributionData,
+                      notes: e.target.value,
+                    })
+                  }
                   rows={3}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                   placeholder="Additional notes..."
@@ -721,7 +966,12 @@ const DistributorDashboard = () => {
                 <input
                   type="text"
                   value={transferData.toRetailerId}
-                  onChange={(e) => setTransferData({ ...transferData, toRetailerId: e.target.value })}
+                  onChange={(e) =>
+                    setTransferData({
+                      ...transferData,
+                      toRetailerId: e.target.value,
+                    })
+                  }
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                   placeholder="retailer123"
                   required
@@ -732,22 +982,42 @@ const DistributorDashboard = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Transfer Location
                 </label>
-                <input
+                {/* <input
                   type="text"
                   value={transferData.transferLocation}
-                  onChange={(e) => setTransferData({ ...transferData, transferLocation: e.target.value })}
+                  onChange={(e) =>
+                    setTransferData({
+                      ...transferData,
+                      transferLocation: e.target.value,
+                    })
+                  }
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                   placeholder="Retail Store Location"
+                /> */}
+                <LocationInput
+                  locationValue={transferData.transferLocation}
+                  latitudeValue={transferData.latitude}
+                  longitudeValue={transferData.longitude}
+                  onLocationChange={(value) =>
+                    handleTransferInputChange("transferLocation", value)
+                  }
+                  onLatitudeChange={(value) => {
+                    handleTransferInputChange("latitude", value);
+                  }}
+                  onLongitudeChange={(value) => {
+                    handleTransferInputChange("longitude", value);
+                  }}
                 />
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Notes
                 </label>
                 <textarea
                   value={transferData.notes}
-                  onChange={(e) => setTransferData({ ...transferData, notes: e.target.value })}
+                  onChange={(e) =>
+                    setTransferData({ ...transferData, notes: e.target.value })
+                  }
                   rows={3}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
                   placeholder="Transfer notes..."

@@ -1,33 +1,127 @@
 // src/components/dashboard/ProcessingStartModal.js
-'use client';
+"use client";
 
-import React, { useState } from 'react';
-import { X, MapPin } from 'lucide-react';
+import React, { use, useEffect, useState } from "react";
+import { X, MapPin } from "lucide-react";
+import LocationInput from "../ui/LocationInput";
 
 const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
+  const [weatherData, setWeatherData] = useState({});
   const [formData, setFormData] = useState({
-    processType: 'initial_processing',
-    processingLocation: '',
-    latitude: '',
-    longitude: '',
-    inputQuantity: batch?.quantity || '',
-    outputQuantity: batch?.quantity || '',
-    wasteQuantity: '0',
-    processingTime: '',
-    energyUsage: '',
-    waterUsage: '',
-    notes: ''
+    processType: "initial_processing",
+    processingLocation: "",
+    latitude: "",
+    longitude: "",
+    inputQuantity: batch?.quantity || "",
+    outputQuantity: batch?.quantity || "",
+    wasteQuantity: "0",
+    processingTime: "",
+    energyUsage: "",
+    waterUsage: "",
+    notes: "",
   });
 
   const [loading, setLoading] = useState(false);
+  useEffect(() => {
+    console.log("Batch data in modal:", formData, weatherData);
+  }, [formData, weatherData]);
+
+  // fetch weather data based on latitude and longitude from OpenWeather API
+  useEffect(() => {
+    if (formData.latitude && formData.longitude) {
+      fetch(`/api/weather?lat=${formData.latitude}&lon=${formData.longitude}`)
+        .then((response) => response.json())
+        .then((data) => {
+          setWeatherData((prev) => ({
+            ...prev,
+            temperature: data.weather.main.temp,
+            humidity: data.weather.main.humidity,
+            weather_main: data.weather.weather[0].main,
+            weather_description: data.weather.weather[0].description,
+          }));
+          console.log("Fetched weather data:", weatherData);
+        })
+        .catch((error) => {
+          console.error("Error fetching weather data:", error);
+        });
+    }
+  }, [formData.latitude, formData.longitude]);
+
+  const handleInputChange = (field, value) => {
+    if (formData[field] === value) {
+      return;
+    }
+    setFormData((prev) => {
+      const updated = {
+        ...prev,
+        [field]: value,
+      };
+
+      // Auto-calculate total batch value when quantity or price changes
+      if (field === "quantity" || field === "pricePerUnit") {
+        const quantity =
+          parseFloat(field === "quantity" ? value : prev.quantity) || 0;
+        const pricePerUnit =
+          parseFloat(field === "pricePerUnit" ? value : prev.pricePerUnit) || 0;
+        updated.totalBatchValue = (quantity * pricePerUnit).toFixed(2);
+      }
+
+      return updated;
+    });
+
+    // Update filtered crop options when crop type changes
+    if (field === "cropType") {
+      const filtered = cropOptions.filter((crop) => crop.cropType === value);
+      setFilteredCropOptions(filtered);
+      // Clear crop and variety when crop type changes
+      setFormData((prev) => ({
+        ...prev,
+        cropType: value,
+        crop: "",
+        variety: "",
+      }));
+      setAvailableVarieties([]);
+    }
+
+    // Update available varieties when crop changes
+    if (field === "crop") {
+      const selectedCrop = cropOptions.find(
+        (crop) =>
+          crop.label.toLowerCase() === value.toLowerCase() ||
+          crop.value.toLowerCase() === value.toLowerCase()
+      );
+      if (selectedCrop) {
+        setAvailableVarieties(selectedCrop.varieties);
+        // Clear variety when crop changes
+        setFormData((prev) => ({
+          ...prev,
+          crop: value,
+          variety: "",
+        }));
+      } else {
+        setAvailableVarieties([]);
+      }
+    }
+  };
+
+  const handleArrayInputChange = (field, value) => {
+    const array = value
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item);
+    setFormData((prev) => ({
+      ...prev,
+      [field]: array,
+    }));
+  };
 
   if (!isOpen) return null;
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      [name]: value
+      [name]: value,
     }));
   };
 
@@ -35,18 +129,18 @@ const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          setFormData(prev => ({
+          setFormData((prev) => ({
             ...prev,
             latitude: position.coords.latitude.toFixed(6),
-            longitude: position.coords.longitude.toFixed(6)
+            longitude: position.coords.longitude.toFixed(6),
           }));
         },
         (error) => {
-          alert('Unable to get current location');
+          alert("Unable to get current location");
         }
       );
     } else {
-      alert('Geolocation is not supported by this browser');
+      alert("Geolocation is not supported by this browser");
     }
   };
 
@@ -54,38 +148,43 @@ const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
     e.preventDefault();
     setLoading(true);
 
+    const submissionData = {
+      ...formData,
+      ...weatherData,
+    };
+
     try {
-      await onSubmit(formData);
+      await onSubmit(submissionData);
       // Reset form
       setFormData({
-        processType: 'initial_processing',
-        processingLocation: '',
-        latitude: '',
-        longitude: '',
-        inputQuantity: batch?.quantity || '',
-        outputQuantity: batch?.quantity || '',
-        wasteQuantity: '0',
-        processingTime: '',
-        energyUsage: '',
-        waterUsage: '',
-        notes: ''
+        processType: "initial_processing",
+        processingLocation: "",
+        latitude: "",
+        longitude: "",
+        inputQuantity: batch?.quantity || "",
+        outputQuantity: batch?.quantity || "",
+        wasteQuantity: "0",
+        processingTime: "",
+        energyUsage: "",
+        waterUsage: "",
+        notes: "",
       });
       onClose();
     } catch (error) {
-      console.error('Error:', error);
+      console.error("Error:", error);
     } finally {
       setLoading(false);
     }
   };
 
   const processTypeOptions = [
-    { value: 'initial_processing', label: 'Initial Processing' },
-    { value: 'cleaning', label: 'Cleaning' },
-    { value: 'sorting', label: 'Sorting' },
-    { value: 'grading', label: 'Grading' },
-    { value: 'milling', label: 'Milling' },
-    { value: 'packaging', label: 'Packaging' },
-    { value: 'storage', label: 'Storage' }
+    { value: "initial_processing", label: "Initial Processing" },
+    { value: "cleaning", label: "Cleaning" },
+    { value: "sorting", label: "Sorting" },
+    { value: "grading", label: "Grading" },
+    { value: "milling", label: "Milling" },
+    { value: "packaging", label: "Packaging" },
+    { value: "storage", label: "Storage" },
   ];
 
   return (
@@ -94,7 +193,9 @@ const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
         {/* Header */}
         <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
           <div>
-            <h3 className="text-xl font-semibold text-gray-900">Start Processing</h3>
+            <h3 className="text-xl font-semibold text-gray-900">
+              Start Processing
+            </h3>
             <p className="text-sm text-gray-500 mt-1">Batch {batch?.batchId}</p>
           </div>
           <button
@@ -119,18 +220,38 @@ const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
               className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
               required
             >
-              {processTypeOptions.map(option => (
-                <option key={option.value} value={option.value}>{option.label}</option>
+              {processTypeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
               ))}
             </select>
           </div>
 
           {/* Location Section */}
           <div>
-            <h4 className="text-sm font-semibold text-gray-900 mb-3">Processing Location</h4>
+            <h4 className="text-sm font-semibold text-gray-900 mb-3">
+              Processing Location
+            </h4>
 
             <div className="space-y-4">
               <div>
+                <LocationInput
+                  locationValue={formData.processingLocation}
+                  latitudeValue={formData.latitude}
+                  longitudeValue={formData.longitude}
+                  onLocationChange={(value) =>
+                    handleInputChange("processingLocation", value)
+                  }
+                  onLatitudeChange={(value) =>
+                    handleInputChange("latitude", value)
+                  }
+                  onLongitudeChange={(value) =>
+                    handleInputChange("longitude", value)
+                  }
+                />
+              </div>
+              {/* <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Location Name / Address
                 </label>
@@ -142,9 +263,9 @@ const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
                   placeholder="e.g., ABC Processing Plant, Selangor"
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                 />
-              </div>
+              </div> */}
 
-              <div className="grid grid-cols-2 gap-4">
+              {/* <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     Latitude
@@ -173,22 +294,24 @@ const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   />
                 </div>
-              </div>
+              </div> */}
 
-              <button
+              {/* <button
                 type="button"
                 onClick={getCurrentLocation}
                 className="flex items-center text-blue-600 hover:text-blue-700 text-sm font-medium"
               >
                 <MapPin className="h-4 w-4 mr-1" />
                 Use Current Location
-              </button>
+              </button> */}
             </div>
           </div>
 
           {/* Quantity Section */}
           <div>
-            <h4 className="text-sm font-semibold text-gray-900 mb-3">Quantity Information</h4>
+            <h4 className="text-sm font-semibold text-gray-900 mb-3">
+              Quantity Information
+            </h4>
 
             <div className="grid grid-cols-3 gap-4">
               <div>
@@ -205,7 +328,9 @@ const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                   required
                 />
-                <p className="text-xs text-gray-500 mt-1">Original: {batch?.quantity} {batch?.unit}</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Original: {batch?.quantity} {batch?.unit}
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -242,7 +367,9 @@ const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
 
           {/* Additional Details */}
           <div>
-            <h4 className="text-sm font-semibold text-gray-900 mb-3">Additional Details (Optional)</h4>
+            <h4 className="text-sm font-semibold text-gray-900 mb-3">
+              Additional Details (Optional)
+            </h4>
 
             <div className="grid grid-cols-3 gap-4">
               <div>
@@ -318,7 +445,7 @@ const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
               disabled={loading}
               className="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg font-medium transition-colors"
             >
-              {loading ? 'Starting...' : 'Start Processing'}
+              {loading ? "Starting..." : "Start Processing"}
             </button>
           </div>
         </form>

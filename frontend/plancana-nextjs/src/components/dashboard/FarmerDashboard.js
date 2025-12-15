@@ -1,4 +1,4 @@
-'use client';
+"use client";
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { batchService, dashboardService } from "../../services/api";
@@ -8,10 +8,29 @@ import { useRouter } from "next/navigation";
 import BatchManagement from "../batch/BatchManagement";
 import BatchDetails from "../batch/BatchDetails";
 import {
-  TrendingUp, TrendingDown, Package, Truck, DollarSign, Leaf,
-  Plus, Upload, FileText, BarChart3, ArrowUpRight, Search,
-  Layers, Maximize2, MapPin, Sun, Droplets, Wind, CloudRain,
-  Factory, Store, CheckCircle, Activity
+  TrendingUp,
+  TrendingDown,
+  Package,
+  Truck,
+  DollarSign,
+  Leaf,
+  Plus,
+  Upload,
+  FileText,
+  BarChart3,
+  ArrowUpRight,
+  Search,
+  Layers,
+  Maximize2,
+  MapPin,
+  Sun,
+  Droplets,
+  Wind,
+  CloudRain,
+  Factory,
+  Store,
+  CheckCircle,
+  Activity,
 } from "lucide-react";
 import {
   Area,
@@ -25,7 +44,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import ArcGISMap from '@/components/gis-map/testMap';
+import ArcGISMap from "@/components/gis-map/testMap";
 
 const FarmerDashboard = () => {
   const [currentLat, setCurrentLat] = useState(0); // Use a default, or user's farm lat
@@ -37,20 +56,57 @@ const FarmerDashboard = () => {
   const [currentView, setCurrentView] = useState("dashboard"); // 'dashboard', 'batches', 'batchDetails'
   const [selectedBatchId, setSelectedBatchId] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  // const [weatherData, setWeatherData] = useState({
+  //   temperature: "24°C",
+  //   humidity: "65%",
+  //   windSpeed: "12 km/h",
+  //   precipitation: "15%",
+  //   location: "Central Valley",
+  //   forecast: [
+  //     { day: "Mon", temp: "24°", icon: "sun" },
+  //     { day: "Tue", temp: "25°", icon: "sun" },
+  //     { day: "Wed", temp: "26°", icon: "sun" },
+  //     { day: "Thu", temp: "27°", icon: "sun" },
+  //     { day: "Fri", temp: "28°", icon: "sun" },
+  //   ]
+  // });
   const [weatherData, setWeatherData] = useState({
-    temperature: "24°C",
-    humidity: "65%",
-    windSpeed: "12 km/h",
-    precipitation: "15%",
-    location: "Central Valley",
-    forecast: [
-      { day: "Mon", temp: "24°", icon: "sun" },
-      { day: "Tue", temp: "25°", icon: "sun" },
-      { day: "Wed", temp: "26°", icon: "sun" },
-      { day: "Thu", temp: "27°", icon: "sun" },
-      { day: "Fri", temp: "28°", icon: "sun" },
-    ]
+    temperature: "",
+    humidity: "",
+    windSpeed: "",
+    weather_description: "",
+    location: "",
+    forecast: [],
   });
+  const [currentLatitude, setCurrentLatitude] = useState(0);
+  const [currentLongitude, setCurrentLongitude] = useState(0);
+
+  const getBrowserLocation = () => {
+    if (navigator.geolocation) {
+      // Request the user's current position
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          // Success callback: Location is obtained
+          setCurrentLatitude(position.coords.latitude);
+          setCurrentLongitude(position.coords.longitude);
+        },
+        (error) => {
+          // Error callback: User denied permission, timeout, etc.
+          console.error("Geolocation Error:", error.message);
+          toast.error(
+            "Failed to get your current location. Using farm default."
+          );
+          // Optionally use a fallback (like farm's registered address)
+          // If you use the farm's default coordinates, they should be set here
+          // or after dashboard data loads.
+        },
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 1000 }
+      );
+    } else {
+      console.error("Geolocation is not supported by this browser.");
+      toast.error("Geolocation not supported.");
+    }
+  };
   const router = useRouter();
 
   // Mock data for charts
@@ -75,7 +131,62 @@ const FarmerDashboard = () => {
   useEffect(() => {
     loadDashboardData();
     loadBatches();
+    getBrowserLocation();
   }, []);
+
+  useEffect(() => {
+    if (currentLatitude !== 0 && currentLongitude !== 0) {
+      fetch(`/api/weather?lat=${currentLatitude}&lon=${currentLongitude}`)
+        .then((response) => response.json())
+        .then((data) => {
+          // 1. EARLY EXIT CHECK: Keep this! It protects against the scenario
+          // where the backend sends a malformed/error response even with a 200 status.
+          if (!data || !data.weather) {
+            console.error(
+              "API returned incomplete or erroneous weather data:",
+              data
+            );
+            return;
+          }
+
+          const currentWeather = data.weather;
+
+          // 2. FORECAST LIST SAFETY CHECK: Keep this!
+          const dailyForecastsList = data.forecast?.list ?? [];
+
+          const filteredForecasts = dailyForecastsList
+            .filter((item) => item.dt_txt.includes("12:00:00"))
+            .slice(0, 5)
+            .map((item) => ({
+              day: new Date(item.dt * 1000).toLocaleDateString("en-US", {
+                weekday: "short",
+              }),
+              // 3. NESTED PROPERTY SAFETY: Use optional chaining here as well
+              temp: Math.round(item.main?.temp ?? 0) + "°",
+              main: item.weather?.[0]?.main ?? "Unknown",
+              description: item.weather?.[0]?.description ?? "No data",
+            }));
+
+          setWeatherData(() => ({
+            // 4. NESTED PROPERTY SAFETY: Ensure all accesses use optional chaining
+            // to avoid crashes if the 'main' or 'wind' objects are sporadically missing.
+            temperature: Math.round(currentWeather.main?.temp ?? 0) + "°C",
+            humidity: (currentWeather.main?.humidity ?? "N/A") + "%", // Moved concatenation for safety
+            windSpeed: (currentWeather.wind?.speed ?? "N/A") + " km/h", // Moved concatenation for safety
+            weather_description:
+              currentWeather.weather?.[0]?.description ?? "N/A",
+            location:
+              (currentWeather.name ?? "Unknown") +
+              ", " +
+              (currentWeather.sys?.country ?? "??"),
+            forecast: filteredForecasts,
+          }));
+        })
+        .catch((error) => {
+          console.error("Error fetching weather data:", error);
+        });
+    }
+  }, [currentLatitude, currentLongitude]);
 
   const loadDashboardData = async () => {
     try {
@@ -124,9 +235,30 @@ const FarmerDashboard = () => {
 
   // Mock recent transactions data
   const recentTransactions = [
-    { id: 1, batch: "Wheat Batch #142", amount: "+$12,450", weight: "500 kg - US", time: "2 hours ago", type: "income" },
-    { id: 2, batch: "Corn Shipment", amount: "+$8,920", weight: "850 kg - CA", time: "5 hours ago", type: "income" },
-    { id: 3, batch: "Equipment Purchase", amount: "-$3,200", weight: "", time: "1 day ago", type: "expense" },
+    {
+      id: 1,
+      batch: "Wheat Batch #142",
+      amount: "+$12,450",
+      weight: "500 kg - US",
+      time: "2 hours ago",
+      type: "income",
+    },
+    {
+      id: 2,
+      batch: "Corn Shipment",
+      amount: "+$8,920",
+      weight: "850 kg - CA",
+      time: "5 hours ago",
+      type: "income",
+    },
+    {
+      id: 3,
+      batch: "Equipment Purchase",
+      amount: "-$3,200",
+      weight: "",
+      time: "1 day ago",
+      type: "expense",
+    },
   ];
 
   if (loading && !dashboardData) {
@@ -166,10 +298,12 @@ const FarmerDashboard = () => {
       {/* Welcome Banner with Gradient */}
       <div className="bg-gradient-to-r from-green-600 to-green-500 rounded-xl shadow-lg p-8 text-white">
         <h1 className="text-3xl font-bold mb-2 flex items-center gap-2">
-          Welcome back, {dashboardData?.farmerInfo?.farmName || user?.username}! 🌾
+          Welcome back, {dashboardData?.farmerInfo?.farmName || user?.username}!
+          🌾
         </h1>
         <p className="text-green-50 text-lg">
-          Manage your crops and track your agricultural products through the supply chain.
+          Manage your crops and track your agricultural products through the
+          supply chain.
         </p>
       </div>
 
@@ -185,7 +319,9 @@ const FarmerDashboard = () => {
               +12%
             </div>
           </div>
-          <p className="text-gray-600 text-sm font-medium">Total Active Batches</p>
+          <p className="text-gray-600 text-sm font-medium">
+            Total Active Batches
+          </p>
           <p className="text-3xl font-bold text-gray-900 mt-1">
             {dashboardData?.statistics?.totalBatches || "24"}
           </p>
@@ -217,7 +353,9 @@ const FarmerDashboard = () => {
               +2.4%
             </div>
           </div>
-          <p className="text-gray-600 text-sm font-medium">Average Farm Price</p>
+          <p className="text-gray-600 text-sm font-medium">
+            Average Farm Price
+          </p>
           <p className="text-3xl font-bold text-gray-900 mt-1">$4.28/kg</p>
           <p className="text-xs text-gray-500 mt-1">vs last week</p>
         </div>
@@ -244,8 +382,12 @@ const FarmerDashboard = () => {
         <div className="bg-white rounded-xl shadow-sm p-6">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">Batch Registration Trends</h3>
-              <p className="text-sm text-gray-500 mt-1">Monthly batch creation and activity</p>
+              <h3 className="text-lg font-semibold text-gray-900">
+                Batch Registration Trends
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Monthly batch creation and activity
+              </p>
             </div>
             <div className="flex items-center text-green-600 text-sm font-medium">
               <TrendingUp className="h-4 w-4 mr-1" />
@@ -256,8 +398,8 @@ const FarmerDashboard = () => {
             <AreaChart data={batchTrendsData}>
               <defs>
                 <linearGradient id="colorBatches" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -265,9 +407,9 @@ const FarmerDashboard = () => {
               <YAxis stroke="#9ca3af" />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: 'white',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '8px'
+                  backgroundColor: "white",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "8px",
                 }}
               />
               <Area
@@ -285,8 +427,12 @@ const FarmerDashboard = () => {
         <div className="bg-white rounded-xl shadow-sm p-6">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">Shipment Status Overview</h3>
-              <p className="text-sm text-gray-500 mt-1">Track your supply chain performance</p>
+              <h3 className="text-lg font-semibold text-gray-900">
+                Shipment Status Overview
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Track your supply chain performance
+              </p>
             </div>
             <div className="text-orange-600 text-sm font-medium flex items-center">
               <Package className="h-4 w-4 mr-1" />
@@ -300,9 +446,9 @@ const FarmerDashboard = () => {
               <YAxis stroke="#9ca3af" />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: 'white',
-                  border: '1px solid #e5e7eb',
-                  borderRadius: '8px'
+                  backgroundColor: "white",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: "8px",
                 }}
               />
               <Legend />
@@ -316,7 +462,9 @@ const FarmerDashboard = () => {
 
       {/* Quick Actions */}
       <div className="bg-white rounded-xl shadow-sm p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">
+          Quick Actions
+        </h3>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <button
             onClick={handleCreateBatch}
@@ -325,33 +473,33 @@ const FarmerDashboard = () => {
             <Plus className="h-8 w-8" />
             <div className="text-center">
               <p className="font-semibold">Create New Batch</p>
-              <p className="text-xs text-green-100 mt-1">Register a new crop batch</p>
+              <p className="text-xs text-green-100 mt-1">
+                Register a new crop batch
+              </p>
             </div>
           </button>
 
-          <button
-            className="bg-blue-600 hover:bg-blue-700 text-white p-6 rounded-xl transition-all transform hover:scale-105 flex flex-col items-center justify-center space-y-3"
-          >
+          <button className="bg-blue-600 hover:bg-blue-700 text-white p-6 rounded-xl transition-all transform hover:scale-105 flex flex-col items-center justify-center space-y-3">
             <Upload className="h-8 w-8" />
             <div className="text-center">
               <p className="font-semibold">Upload Documents</p>
-              <p className="text-xs text-blue-100 mt-1">Add compliance certificates</p>
+              <p className="text-xs text-blue-100 mt-1">
+                Add compliance certificates
+              </p>
             </div>
           </button>
 
-          <button
-            className="bg-purple-600 hover:bg-purple-700 text-white p-6 rounded-xl transition-all transform hover:scale-105 flex flex-col items-center justify-center space-y-3"
-          >
+          <button className="bg-purple-600 hover:bg-purple-700 text-white p-6 rounded-xl transition-all transform hover:scale-105 flex flex-col items-center justify-center space-y-3">
             <FileText className="h-8 w-8" />
             <div className="text-center">
               <p className="font-semibold">View Reports</p>
-              <p className="text-xs text-purple-100 mt-1">Access detailed analytics</p>
+              <p className="text-xs text-purple-100 mt-1">
+                Access detailed analytics
+              </p>
             </div>
           </button>
 
-          <button
-            className="bg-orange-600 hover:bg-orange-700 text-white p-6 rounded-xl transition-all transform hover:scale-105 flex flex-col items-center justify-center space-y-3"
-          >
+          <button className="bg-orange-600 hover:bg-orange-700 text-white p-6 rounded-xl transition-all transform hover:scale-105 flex flex-col items-center justify-center space-y-3">
             <BarChart3 className="h-8 w-8" />
             <div className="text-center">
               <p className="font-semibold">Track Shipments</p>
@@ -366,8 +514,12 @@ const FarmerDashboard = () => {
         {/* Supply Chain Overview - Takes 2 columns */}
         <div className="lg:col-span-2 bg-white rounded-xl shadow-sm p-6">
           <div className="mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">Supply Chain Overview</h3>
-            <p className="text-sm text-gray-500 mt-1">Track your products across the entire supply chain</p>
+            <h3 className="text-lg font-semibold text-gray-900">
+              Supply Chain Overview
+            </h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Track your products across the entire supply chain
+            </p>
           </div>
 
           <div className="grid grid-cols-5 gap-4">
@@ -377,8 +529,12 @@ const FarmerDashboard = () => {
               </div>
               <div className="text-center">
                 <p className="font-semibold text-gray-900">Farm</p>
-                <p className="text-sm text-gray-600">{dashboardData?.statistics?.totalBatches || "24"} Batches</p>
-                <span className="inline-block px-2 py-1 text-xs bg-green-100 text-green-700 rounded-full mt-1">Active</span>
+                <p className="text-sm text-gray-600">
+                  {dashboardData?.statistics?.totalBatches || "24"} Batches
+                </p>
+                <span className="inline-block px-2 py-1 text-xs bg-green-100 text-green-700 rounded-full mt-1">
+                  Active
+                </span>
               </div>
             </div>
 
@@ -389,7 +545,9 @@ const FarmerDashboard = () => {
               <div className="text-center">
                 <p className="font-semibold text-gray-900">Processing</p>
                 <p className="text-sm text-gray-600">18 Units</p>
-                <span className="inline-block px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-full mt-1">Active</span>
+                <span className="inline-block px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-full mt-1">
+                  Active
+                </span>
               </div>
             </div>
 
@@ -400,7 +558,9 @@ const FarmerDashboard = () => {
               <div className="text-center">
                 <p className="font-semibold text-gray-900">Distribution</p>
                 <p className="text-sm text-gray-600">328 Shipments</p>
-                <span className="inline-block px-2 py-1 text-xs bg-orange-100 text-orange-700 rounded-full mt-1">Active</span>
+                <span className="inline-block px-2 py-1 text-xs bg-orange-100 text-orange-700 rounded-full mt-1">
+                  Active
+                </span>
               </div>
             </div>
 
@@ -411,7 +571,9 @@ const FarmerDashboard = () => {
               <div className="text-center">
                 <p className="font-semibold text-gray-900">Retail</p>
                 <p className="text-sm text-gray-600">156 Stores</p>
-                <span className="inline-block px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded-full mt-1">Active</span>
+                <span className="inline-block px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded-full mt-1">
+                  Active
+                </span>
               </div>
             </div>
 
@@ -422,7 +584,9 @@ const FarmerDashboard = () => {
               <div className="text-center">
                 <p className="font-semibold text-gray-900">Delivered</p>
                 <p className="text-sm text-gray-600">892 Orders</p>
-                <span className="inline-block px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded-full mt-1">Complete</span>
+                <span className="inline-block px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded-full mt-1">
+                  Complete
+                </span>
               </div>
             </div>
           </div>
@@ -436,7 +600,9 @@ const FarmerDashboard = () => {
           </div>
 
           <div className="mb-6">
-            <div className="text-5xl font-bold mb-2">24°C</div>
+            <div className="text-5xl font-bold mb-2">
+              {weatherData.temperature}
+            </div>
             <div className="flex items-center text-blue-100">
               <MapPin className="h-4 w-4 mr-1" />
               <span>{weatherData.location}</span>
@@ -460,13 +626,13 @@ const FarmerDashboard = () => {
               <span className="font-semibold">{weatherData.windSpeed}</span>
             </div>
 
-            <div className="flex items-center justify-between py-2">
+            {/* <div className="flex items-center justify-between py-2">
               <div className="flex items-center">
                 <CloudRain className="h-5 w-5 mr-2" />
                 <span>Precipitation</span>
               </div>
               <span className="font-semibold">{weatherData.precipitation}</span>
-            </div>
+            </div> */}
           </div>
 
           <div>
@@ -477,6 +643,7 @@ const FarmerDashboard = () => {
                   <p className="text-xs mb-1">{day.day}</p>
                   <Sun className="h-5 w-5 mx-auto mb-1" />
                   <p className="text-sm font-semibold">{day.temp}</p>
+                  <p className="text-xs">{day.description}</p>
                 </div>
               ))}
             </div>
@@ -490,8 +657,12 @@ const FarmerDashboard = () => {
         <div className="lg:col-span-2 bg-white rounded-xl shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">GIS Map Overview</h3>
-              <p className="text-sm text-gray-500 mt-1">Real-time farm and shipment tracking</p>
+              <h3 className="text-lg font-semibold text-gray-900">
+                GIS Map Overview
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Real-time farm and shipment tracking
+              </p>
             </div>
             <div className="flex items-center space-x-2">
               <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
@@ -507,10 +678,18 @@ const FarmerDashboard = () => {
           </div>
 
           <div className="relative">
-            <div className="h-80 rounded-xl mb-4 overflow-hidden cursor-pointer" onClick={() => router.push("/farmer/gis")}>
+            <div
+              className="h-80 rounded-xl mb-4 overflow-hidden cursor-pointer"
+              onClick={() => router.push("/farmer/gis")}
+            >
               <ArcGISMap
-                webMapId={process.env.NEXT_PUBLIC_ARCGIS_TOKEN_ID_WEBMAP || "a24b5bc059d2478e843f4c1968e47860"}
+                webMapId={
+                  process.env.NEXT_PUBLIC_ARCGIS_TOKEN_ID_WEBMAP ||
+                  "a24b5bc059d2478e843f4c1968e47860"
+                }
                 dragable={true}
+                height="70vh"
+                zoom={5}
               />
             </div>
 
@@ -534,7 +713,9 @@ const FarmerDashboard = () => {
         {/* Recent Transactions */}
         <div className="bg-white rounded-xl shadow-sm p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">Recent Transactions</h3>
+            <h3 className="text-lg font-semibold text-gray-900">
+              Recent Transactions
+            </h3>
             <button className="text-sm text-green-600 hover:text-green-700 font-medium flex items-center">
               View All
               <ArrowUpRight className="h-4 w-4 ml-1" />
@@ -543,24 +724,41 @@ const FarmerDashboard = () => {
 
           <div className="space-y-4">
             {recentTransactions.map((transaction) => (
-              <div key={transaction.id} className="flex items-start space-x-3 p-3 hover:bg-gray-50 rounded-lg transition-colors">
-                <div className={`p-2 rounded-lg ${
-                  transaction.type === 'income' ? 'bg-green-100' : 'bg-red-100'
-                }`}>
-                  <ArrowUpRight className={`h-5 w-5 ${
-                    transaction.type === 'income' ? 'text-green-600' : 'text-red-600 rotate-180'
-                  }`} />
+              <div
+                key={transaction.id}
+                className="flex items-start space-x-3 p-3 hover:bg-gray-50 rounded-lg transition-colors"
+              >
+                <div
+                  className={`p-2 rounded-lg ${
+                    transaction.type === "income"
+                      ? "bg-green-100"
+                      : "bg-red-100"
+                  }`}
+                >
+                  <ArrowUpRight
+                    className={`h-5 w-5 ${
+                      transaction.type === "income"
+                        ? "text-green-600"
+                        : "text-red-600 rotate-180"
+                    }`}
+                  />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-900 truncate">
                     {transaction.batch}
                   </p>
                   <p className="text-xs text-gray-500">{transaction.weight}</p>
-                  <p className="text-xs text-gray-400 mt-1">{transaction.time}</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {transaction.time}
+                  </p>
                 </div>
-                <div className={`text-sm font-bold ${
-                  transaction.type === 'income' ? 'text-green-600' : 'text-red-600'
-                }`}>
+                <div
+                  className={`text-sm font-bold ${
+                    transaction.type === "income"
+                      ? "text-green-600"
+                      : "text-red-600"
+                  }`}
+                >
                   {transaction.amount}
                 </div>
               </div>
@@ -574,9 +772,13 @@ const FarmerDashboard = () => {
         <div className="bg-white rounded-xl shadow-sm">
           <div className="px-6 py-4 border-b border-gray-200">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">Recent Batches</h2>
+              <h2 className="text-lg font-semibold text-gray-900">
+                Recent Batches
+              </h2>
               <div className="flex items-center space-x-4">
-                <span className="text-sm text-gray-500">{batches.length} total batches</span>
+                <span className="text-sm text-gray-500">
+                  {batches.length} total batches
+                </span>
                 <button
                   onClick={() => setCurrentView("batches")}
                   className="text-sm text-green-600 hover:text-green-700 font-medium flex items-center"
@@ -615,9 +817,12 @@ const FarmerDashboard = () => {
           <div className="mx-auto h-16 w-16 text-gray-400 mb-4">
             <Package className="h-full w-full" />
           </div>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">No Batches Yet</h3>
+          <h3 className="text-xl font-semibold text-gray-900 mb-2">
+            No Batches Yet
+          </h3>
           <p className="text-gray-600 mb-6 max-w-md mx-auto">
-            Start by creating your first agricultural batch to track through the supply chain.
+            Start by creating your first agricultural batch to track through the
+            supply chain.
           </p>
           <button
             onClick={handleCreateBatch}

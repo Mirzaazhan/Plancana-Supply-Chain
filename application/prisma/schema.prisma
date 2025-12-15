@@ -236,6 +236,7 @@ model FarmLocation {
   farmName          String
   latitude          Float
   longitude         Float
+  location          String?
   elevation         Float?
   farmBoundary      Json?    // GeoJSON polygon
   soilType          String?
@@ -255,7 +256,6 @@ model Batch {
   batchId           String       @unique // BATCH_2024_001
   farmerId          String
   farmLocationId    String?
-  cropType          String?      // Fruit, Vegetable, Cash Crop, Herb/Spice, Industrial Crop
   productType       String
   variety           String?
   quantity          Float
@@ -288,7 +288,6 @@ model Batch {
   // Certifications & Compliance
   certifications    String[]     // Organic, Halal, MyGAP, GLOBALG.A.P, etc.
   customCertification String?    // Custom certification if not in dropdown
-  myGapCertNumber   String?      // myGAP Certificate Number (database only, not on blockchain)
 
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
@@ -313,10 +312,8 @@ enum BatchStatus {
   PROCESSING
   PROCESSED
   IN_TRANSIT
-  IN_DISTRIBUTION
   DELIVERED
   RETAIL_READY
-  IN_RETAIL
   SOLD
   RECALLED
 }
@@ -357,16 +354,32 @@ model ProcessingRecord {
   energyUsage       Float?   // kWh
   waterUsage        Float?   // liters
   blockchainHash    String?
+<<<<<<< Updated upstream
+  
+=======
 
   // Location tracking at processing level
   processingLocation String? // Address or location name
   latitude          Float?   // Processing location coordinates
   longitude         Float?
 
+  //weather data
+  temperature       Float?
+  humidity          Float?
+  weather_main      String?
+  weather_desc      String?
+
+  //weather data
+  temperature       Float?
+  humidity          Float?
+  weather_main      String?
+  weather_desc      String?
+
+>>>>>>> Stashed changes
   batch             Batch @relation(fields: [batchId], references: [id])
   processor         ProcessorProfile @relation(fields: [processorId], references: [id])
   facility          ProcessingFacility @relation(fields: [facilityId], references: [id])
-
+  
   @@map("processing_records")
 }
 
@@ -436,12 +449,14 @@ model Transaction {
   paymentStatus     String   @default("PENDING")
   invoiceNumber     String?
   blockchainHash    String?
-
+  
   batch             Batch @relation(fields: [batchId], references: [id])
-
+  
   @@map("transactions")
 }
 
+<<<<<<< Updated upstream
+=======
 model BatchTransfer {
   id                String   @id @default(cuid())
   batchId           String
@@ -461,6 +476,12 @@ model BatchTransfer {
   latitude          Float?
   longitude         Float?
   conditions        Json?    // Storage/transport conditions
+
+  //weather data
+  temperature       Float?
+  humidity          Float?
+  weather_main      String?
+  weather_desc      String?
 
   // Documentation
   documents         String[] // URLs to transfer documents
@@ -508,6 +529,9 @@ model DistributionRecord {
   storageConditions   String?
   temperatureControl  String?
   humidity            Float?
+  temperature       Float?
+  weather_main      String?
+  weather_desc      String?
 
   // Logistics
   vehicleType         String?
@@ -552,6 +576,7 @@ model DistributionRecord {
   @@map("distribution_records")
 }
 
+>>>>>>> Stashed changes
 model WeatherData {
   id                String   @id @default(cuid())
   batchId           String?
@@ -568,6 +593,25 @@ model WeatherData {
   farmLocation      FarmLocation @relation(fields: [locationId], references: [id])
   
   @@map("weather_data")
+}
+
+model BatchLocationHistory{
+  id                String   @id @default(cuid())
+  batchId           String
+  eventType         String
+  latitude          Float
+  longitude         Float
+  timestamp         DateTime @default(now())
+  metadata          Json? //for weatherData
+
+
+  batch             Batch @relation(fields: [batchId], references: [id])
+
+  geom_point Unsupported("geography(Point, 4326)")?
+
+  @@index([batchId, timestamp])
+  @@index([geom_point], type: Gist)
+  @@map("batch_location_history")
 }
 
 model ActivityLog {

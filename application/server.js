@@ -1,31 +1,31 @@
 // server.js - Agricultural Supply Chain API Server with Database Integration
-const express = require('express');
-const { Gateway, Wallets } = require('fabric-network');
-const QRCode = require('qrcode');
-const path = require('path');
-const fs = require('fs');
-const cors = require('cors');
-require('dotenv').config();
-const crypto = require('crypto');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const { PrismaClient, Prisma } = require('@prisma/client');
-const multer = require('multer');
-const nodemailer = require('nodemailer');
+const express = require("express");
+const { Gateway, Wallets } = require("fabric-network");
+const QRCode = require("qrcode");
+const path = require("path");
+const fs = require("fs");
+const cors = require("cors");
+require("dotenv").config();
+const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
+const { PrismaClient, Prisma } = require("@prisma/client");
+const multer = require("multer");
+const nodemailer = require("nodemailer");
 
 // Initialize Prisma
 const prisma = new PrismaClient();
 async function updateGeometryPoint(tableName, id, lat, lng) {
-    // Check if coordinates exist
-    if (lat === undefined || lng === undefined || lat === null || lng === null) {
-        return; 
-    }
-    const srid = 4326; // WGS 84 spatial reference system
+  // Check if coordinates exist
+  if (lat === undefined || lng === undefined || lat === null || lng === null) {
+    return;
+  }
+  const srid = 4326; // WGS 84 spatial reference system
 
-    try {
-            // ✅ CRITICAL FIX: Explicitly cast the SRID parameter to INTEGER 
-            // and ensure ST_MakePoint result is cast to GEOMETRY before ST_SetSRID.
-            await prisma.$executeRaw(Prisma.sql`
+  try {
+    // ✅ CRITICAL FIX: Explicitly cast the SRID parameter to INTEGER
+    // and ensure ST_MakePoint result is cast to GEOMETRY before ST_SetSRID.
+    await prisma.$executeRaw(Prisma.sql`
                 UPDATE ${Prisma.raw(tableName)}
                 SET geom_point = public.ST_SetSRID(
                     public.ST_MakePoint(${lng}::double precision, ${lat}::double precision)::geometry, 
@@ -33,12 +33,113 @@ async function updateGeometryPoint(tableName, id, lat, lng) {
                 )::geography
                 WHERE id = ${id}
             `);
-            console.log(`✅ PostGIS: Updated geometry for ${tableName} ID ${id}`);
-        } catch (error) {
-            // This MUST re-throw so the main route can catch the error and respond once.
-            console.error(`❌ PostGIS Error updating ${tableName}:`, error.message);
-            throw error; 
-        }
+    console.log(`✅ PostGIS: Updated geometry for ${tableName} ID ${id}`);
+  } catch (error) {
+    // This MUST re-throw so the main route can catch the error and respond once.
+    console.error(`❌ PostGIS Error updating ${tableName}:`, error.message);
+    throw error;
+  }
+}
+/**
+ * Creates a record in the BatchLocationHistory table and updates the PostGIS geometry.
+ * @param {string} batchId
+ * @param {string} eventType
+ * @param {number} lat
+ * @param {number} lng
+ * @param {object} [metadata=null]
+ */
+async function logBatchLocation(batchId, eventType, lat, lng, metadata = null) {
+  if (!lat || !lng) {
+    console.warn(
+      `Cannot log location history for batch ${batchId}: Coordinates missing.`
+    );
+    return null;
+  }
+
+  try {
+    const historyRecord = await prisma.batchLocationHistory.create({
+      data: {
+        batchId: batchId,
+        eventType: eventType,
+        latitude: lat,
+        longitude: lng,
+        metadata: metadata || Prisma.DbNull,
+      },
+    });
+
+    const srid = 4326;
+    await prisma.$executeRaw(Prisma.sql`
+            UPDATE "batch_location_history"
+            SET geom_point = public.ST_SetSRID(
+                public.ST_MakePoint(${lng}::double precision, ${lat}::double precision)::geometry, 
+                ${srid}::integer
+            )::geography
+            WHERE id = ${historyRecord.id}
+        `);
+
+    console.log(
+      `Logged location history event: ${eventType} for Batch ${batchId}`
+    );
+    return historyRecord;
+  } catch (error) {
+    console.error(
+      `Error logging location history for batch ${batchId}:`,
+      error.message
+    );
+    return null;
+  }
+}
+
+/**
+ * Fetches the Latitude and Longitude for any given spatial entity record ID.
+ * @param {string} recordId // the user id
+ * @param {string} entityType //user name
+ * @returns {Promise<{lat: number, lng: number} | null>}
+ */
+async function getCoordinates(recordId, entityType) {
+  let model;
+  let latField = "latitude";
+  let lngField = "longitude";
+
+  // Map the string entityType to the correct Prisma model instance
+  switch (entityType) {
+    case "FarmLocation":
+      model = prisma.farmLocation;
+      break;
+    case "ProcessingFacility":
+      model = prisma.processingFacility;
+      break;
+    case "DistributorProfile":
+      model = prisma.distributorProfile;
+      break;
+    case "RetailerProfile":
+      model = prisma.retailerProfile;
+      break;
+    default:
+      console.error(`Unknown entity type: ${entityType}`);
+      return null;
+  }
+  try {
+    const record = await model.findUnique({
+      where: { id: recordId },
+      // Dynamically select the latitude and longitude fields
+      select: { [latField]: true, [lngField]: true },
+    });
+
+    if (record && record[latField] !== null && record[lngField] !== null) {
+      return {
+        lat: parseFloat(record[latField]),
+        lng: parseFloat(record[lngField]),
+      };
+    }
+    return null;
+  } catch (error) {
+    console.error(
+      `Error fetching coordinates for ${entityType}:`,
+      error.message
+    );
+    return null;
+  }
 }
 
 const app = express();
@@ -46,163 +147,165 @@ const PORT = process.env.PORT || 3000;
 
 // Helper function: Retry logic for MVCC conflicts
 async function retryOnMVCCConflict(fn, maxRetries = 3, delayMs = 500) {
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            return await fn();
-        } catch (error) {
-            const isMVCCConflict = error.message && error.message.includes('MVCC_READ_CONFLICT');
-            const isLastAttempt = attempt === maxRetries;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      const isMVCCConflict =
+        error.message && error.message.includes("MVCC_READ_CONFLICT");
+      const isLastAttempt = attempt === maxRetries;
 
-            if (isMVCCConflict && !isLastAttempt) {
-                console.warn(`MVCC conflict detected, retrying... (attempt ${attempt}/${maxRetries})`);
-                await new Promise(resolve => setTimeout(resolve, delayMs * attempt)); // Exponential backoff
-                continue;
-            }
-            throw error; // Re-throw if not MVCC or if last attempt
-        }
+      if (isMVCCConflict && !isLastAttempt) {
+        console.warn(
+          `MVCC conflict detected, retrying... (attempt ${attempt}/${maxRetries})`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs * attempt)); // Exponential backoff
+        continue;
+      }
+      throw error; // Re-throw if not MVCC or if last attempt
     }
+  }
 }
 
 // Middleware
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
-app.use(express.static('public'));
-app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
-
+app.use(express.static("public"));
+app.use("/uploads", express.static(path.join(__dirname, "public", "uploads")));
 
 // Trust proxy for getting real IP addresses
-app.set('trust proxy', true);
+app.set("trust proxy", true);
 
 // Authentication middleware
 const authenticate = async (req, res, next) => {
-    try {
-        const token = req.header('Authorization')?.replace('Bearer ', '');
-        
-        if (!token) {
-            return res.status(401).json({ 
-                success: false,
-                error: 'Access denied. No token provided.' 
-            });
-        }
-        
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        
-        // Check if session exists and is valid
-        const session = await prisma.userSession.findUnique({
-            where: { sessionToken: token },
-            include: {
-                user: {
-                    include: {
-                        farmerProfile: true,
-                        processorProfile: true,
-                        distributorProfile: true,
-                        retailerProfile: true,
-                        regulatorProfile: true,
-                        adminProfile: true
-                    }
-                }
-            }
-        });
-        
-        if (!session || session.expiresAt < new Date()) {
-            return res.status(401).json({ 
-                success: false,
-                error: 'Session expired' 
-            });
-        }
-        
-        req.user = session.user;
-        next();
-        
-    } catch (error) {
-        res.status(401).json({ 
-            success: false,
-            error: 'Invalid token' 
-        });
+  try {
+    const token = req.header("Authorization")?.replace("Bearer ", "");
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: "Access denied. No token provided.",
+      });
     }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // Check if session exists and is valid
+    const session = await prisma.userSession.findUnique({
+      where: { sessionToken: token },
+      include: {
+        user: {
+          include: {
+            farmerProfile: true,
+            processorProfile: true,
+            distributorProfile: true,
+            retailerProfile: true,
+            regulatorProfile: true,
+            adminProfile: true,
+          },
+        },
+      },
+    });
+
+    if (!session || session.expiresAt < new Date()) {
+      return res.status(401).json({
+        success: false,
+        error: "Session expired",
+      });
+    }
+
+    req.user = session.user;
+    next();
+  } catch (error) {
+    res.status(401).json({
+      success: false,
+      error: "Invalid token",
+    });
+  }
 };
 
 // Configure multer for image uploads
 
 const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        const uploadPath = path.join(__dirname, 'public', 'uploads', 'profiles');
+  destination: function (req, file, cb) {
+    const uploadPath = path.join(__dirname, "public", "uploads", "profiles");
 
-      // ✅ Correct: mkdir with recursive true and callback
-      fs.mkdir(uploadPath, { recursive: true }, (err) => {
-        if (err) return cb(err);
-        cb(null, uploadPath);
-      });
-    },
-    filename: function (req, file, cb) {
-      cb(null, Date.now() + '-' + file.originalname);
-    }
-  });
+    // ✅ Correct: mkdir with recursive true and callback
+    fs.mkdir(uploadPath, { recursive: true }, (err) => {
+      if (err) return cb(err);
+      cb(null, uploadPath);
+    });
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + "-" + file.originalname);
+  },
+});
 
 const upload = multer({
-    storage: storage,
-    limits: {
-        fileSize: 5 * 1024 * 1024 // 5MB limit
-    },
-    fileFilter: (req, file, cb) => {
-        if (file.mimetype.startsWith('image/')) {
-            cb(null, true);
-        } else {
-            cb(new Error('Only image files are allowed'));
-        }
+  storage: storage,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only image files are allowed"));
     }
+  },
 });
 const createEmailTransporter = () => {
-    // Option A: Gmail (easiest for development)
-    if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-      return nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-          user: process.env.GMAIL_USER,
-          pass: process.env.GMAIL_APP_PASSWORD
-        }
-      });
-    }
-    
-    // Option B: Outlook/Hotmail
-    if (process.env.OUTLOOK_USER && process.env.OUTLOOK_PASSWORD) {
-      return nodemailer.createTransport({
-        service: 'outlook',
-        auth: {
-          user: process.env.OUTLOOK_USER,
-          pass: process.env.OUTLOOK_PASSWORD
-        }
-      });
-    }
-    
-    // Option C: Generic SMTP
-    if (process.env.SMTP_HOST) {
-      return nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: process.env.SMTP_PORT || 587,
-        secure: process.env.SMTP_SECURE === 'true',
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASSWORD
-        }
-      });
-    }
-    
-    // Option D: Development mode - log to console instead
-    console.warn('⚠️  No email configuration found. Emails will be logged to console.');
+  // Option A: Gmail (easiest for development)
+  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
     return nodemailer.createTransport({
-      streamTransport: true,
-      newline: 'unix',
-      buffer: true
+      service: "gmail",
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD,
+      },
     });
-}
+  }
 
+  // Option B: Outlook/Hotmail
+  if (process.env.OUTLOOK_USER && process.env.OUTLOOK_PASSWORD) {
+    return nodemailer.createTransport({
+      service: "outlook",
+      auth: {
+        user: process.env.OUTLOOK_USER,
+        pass: process.env.OUTLOOK_PASSWORD,
+      },
+    });
+  }
+
+  // Option C: Generic SMTP
+  if (process.env.SMTP_HOST) {
+    return nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: process.env.SMTP_PORT || 587,
+      secure: process.env.SMTP_SECURE === "true",
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASSWORD,
+      },
+    });
+  }
+
+  // Option D: Development mode - log to console instead
+  console.warn(
+    "⚠️  No email configuration found. Emails will be logged to console."
+  );
+  return nodemailer.createTransport({
+    streamTransport: true,
+    newline: "unix",
+    buffer: true,
+  });
+};
 
 // 4. Create email sending function
 const sendPasswordResetEmail = async (email, resetToken) => {
   const transporter = createEmailTransporter();
-  const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
+  const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3001";
   const resetLink = `${FRONTEND_URL}/reset-password?token=${resetToken}`;
 
   // Beautiful email template
@@ -254,2355 +357,2565 @@ const sendPasswordResetEmail = async (email, resetToken) => {
   `;
 
   const mailOptions = {
-    from: process.env.FROM_EMAIL || 'noreply@plancana.com',
+    from: process.env.FROM_EMAIL || "noreply@plancana.com",
     to: email,
-    subject: '🔐 Password Reset Request - Plancana',
-    html: emailHTML
+    subject: "🔐 Password Reset Request - Plancana",
+    html: emailHTML,
   };
 
   try {
     const info = await transporter.sendMail(mailOptions);
-    console.log('✅ Password reset email sent:', info.messageId);
+    console.log("✅ Password reset email sent:", info.messageId);
     return { success: true, messageId: info.messageId };
   } catch (error) {
-    console.error('❌ Email sending failed:', error);
+    console.error("❌ Email sending failed:", error);
     return { success: false, error: error.message };
   }
 };
 // Role-based authorization
 const authorize = (allowedRoles) => {
-    return (req, res, next) => {
-        if (!req.user) {
-            return res.status(401).json({ 
-                success: false,
-                error: 'Authentication required' 
-            });
-        }
-        
-        if (!allowedRoles.includes(req.user.role)) {
-            return res.status(403).json({ 
-                success: false,
-                error: 'Access denied. Insufficient permissions.' 
-            });
-        }
-        
-        next();
-    };
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({
+        success: false,
+        error: "Authentication required",
+      });
+    }
+
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        error: "Access denied. Insufficient permissions.",
+      });
+    }
+
+    next();
+  };
 };
-
-
 
 // Blockchain connection helper (UNCHANGED - preserves your date handling)
 class BlockchainService {
-    constructor() {
-        this.walletPath = path.join(process.cwd(), process.env.WALLET_PATH || 'wallet');
-        this.connectionProfilePath = path.join(process.cwd(), process.env.CONNECTION_PROFILE_PATH || './config/connection-profile.json');
+  constructor() {
+    this.walletPath = path.join(
+      process.cwd(),
+      process.env.WALLET_PATH || "wallet"
+    );
+    this.connectionProfilePath = path.join(
+      process.cwd(),
+      process.env.CONNECTION_PROFILE_PATH || "./config/connection-profile.json"
+    );
+  }
+
+  async connectToNetwork() {
+    try {
+      // Create wallet if it doesn't exist
+      const wallet = await Wallets.newFileSystemWallet(this.walletPath);
+
+      // Check if user exists in wallet
+      const identity = await wallet.get("appUser");
+      if (!identity) {
+        console.log(
+          "User identity does not exist in wallet. Please enroll user first."
+        );
+        return null;
+      }
+
+      // Load connection profile
+      const connectionProfile = JSON.parse(
+        fs.readFileSync(this.connectionProfilePath, "utf8")
+      );
+
+      // Create gateway
+      const gateway = new Gateway();
+      await gateway.connect(connectionProfile, {
+        wallet,
+        identity: "appUser",
+        discovery: { enabled: true, asLocalhost: true },
+      });
+
+      // Get network and contract
+      const network = await gateway.getNetwork("mychannel");
+      const contract = network.getContract("agricultural-contract");
+
+      return { gateway, contract };
+    } catch (error) {
+      console.error(`Failed to connect to network: ${error}`);
+      return null;
     }
+  }
 
-    async connectToNetwork() {
-        try {
-            // Create wallet if it doesn't exist
-            const wallet = await Wallets.newFileSystemWallet(this.walletPath);
+  async generateBatchId() {
+    // Generate unique batch ID with timestamp
+    const timestamp = Date.now();
+    const random = Math.floor(Math.random() * 1000);
+    return `BATCH${timestamp}${random}`;
+  }
 
-            // Check if user exists in wallet
-            const identity = await wallet.get('appUser');
-            if (!identity) {
-                console.log('User identity does not exist in wallet. Please enroll user first.');
-                return null;
-            }
+  async generateQRCode(batchId) {
+    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3001";
+    try {
+      const qrData = {
+        batchId: batchId,
+        verificationUrl: `${FRONTEND_URL}/verify/${batchId}`,
+        timestamp: new Date().toISOString(),
+        network: "agricultural-blockchain",
+      };
 
-            // Load connection profile
-            const connectionProfile = JSON.parse(fs.readFileSync(this.connectionProfilePath, 'utf8'));
+      const qrCodeData = await QRCode.toDataURL(JSON.stringify(qrData), {
+        errorCorrectionLevel: "M",
+        type: "image/png",
+        quality: 0.92,
+        margin: 1,
+        width: 256,
+      });
 
-            // Create gateway
-            const gateway = new Gateway();
-            await gateway.connect(connectionProfile, {
-                wallet,
-                identity: 'appUser',
-                discovery: { enabled: true, asLocalhost: true }
-            });
-
-            // Get network and contract
-            const network = await gateway.getNetwork('mychannel');
-            const contract = network.getContract('agricultural-contract');
-
-            return { gateway, contract };
-        } catch (error) {
-            console.error(`Failed to connect to network: ${error}`);
-            return null;
-        }
+      return qrCodeData;
+    } catch (error) {
+      console.error("QR code generation failed:", error);
+      throw error;
     }
+  }
 
-    async generateBatchId() {
-        // Generate unique batch ID with timestamp
-        const timestamp = Date.now();
-        const random = Math.floor(Math.random() * 1000);
-        return `BATCH${timestamp}${random}`;
+  async generateProcessingQRCode(batchId) {
+    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3001";
+    try {
+      const qrData = {
+        batchId: batchId,
+        processingUrl: `${FRONTEND_URL}/process-batch/${batchId}`,
+        timestamp: new Date().toISOString(),
+        network: "agricultural-blockchain",
+        type: "processing",
+      };
+
+      const qrCodeData = await QRCode.toDataURL(JSON.stringify(qrData), {
+        errorCorrectionLevel: "M",
+        type: "image/png",
+        quality: 0.92,
+        margin: 1,
+        width: 256,
+        color: {
+          dark: "#000000",
+          light: "#FFFFFF",
+        },
+      });
+
+      return qrCodeData;
+    } catch (error) {
+      console.error("Processing QR code generation failed:", error);
+      throw error;
     }
+  }
 
-    async generateQRCode(batchId) {
-        const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
-        try {
-            const qrData = {
-                batchId: batchId,
-                verificationUrl: `${FRONTEND_URL}/verify/${batchId}`,
-                timestamp: new Date().toISOString(),
-                network: 'agricultural-blockchain'
-            };
+  async submitTransactionWithRetry(contract, functionName, args, retries = 3) {
+    for (let i = 0; i < retries; i++) {
+      try {
+        console.log(`Attempt ${i + 1} to submit transaction: ${functionName}`);
+        const result = await contract.submitTransaction(functionName, ...args);
+        return result;
+      } catch (error) {
+        console.error(`Transaction attempt ${i + 1} failed:`, error.message);
+        if (i === retries - 1) throw error;
 
-            const qrCodeData = await QRCode.toDataURL(JSON.stringify(qrData), {
-                errorCorrectionLevel: 'M',
-                type: 'image/png',
-                quality: 0.92,
-                margin: 1,
-                width: 256
-            });
-
-            return qrCodeData;
-        } catch (error) {
-            console.error('QR code generation failed:', error);
-            throw error;
-        }
+        // Wait before retry
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
     }
-
-    async generateProcessingQRCode(batchId) {
-        const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
-        try {
-            const qrData = {
-                batchId: batchId,
-                processingUrl: `${FRONTEND_URL}/process-batch/${batchId}`,
-                timestamp: new Date().toISOString(),
-                network: 'agricultural-blockchain',
-                type: 'processing'
-            };
-
-            const qrCodeData = await QRCode.toDataURL(JSON.stringify(qrData), {
-                errorCorrectionLevel: 'M',
-                type: 'image/png',
-                quality: 0.92,
-                margin: 1,
-                width: 256,
-                color: {
-                    dark: '#000000',
-                    light: '#FFFFFF'
-                }
-            });
-
-            return qrCodeData;
-        } catch (error) {
-            console.error('Processing QR code generation failed:', error);
-            throw error;
-        }
-    }
-
-    async submitTransactionWithRetry(contract, functionName, args, retries = 3) {
-        for (let i = 0; i < retries; i++) {
-            try {
-                console.log(`Attempt ${i + 1} to submit transaction: ${functionName}`);
-                const result = await contract.submitTransaction(functionName, ...args);
-                return result;
-            } catch (error) {
-                console.error(`Transaction attempt ${i + 1} failed:`, error.message);
-                if (i === retries - 1) throw error;
-                
-                // Wait before retry
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-        }
-    }
+  }
 }
 
 const blockchainService = new BlockchainService();
 
 // PRESERVE YOUR DATE FORMATTING FUNCTIONS (UNCHANGED)
 function formatBlockchainDates(data) {
-    if (Array.isArray(data)) {
-        return data.map(item => formatBlockchainDates(item));
-    }
-    
-    if (typeof data === 'object' && data !== null) {
-        const formatted = { ...data };
-        
-        // Fix common date fields
-        const dateFields = ['createdDate', 'lastUpdated', 'timestamp'];
-        
-        dateFields.forEach(field => {
-            if (formatted[field]) {
-                // If it's a nanosecond timestamp (has decimal point)
-                if (typeof formatted[field] === 'string' && formatted[field].includes('.')) {
-                    const seconds = parseFloat(formatted[field]);
-                    formatted[field] = new Date(seconds * 1000).toISOString();
-                }
-            }
-        });
-        
-        // Fix statusHistory dates
-        if (formatted.statusHistory && Array.isArray(formatted.statusHistory)) {
-            formatted.statusHistory = formatted.statusHistory.map(history => ({
-                ...history,
-                timestamp: history.timestamp && history.timestamp.includes('.') 
-                    ? new Date(parseFloat(history.timestamp) * 1000).toISOString()
-                    : history.timestamp
-            }));
+  if (Array.isArray(data)) {
+    return data.map((item) => formatBlockchainDates(item));
+  }
+
+  if (typeof data === "object" && data !== null) {
+    const formatted = { ...data };
+
+    // Fix common date fields
+    const dateFields = ["createdDate", "lastUpdated", "timestamp"];
+
+    dateFields.forEach((field) => {
+      if (formatted[field]) {
+        // If it's a nanosecond timestamp (has decimal point)
+        if (
+          typeof formatted[field] === "string" &&
+          formatted[field].includes(".")
+        ) {
+          const seconds = parseFloat(formatted[field]);
+          formatted[field] = new Date(seconds * 1000).toISOString();
         }
-        
-        return formatted;
+      }
+    });
+
+    // Fix statusHistory dates
+    if (formatted.statusHistory && Array.isArray(formatted.statusHistory)) {
+      formatted.statusHistory = formatted.statusHistory.map((history) => ({
+        ...history,
+        timestamp:
+          history.timestamp && history.timestamp.includes(".")
+            ? new Date(parseFloat(history.timestamp) * 1000).toISOString()
+            : history.timestamp,
+      }));
     }
-    
-    return data;
+
+    return formatted;
+  }
+
+  return data;
 }
 function calculateStableHash(batch) {
-    // Create a stable version by excluding changing fields
-    const stableData = {
-        batchId: batch.batchId,
-        farmerId: batch.farmerId,
-        productType: batch.productType,
-        variety: batch.variety,
-        quantity: batch.quantity,
-        unit: batch.unit,
-        harvestDate: batch.harvestDate,
-        cultivationMethod: batch.cultivationMethod,
-        seedsSource: batch.seedsSource,
-        irrigationMethod: batch.irrigationMethod,
-        fertilizers: batch.fertilizers,
-        pesticides: batch.pesticides,
-        qualityGrade: batch.qualityGrade,
-        moistureContent: batch.moistureContent,
-        proteinContent: batch.proteinContent,
-        images: batch.images,
-        notes: batch.notes,
-        status: batch.status
-        // Exclude: id, createdAt, updatedAt, blockchainHash, dataHash, qrCodeHash
-    };
-    
-    return crypto
-        .createHash('sha256')
-        .update(JSON.stringify(stableData))
-        .digest('hex');
+  // Create a stable version by excluding changing fields
+  const stableData = {
+    batchId: batch.batchId,
+    farmerId: batch.farmerId,
+    productType: batch.productType,
+    variety: batch.variety,
+    quantity: batch.quantity,
+    unit: batch.unit,
+    harvestDate: batch.harvestDate,
+    cultivationMethod: batch.cultivationMethod,
+    seedsSource: batch.seedsSource,
+    irrigationMethod: batch.irrigationMethod,
+    fertilizers: batch.fertilizers,
+    pesticides: batch.pesticides,
+    qualityGrade: batch.qualityGrade,
+    moistureContent: batch.moistureContent,
+    proteinContent: batch.proteinContent,
+    images: batch.images,
+    notes: batch.notes,
+    status: batch.status,
+    // Exclude: id, createdAt, updatedAt, blockchainHash, dataHash, qrCodeHash
+  };
+
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify(stableData))
+    .digest("hex");
 }
 
-
-
 function formatVerificationData(verification) {
-    // Fix timestamp formats
-    const formatted = { ...verification };
-    
-    // Format main dates
-    if (formatted.createdDate && formatted.createdDate.includes('.')) {
-        formatted.createdDate = new Date(parseFloat(formatted.createdDate) * 1000).toISOString();
-        formatted.createdDateFormatted = new Date(parseFloat(verification.createdDate) * 1000).toLocaleString();
-    }
-    
-    if (formatted.lastUpdated && formatted.lastUpdated.includes('.')) {
-        formatted.lastUpdated = new Date(parseFloat(formatted.lastUpdated) * 1000).toISOString();
-        formatted.lastUpdatedFormatted = new Date(parseFloat(verification.lastUpdated) * 1000).toLocaleString();
-    }
-    
-    // Format status history
-    if (formatted.statusHistory && Array.isArray(formatted.statusHistory)) {
-        formatted.statusHistory = formatted.statusHistory.map(history => ({
-            ...history,
-            timestamp: history.timestamp && history.timestamp.includes('.') 
-                ? new Date(parseFloat(history.timestamp) * 1000).toISOString()
-                : history.timestamp,
-            timestampFormatted: history.timestamp && history.timestamp.includes('.')
-                ? new Date(parseFloat(history.timestamp) * 1000).toLocaleString()
-                : new Date(history.timestamp).toLocaleString()
-        }));
-    }
-    
-    // Add verification summary
-    formatted.verificationSummary = {
-        batchExists: true,
-        farmer: formatted.farmer,
-        crop: formatted.crop,
-        quantity: `${formatted.quantity} kg`,
-        location: formatted.location,
-        currentStatus: formatted.status || 'created',
-        ageInDays: formatted.createdDate 
-            ? Math.floor((Date.now() - new Date(formatted.createdDate).getTime()) / (1000 * 60 * 60 * 24))
-            : 0,
-        totalStatusChanges: formatted.statusHistory ? formatted.statusHistory.length : 0
-    };
-    
-    return formatted;
+  // Fix timestamp formats
+  const formatted = { ...verification };
+
+  // Format main dates
+  if (formatted.createdDate && formatted.createdDate.includes(".")) {
+    formatted.createdDate = new Date(
+      parseFloat(formatted.createdDate) * 1000
+    ).toISOString();
+    formatted.createdDateFormatted = new Date(
+      parseFloat(verification.createdDate) * 1000
+    ).toLocaleString();
+  }
+
+  if (formatted.lastUpdated && formatted.lastUpdated.includes(".")) {
+    formatted.lastUpdated = new Date(
+      parseFloat(formatted.lastUpdated) * 1000
+    ).toISOString();
+    formatted.lastUpdatedFormatted = new Date(
+      parseFloat(verification.lastUpdated) * 1000
+    ).toLocaleString();
+  }
+
+  // Format status history
+  if (formatted.statusHistory && Array.isArray(formatted.statusHistory)) {
+    formatted.statusHistory = formatted.statusHistory.map((history) => ({
+      ...history,
+      timestamp:
+        history.timestamp && history.timestamp.includes(".")
+          ? new Date(parseFloat(history.timestamp) * 1000).toISOString()
+          : history.timestamp,
+      timestampFormatted:
+        history.timestamp && history.timestamp.includes(".")
+          ? new Date(parseFloat(history.timestamp) * 1000).toLocaleString()
+          : new Date(history.timestamp).toLocaleString(),
+    }));
+  }
+
+  // Add verification summary
+  formatted.verificationSummary = {
+    batchExists: true,
+    farmer: formatted.farmer,
+    crop: formatted.crop,
+    quantity: `${formatted.quantity} kg`,
+    location: formatted.location,
+    currentStatus: formatted.status || "created",
+    ageInDays: formatted.createdDate
+      ? Math.floor(
+          (Date.now() - new Date(formatted.createdDate).getTime()) /
+            (1000 * 60 * 60 * 24)
+        )
+      : 0,
+    totalStatusChanges: formatted.statusHistory
+      ? formatted.statusHistory.length
+      : 0,
+  };
+
+  return formatted;
 }
 
 // AUTHENTICATION ROUTES
 // Register new user
-app.post('/api/auth/register', async (req, res) => {
-    try {
-        const { email, username, password, role, profileData } = req.body;
-        
-        // Validate required fields
-        if (!email || !username || !password || !role) {
-            return res.status(400).json({
-                success: false,
-                error: 'Missing required fields: email, username, password, role'
-            });
-        }
-        
-        // Check if user exists
-        const existingUser = await prisma.user.findFirst({
-            where: {
-                OR: [
-                    { email },
-                    { username }
-                ]
-            }
-        });
-        
-        if (existingUser) {
-            return res.status(400).json({
-                success: false,
-                error: 'User already exists'
-            });
-        }
-        
-        // Hash password
-        const hashedPassword = await bcrypt.hash(password, parseInt(process.env.BCRYPT_ROUNDS || 12));
-        
-        // Create user with profile
-        const user = await prisma.user.create({
-            data: {
-                email,
-                username,
-                password: hashedPassword,
-                role,
-                status: 'ACTIVE', // Auto-activate for demo
-                isEmailVerified: true, // Auto-verify for demo
-                
-                // Create role-specific profile
-                ...(role === 'FARMER' && {
-                    farmerProfile: {
-                        create: {
-                            firstName: profileData?.firstName || 'Farmer',
-                            lastName: profileData?.lastName || 'User',
-                            farmName: profileData?.farmName || 'My Farm',
-                            phone: profileData?.phone || '',
-                            address: profileData?.address || '',
-                            farmSize: profileData?.farmSize || 0,
-                            primaryCrops: profileData?.primaryCrops || [],
-                            farmingType: profileData?.farmingType || []
-                        }
-                    }
-                }),
-                
-                ...(role === 'PROCESSOR' && {
-                    processorProfile: {
-                        create: {
-                            companyName: profileData?.companyName || 'Processing Company',
-                            contactPerson: profileData?.contactPerson || username,
-                            phone: profileData?.phone || '',
-                            facilityType: profileData?.facilityType || [],
-                            processingCapacity: profileData?.processingCapacity || 0,
-                            certifications: profileData?.certifications || []
-                        }
-                    }
-                }),
-                
-                ...(role === 'ADMIN' && {
-                    adminProfile: {
-                        create: {
-                            firstName: profileData?.firstName || 'Admin',
-                            lastName: profileData?.lastName || 'User',
-                            phone: profileData?.phone || '',
-                            adminLevel: 'ADMIN',
-                            permissions: ['user_management', 'system_config']
-                        }
-                    }
-                })
-            }
-        });
-        
-        res.status(201).json({
-            success: true,
-            message: 'Registration successful',
-            userId: user.id
-        });
-        
-    } catch (error) {
-        console.error('Registration error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Registration failed',
-            details: error.message
-        });
+app.post("/api/auth/register", async (req, res) => {
+  try {
+    const { email, username, password, role, profileData } = req.body;
+
+    // Validate required fields
+    if (!email || !username || !password || !role) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing required fields: email, username, password, role",
+      });
     }
+
+    // Check if user exists
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        OR: [{ email }, { username }],
+      },
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        error: "User already exists",
+      });
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(
+      password,
+      parseInt(process.env.BCRYPT_ROUNDS || 12)
+    );
+
+    // Create user with profile
+    const user = await prisma.user.create({
+      data: {
+        email,
+        username,
+        password: hashedPassword,
+        role,
+        status: "ACTIVE", // Auto-activate for demo
+        isEmailVerified: true, // Auto-verify for demo
+
+        // Create role-specific profile
+        ...(role === "FARMER" && {
+          farmerProfile: {
+            create: {
+              firstName: profileData?.firstName || "Farmer",
+              lastName: profileData?.lastName || "User",
+              farmName: profileData?.farmName || "My Farm",
+              phone: profileData?.phone || "",
+              address: profileData?.address || "",
+              farmSize: profileData?.farmSize || 0,
+              primaryCrops: profileData?.primaryCrops || [],
+              farmingType: profileData?.farmingType || [],
+            },
+          },
+        }),
+
+        ...(role === "PROCESSOR" && {
+          processorProfile: {
+            create: {
+              companyName: profileData?.companyName || "Processing Company",
+              contactPerson: profileData?.contactPerson || username,
+              phone: profileData?.phone || "",
+              facilityType: profileData?.facilityType || [],
+              processingCapacity: profileData?.processingCapacity || 0,
+              certifications: profileData?.certifications || [],
+            },
+          },
+        }),
+
+        ...(role === "ADMIN" && {
+          adminProfile: {
+            create: {
+              firstName: profileData?.firstName || "Admin",
+              lastName: profileData?.lastName || "User",
+              phone: profileData?.phone || "",
+              adminLevel: "ADMIN",
+              permissions: ["user_management", "system_config"],
+            },
+          },
+        }),
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Registration successful",
+      userId: user.id,
+    });
+  } catch (error) {
+    console.error("Registration error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Registration failed",
+      details: error.message,
+    });
+  }
 });
 
 // Login user
-app.post('/api/auth/login', async (req, res) => {
-    try {
-        const { email, password } = req.body;
-        const ipAddress = req.ip;
-        const userAgent = req.get('User-Agent');
-        
-        // Find user with profile
-        const user = await prisma.user.findUnique({
-            where: { email },
-            include: {
-                farmerProfile: true,
-                processorProfile: true,
-                distributorProfile: true,
-                retailerProfile: true,
-                regulatorProfile: true,
-                adminProfile: true
-            }
-        });
-        
-        if (!user) {
-            return res.status(401).json({
-                success: false,
-                error: 'Invalid credentials'
-            });
-        }
-        
-        // Check password
-        const isValidPassword = await bcrypt.compare(password, user.password);
-        
-        if (!isValidPassword) {
-            return res.status(401).json({
-                success: false,
-                error: 'Invalid credentials'
-            });
-        }
-        
-        // Check if account is active
-        if (user.status !== 'ACTIVE') {
-            return res.status(401).json({
-                success: false,
-                error: 'Account is not active'
-            });
-        }
-        
-        // Generate JWT token
-        const token = jwt.sign(
-            { 
-                userId: user.id, 
-                email: user.email, 
-                role: user.role 
-            },
-            process.env.JWT_SECRET || 'your-default-secret',
-            { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-        );
-        
-        // Create session
-        const session = await prisma.userSession.create({
-            data: {
-                userId: user.id,
-                sessionToken: token,
-                ipAddress,
-                userAgent,
-                expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
-            }
-        });
-        
-        // Update last login
-        await prisma.user.update({
-            where: { id: user.id },
-            data: { lastLogin: new Date() }
-        });
-        
-        // Log activity
-        await prisma.activityLog.create({
-            data: {
-                userId: user.id,
-                action: 'LOGIN',
-                ipAddress,
-                userAgent,
-                metadata: { sessionId: session.id }
-            }
-        });
-        
-        // Remove sensitive data
-        const { password: _, ...userWithoutPassword } = user;
-        
-        res.json({
-            success: true,
-            user: userWithoutPassword,
-            token,
-            sessionId: session.id
-        });
-        
-    } catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Login failed'
-        });
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const ipAddress = req.ip;
+    const userAgent = req.get("User-Agent");
+
+    // Find user with profile
+    const user = await prisma.user.findUnique({
+      where: { email },
+      include: {
+        farmerProfile: true,
+        processorProfile: true,
+        distributorProfile: true,
+        retailerProfile: true,
+        regulatorProfile: true,
+        adminProfile: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid credentials",
+      });
     }
+
+    // Check password
+    const isValidPassword = await bcrypt.compare(password, user.password);
+
+    if (!isValidPassword) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid credentials",
+      });
+    }
+
+    // Check if account is active
+    if (user.status !== "ACTIVE") {
+      return res.status(401).json({
+        success: false,
+        error: "Account is not active",
+      });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign(
+      {
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+      },
+      process.env.JWT_SECRET || "your-default-secret",
+      { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
+    );
+
+    // Create session
+    const session = await prisma.userSession.create({
+      data: {
+        userId: user.id,
+        sessionToken: token,
+        ipAddress,
+        userAgent,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      },
+    });
+
+    // Update last login
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { lastLogin: new Date() },
+    });
+
+    // Log activity
+    await prisma.activityLog.create({
+      data: {
+        userId: user.id,
+        action: "LOGIN",
+        ipAddress,
+        userAgent,
+        metadata: { sessionId: session.id },
+      },
+    });
+
+    // Remove sensitive data
+    const { password: _, ...userWithoutPassword } = user;
+
+    res.json({
+      success: true,
+      user: userWithoutPassword,
+      token,
+      sessionId: session.id,
+    });
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Login failed",
+    });
+  }
 });
 // Request password reset
-app.post('/api/auth/forgot-password', async (req, res) => {
-    try {
-        const { email } = req.body;
+app.post("/api/auth/forgot-password", async (req, res) => {
+  try {
+    const { email } = req.body;
 
-        if (!email) {
-            return res.status(400).json({
-                success: false,
-                error: 'Email is required'
-            });
-        }
-
-        // Find user by email
-        const user = await prisma.user.findUnique({
-            where: { email: email.toLowerCase() }
-        });
-
-        if (!user) {
-            // Don't reveal if user exists or not for security
-            return res.json({
-                success: true,
-                message: 'If an account with that email exists, we have sent a password reset link.'
-            });
-        }
-
-        // Generate secure reset token
-        const resetToken = crypto.randomBytes(32).toString('hex');
-        const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
-
-        // Update user with reset token
-        await prisma.user.update({
-            where: { id: user.id },
-            data: {
-                resetPasswordToken: resetToken,
-                resetPasswordExpires: resetTokenExpiry
-            }
-        });
-
-        // Send email (NEW PART!)
-        const emailResult = await sendPasswordResetEmail(user.email, resetToken);
-        
-        if (emailResult.success) {
-            console.log(`✅ Password reset email sent to ${email}`);
-        } else {
-            console.error(`❌ Failed to send email to ${email}:`, emailResult.error);
-        }
-
-        // Log activity
-        await prisma.activityLog.create({
-            data: {
-                userId: user.id,
-                action: 'PASSWORD_RESET_REQUEST',
-                ipAddress: req.ip,
-                userAgent: req.get('User-Agent'),
-                metadata: { 
-                    email,
-                    emailSent: emailResult.success,
-                    messageId: emailResult.messageId
-                }
-            }
-        });
-
-        // Always return success (security - don't reveal if user exists)
-        res.json({
-            success: true,
-            message: 'If an account with that email exists, we have sent a password reset link.'
-        });
-
-    } catch (error) {
-        console.error('Forgot password error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Internal server error'
-        });
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: "Email is required",
+      });
     }
+
+    // Find user by email
+    const user = await prisma.user.findUnique({
+      where: { email: email.toLowerCase() },
+    });
+
+    if (!user) {
+      // Don't reveal if user exists or not for security
+      return res.json({
+        success: true,
+        message:
+          "If an account with that email exists, we have sent a password reset link.",
+      });
+    }
+
+    // Generate secure reset token
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const resetTokenExpiry = new Date(Date.now() + 60 * 60 * 1000); // 1 hour from now
+
+    // Update user with reset token
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetPasswordToken: resetToken,
+        resetPasswordExpires: resetTokenExpiry,
+      },
+    });
+
+    // Send email (NEW PART!)
+    const emailResult = await sendPasswordResetEmail(user.email, resetToken);
+
+    if (emailResult.success) {
+      console.log(`✅ Password reset email sent to ${email}`);
+    } else {
+      console.error(`❌ Failed to send email to ${email}:`, emailResult.error);
+    }
+
+    // Log activity
+    await prisma.activityLog.create({
+      data: {
+        userId: user.id,
+        action: "PASSWORD_RESET_REQUEST",
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+        metadata: {
+          email,
+          emailSent: emailResult.success,
+          messageId: emailResult.messageId,
+        },
+      },
+    });
+
+    // Always return success (security - don't reveal if user exists)
+    res.json({
+      success: true,
+      message:
+        "If an account with that email exists, we have sent a password reset link.",
+    });
+  } catch (error) {
+    console.error("Forgot password error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+    });
+  }
 });
 
 // 2. ✅ MUST HAVE - Verify token is valid
-app.get('/api/auth/verify-reset-token/:token', async (req, res) => {
-    try {
-        const { token } = req.params;
-        
-        console.log('🔍 TOKEN DEBUG: Received token:', token);
-        console.log('🔍 TOKEN DEBUG: Token length:', token.length);
-        console.log('🔍 TOKEN DEBUG: Current time:', new Date().toISOString());
-        
-        const user = await prisma.user.findFirst({
-            where: {
-                resetPasswordToken: token,
-                resetPasswordExpires: {
-                    gt: new Date()
-                }
-            }
-        });
-        
-        console.log('🔍 TOKEN DEBUG: User found with token:', !!user);
-        if (user) {
-            console.log('🔍 TOKEN DEBUG: User email:', user.email);
-            console.log('🔍 TOKEN DEBUG: Token expires at:', user.resetPasswordExpires);
-            console.log('🔍 TOKEN DEBUG: Current time:', new Date().toISOString());
-            console.log('🔍 TOKEN DEBUG: Is expired?', new Date() > user.resetPasswordExpires);
-            console.log('🔍 TOKEN DEBUG: Time remaining (minutes):', Math.floor((user.resetPasswordExpires - new Date()) / 1000 / 60));
-        }
+app.get("/api/auth/verify-reset-token/:token", async (req, res) => {
+  try {
+    const { token } = req.params;
 
-        // ⭐ THE KEY ISSUE: Make sure response matches what frontend expects
-        const response = {
-            success: true,
-            tokenFound: !!user,  // Frontend expects this field
-            user: user ? {
-                email: user.email,
-                expiresAt: user.resetPasswordExpires
-            } : null,
-            message: user ? `Reset token is valid` : 'Token not found or expired'
-        };
+    console.log("🔍 TOKEN DEBUG: Received token:", token);
+    console.log("🔍 TOKEN DEBUG: Token length:", token.length);
+    console.log("🔍 TOKEN DEBUG: Current time:", new Date().toISOString());
 
-        console.log('✅ TOKEN DEBUG: Sending response:', JSON.stringify(response, null, 2));
-        
-        res.json(response);
-        
-    } catch (error) {
-        console.error('❌ TOKEN DEBUG: Error:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: error.message,
-            tokenFound: false 
-        });
+    const user = await prisma.user.findFirst({
+      where: {
+        resetPasswordToken: token,
+        resetPasswordExpires: {
+          gt: new Date(),
+        },
+      },
+    });
+
+    console.log("🔍 TOKEN DEBUG: User found with token:", !!user);
+    if (user) {
+      console.log("🔍 TOKEN DEBUG: User email:", user.email);
+      console.log(
+        "🔍 TOKEN DEBUG: Token expires at:",
+        user.resetPasswordExpires
+      );
+      console.log("🔍 TOKEN DEBUG: Current time:", new Date().toISOString());
+      console.log(
+        "🔍 TOKEN DEBUG: Is expired?",
+        new Date() > user.resetPasswordExpires
+      );
+      console.log(
+        "🔍 TOKEN DEBUG: Time remaining (minutes):",
+        Math.floor((user.resetPasswordExpires - new Date()) / 1000 / 60)
+      );
     }
+
+    // ⭐ THE KEY ISSUE: Make sure response matches what frontend expects
+    const response = {
+      success: true,
+      tokenFound: !!user, // Frontend expects this field
+      user: user
+        ? {
+            email: user.email,
+            expiresAt: user.resetPasswordExpires,
+          }
+        : null,
+      message: user ? `Reset token is valid` : "Token not found or expired",
+    };
+
+    console.log(
+      "✅ TOKEN DEBUG: Sending response:",
+      JSON.stringify(response, null, 2)
+    );
+
+    res.json(response);
+  } catch (error) {
+    console.error("❌ TOKEN DEBUG: Error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      tokenFound: false,
+    });
+  }
 });
 
 // 3. ✅ MUST HAVE - Update password
-app.post('/api/auth/reset-password', async (req, res) => {
-    try {
-        const { token, newPassword, confirmPassword } = req.body;
+app.post("/api/auth/reset-password", async (req, res) => {
+  try {
+    const { token, newPassword, confirmPassword } = req.body;
 
-        // Validation
-        if (!token || !newPassword || !confirmPassword) {
-            return res.status(400).json({
-                success: false,
-                error: 'Token, new password, and confirm password are required'
-            });
-        }
-
-        if (newPassword !== confirmPassword) {
-            return res.status(400).json({
-                success: false,
-                error: 'Passwords do not match'
-            });
-        }
-
-        if (newPassword.length < 6) {
-            return res.status(400).json({
-                success: false,
-                error: 'Password must be at least 6 characters long'
-            });
-        }
-
-        // Find user with valid reset token
-        const user = await prisma.user.findFirst({
-            where: {
-                resetPasswordToken: token,
-                resetPasswordExpires: {
-                    gt: new Date()
-                }
-            }
-        });
-
-        if (!user) {
-            return res.status(400).json({
-                success: false,
-                error: 'Invalid or expired reset token'
-            });
-        }
-
-        // Hash new password
-        const hashedPassword = await bcrypt.hash(newPassword, parseInt(process.env.BCRYPT_ROUNDS || 12));
-
-        // Update user password and clear reset token
-        await prisma.user.update({
-            where: { id: user.id },
-            data: {
-                password: hashedPassword,
-                resetPasswordToken: null,
-                resetPasswordExpires: null
-            }
-        });
-
-        // Invalidate all existing sessions for security
-        await prisma.userSession.deleteMany({
-            where: { userId: user.id }
-        });
-
-        console.log(`✅ Password successfully reset for user: ${user.email}`);
-
-        res.json({
-            success: true,
-            message: 'Password has been reset successfully. Please log in with your new password.'
-        });
-
-    } catch (error) {
-        console.error('Reset password error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Internal server error'
-        });
+    // Validation
+    if (!token || !newPassword || !confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        error: "Token, new password, and confirm password are required",
+      });
     }
-});
-app.post('/api/test-email-simple', async (req, res) => {
-    const nodemailer = require('nodemailer');
-    
-    try {
-        console.log('🧪 Testing email with config:');
-        console.log('Gmail User:', process.env.GMAIL_USER);
-        console.log('Gmail Pass (length):', process.env.GMAIL_APP_PASSWORD?.length);
-        
-        const transporter = nodemailer.createTransport({
-            service: 'gmail',
-            auth: {
-                user: process.env.GMAIL_USER,
-                pass: process.env.GMAIL_APP_PASSWORD
-            }
-        });
 
-        // Test the connection
-        await transporter.verify();
-        console.log('✅ SMTP connection verified');
-
-        // Send test email
-        const info = await transporter.sendMail({
-            from: process.env.GMAIL_USER,
-            to: req.body.email || process.env.GMAIL_USER, // Send to yourself for testing
-            subject: '🧪 Test Email from Plancana',
-            text: 'This is a test email. If you receive this, email is working!',
-            html: '<h2>✅ Email Working!</h2><p>This is a test email from your Plancana app.</p>'
-        });
-
-        console.log('✅ Test email sent:', info.messageId);
-        res.json({ 
-            success: true, 
-            message: 'Test email sent successfully',
-            messageId: info.messageId
-        });
-
-    } catch (error) {
-        console.error('❌ Email test failed:', error);
-        res.status(500).json({ 
-            success: false, 
-            error: error.message 
-        });
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        error: "Passwords do not match",
+      });
     }
-});
-app.get('/api/debug/reset-tokens', async (req, res) => {
-    try {
-        const users = await prisma.user.findMany({
-            where: {
-                resetPasswordToken: { not: null }
-            },
-            select: {
-                id: true,
-                email: true,
-                resetPasswordToken: true,
-                resetPasswordExpires: true
-            }
-        });
-        
-        res.json({
-            success: true,
-            count: users.length,
-            tokens: users.map(user => ({
-                email: user.email,
-                tokenExists: !!user.resetPasswordToken,
-                tokenLength: user.resetPasswordToken?.length,
-                expiresAt: user.resetPasswordExpires,
-                isExpired: user.resetPasswordExpires ? new Date() > user.resetPasswordExpires : null,
-                timeUntilExpiry: user.resetPasswordExpires ? 
-                    Math.round((user.resetPasswordExpires - new Date()) / 1000 / 60) + ' minutes' : null
-            }))
-        });
-    } catch (error) {
-        res.status(500).json({ error: error.message });
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        error: "Password must be at least 6 characters long",
+      });
     }
+
+    // Find user with valid reset token
+    const user = await prisma.user.findFirst({
+      where: {
+        resetPasswordToken: token,
+        resetPasswordExpires: {
+          gt: new Date(),
+        },
+      },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid or expired reset token",
+      });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(
+      newPassword,
+      parseInt(process.env.BCRYPT_ROUNDS || 12)
+    );
+
+    // Update user password and clear reset token
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        password: hashedPassword,
+        resetPasswordToken: null,
+        resetPasswordExpires: null,
+      },
+    });
+
+    // Invalidate all existing sessions for security
+    await prisma.userSession.deleteMany({
+      where: { userId: user.id },
+    });
+
+    console.log(`✅ Password successfully reset for user: ${user.email}`);
+
+    res.json({
+      success: true,
+      message:
+        "Password has been reset successfully. Please log in with your new password.",
+    });
+  } catch (error) {
+    console.error("Reset password error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+    });
+  }
 });
+app.post("/api/test-email-simple", async (req, res) => {
+  const nodemailer = require("nodemailer");
 
+  try {
+    console.log("🧪 Testing email with config:");
+    console.log("Gmail User:", process.env.GMAIL_USER);
+    console.log("Gmail Pass (length):", process.env.GMAIL_APP_PASSWORD?.length);
 
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: {
+        user: process.env.GMAIL_USER,
+        pass: process.env.GMAIL_APP_PASSWORD,
+      },
+    });
+
+    // Test the connection
+    await transporter.verify();
+    console.log("✅ SMTP connection verified");
+
+    // Send test email
+    const info = await transporter.sendMail({
+      from: process.env.GMAIL_USER,
+      to: req.body.email || process.env.GMAIL_USER, // Send to yourself for testing
+      subject: "🧪 Test Email from Plancana",
+      text: "This is a test email. If you receive this, email is working!",
+      html: "<h2>✅ Email Working!</h2><p>This is a test email from your Plancana app.</p>",
+    });
+
+    console.log("✅ Test email sent:", info.messageId);
+    res.json({
+      success: true,
+      message: "Test email sent successfully",
+      messageId: info.messageId,
+    });
+  } catch (error) {
+    console.error("❌ Email test failed:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+app.get("/api/debug/reset-tokens", async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      where: {
+        resetPasswordToken: { not: null },
+      },
+      select: {
+        id: true,
+        email: true,
+        resetPasswordToken: true,
+        resetPasswordExpires: true,
+      },
+    });
+
+    res.json({
+      success: true,
+      count: users.length,
+      tokens: users.map((user) => ({
+        email: user.email,
+        tokenExists: !!user.resetPasswordToken,
+        tokenLength: user.resetPasswordToken?.length,
+        expiresAt: user.resetPasswordExpires,
+        isExpired: user.resetPasswordExpires
+          ? new Date() > user.resetPasswordExpires
+          : null,
+        timeUntilExpiry: user.resetPasswordExpires
+          ? Math.round((user.resetPasswordExpires - new Date()) / 1000 / 60) +
+            " minutes"
+          : null,
+      })),
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // Get current user profile
-app.get('/api/auth/profile', authenticate, async (req, res) => {
-    try {
-        const user = await prisma.user.findUnique({
-            where: { id: req.user.id },
-            include: {
-                farmerProfile: {
-                    include: {
-                        farmLocations: true,
-                        batches: {
-                            take: 5,
-                            orderBy: { createdAt: 'desc' }
-                        }
-                    }
-                },
-                processorProfile: true,
-                distributorProfile: true,
-                retailerProfile: true,
-                regulatorProfile: true,
-                adminProfile: true
-            }
-        });
-        
-        if (!user) {
-            return res.status(404).json({
-                success: false,
-                error: 'User not found'
-            });
-        }
-        
-        // Remove sensitive data
-        const { password, ...userProfile } = user;
-        
-        console.log('Profile data being sent:', JSON.stringify(userProfile, null, 2)); // Debug log
-        
-        res.json({
-            success: true,
-            user: userProfile
-        });
-        
-    } catch (error) {
-        console.error('Profile fetch error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to fetch profile'
-        });
+app.get("/api/auth/profile", authenticate, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      include: {
+        farmerProfile: {
+          include: {
+            farmLocations: true,
+            batches: {
+              take: 5,
+              orderBy: { createdAt: "desc" },
+            },
+          },
+        },
+        processorProfile: true,
+        distributorProfile: true,
+        retailerProfile: true,
+        regulatorProfile: true,
+        adminProfile: true,
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: "User not found",
+      });
     }
+
+    // Remove sensitive data
+    const { password, ...userProfile } = user;
+
+    console.log(
+      "Profile data being sent:",
+      JSON.stringify(userProfile, null, 2)
+    ); // Debug log
+
+    res.json({
+      success: true,
+      user: userProfile,
+    });
+  } catch (error) {
+    console.error("Profile fetch error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch profile",
+    });
+  }
 });
 
 // MAIN ROUTES (ENHANCED WITH DATABASE INTEGRATION)
 
 // Health check (ENHANCED)
-app.get('/', async (req, res) => {
-    try {
-        // Test database connection
-        await prisma.$queryRaw`SELECT 1`;
-        const dbStatus = 'connected';
-        
-        // Test blockchain connection
-        const { gateway, contract } = await blockchainService.connectToNetwork();
-        const blockchainStatus = contract ? 'connected' : 'disconnected';
-        if (gateway) await gateway.disconnect();
-        
-        res.json({
-            message: 'Agricultural Supply Chain API with Database Integration',
-            status: 'running',
-            timestamp: new Date().toISOString(),
-            services: {
-                database: dbStatus,
-                blockchain: blockchainStatus
-            },
-            endpoints: {
-                'POST /api/auth/register': 'Register new user',
-                'POST /api/auth/login': 'Login user',
-                'GET /api/auth/profile': 'Get user profile',
-                'POST /api/batch/create': 'Create new crop batch',
-                'GET /api/batch/:batchId': 'Get batch details',
-                'GET /api/verify/:batchId': 'Verify batch (QR scan)',
-                'GET /api/batches': 'Get all batches',
-                'GET /api/qr/:batchId': 'Get QR code for batch',
-                'GET /api/farmer/my-batches': 'Get current farmer batches',
-                'GET /api/batch/check/:batchId': 'Check if batch ID exists'
-            }
-        });
-    } catch (error) {
-        res.status(500).json({
-            message: 'Agricultural Supply Chain API',
-            status: 'error',
-            error: error.message
-        });
-    }
+app.get("/", async (req, res) => {
+  try {
+    // Test database connection
+    await prisma.$queryRaw`SELECT 1`;
+    const dbStatus = "connected";
+
+    // Test blockchain connection
+    const { gateway, contract } = await blockchainService.connectToNetwork();
+    const blockchainStatus = contract ? "connected" : "disconnected";
+    if (gateway) await gateway.disconnect();
+
+    res.json({
+      message: "Agricultural Supply Chain API with Database Integration",
+      status: "running",
+      timestamp: new Date().toISOString(),
+      services: {
+        database: dbStatus,
+        blockchain: blockchainStatus,
+      },
+      endpoints: {
+        "POST /api/auth/register": "Register new user",
+        "POST /api/auth/login": "Login user",
+        "GET /api/auth/profile": "Get user profile",
+        "POST /api/batch/create": "Create new crop batch",
+        "GET /api/batch/:batchId": "Get batch details",
+        "GET /api/verify/:batchId": "Verify batch (QR scan)",
+        "GET /api/batches": "Get all batches",
+        "GET /api/qr/:batchId": "Get QR code for batch",
+        "GET /api/farmer/my-batches": "Get current farmer batches",
+        "GET /api/batch/check/:batchId": "Check if batch ID exists",
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: "Agricultural Supply Chain API",
+      status: "error",
+      error: error.message,
+    });
+  }
 });
 
 // Create new crop batch (ENHANCED WITH DATABASE)
-app.post('/api/batch/create', authenticate, authorize(['FARMER']), async (req, res) => {
+app.post(
+  "/api/batch/create",
+  authenticate,
+  authorize(["FARMER"]),
+  async (req, res) => {
     try {
-        const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
-        const { farmer, cropType, crop, quantity, location, customBatchId,latitude,longitude, ...additionalData } = req.body;       
+      const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3001";
+      const {
+        farmer,
+        cropType,
+        crop,
+        quantity,
+        location,
+        customBatchId,
+        latitude,
+        longitude,
+        ...additionalData
+      } = req.body;
 
-        // DEBUG: Log received data
-        console.log('📥 Received batch creation request:');
-        console.log('   Basic fields:', { farmer, cropType, crop, quantity, location });
-        console.log('   Additional data:', JSON.stringify(additionalData, null, 2));
-        console.log('   Pricing fields:', {
-            pricePerUnit: additionalData.pricePerUnit,
-            currency: additionalData.currency,
-            totalBatchValue: additionalData.totalBatchValue,
-            paymentMethod: additionalData.paymentMethod,
-            buyerName: additionalData.buyerName
+      // DEBUG: Log received data
+      console.log("📥 Received batch creation request:");
+      console.log("   Basic fields:", {
+        farmer,
+        cropType,
+        crop,
+        quantity,
+        location,
+      });
+      console.log(
+        "   Additional data:",
+        JSON.stringify(additionalData, null, 2)
+      );
+      console.log("   Pricing fields:", {
+        pricePerUnit: additionalData.pricePerUnit,
+        currency: additionalData.currency,
+        totalBatchValue: additionalData.totalBatchValue,
+        paymentMethod: additionalData.paymentMethod,
+        buyerName: additionalData.buyerName,
+      });
+
+      // Validate required fields
+      if (!farmer || !crop || !quantity || !location) {
+        return res.status(400).json({
+          success: false,
+          error: "Missing required fields: farmer, crop, quantity, location",
         });
+      }
 
-        // Validate required fields
-        if (!farmer || !crop || !quantity || !location) {
-            return res.status(400).json({
-                success: false,
-                error: 'Missing required fields: farmer, crop, quantity, location'
-            });
-        }
+      // Get farmer profile
+      const farmerProfile = await prisma.farmerProfile.findUnique({
+        where: { userId: req.user.id },
+        include: { farmLocations: true },
+      });
 
-        // Get farmer profile
-        const farmerProfile = await prisma.farmerProfile.findUnique({
-            where: { userId: req.user.id },
-            include: { farmLocations: true }
+      if (!farmerProfile) {
+        return res.status(400).json({
+          success: false,
+          error: "Farmer profile not found",
         });
+      }
 
-        if (!farmerProfile) {
-            return res.status(400).json({
-                success: false,
-                error: 'Farmer profile not found'
-            });
-        }
+      // Generate batch ID
+      const batchId =
+        customBatchId || (await blockchainService.generateBatchId());
 
-        // Generate batch ID
-        const batchId = customBatchId || await blockchainService.generateBatchId();
+      // Connect to blockchain
+      const { gateway, contract } = await blockchainService.connectToNetwork();
+      if (!contract) {
+        return res.status(500).json({
+          success: false,
+          error: "Failed to connect to blockchain network",
+        });
+      }
 
-        // Connect to blockchain
-        const { gateway, contract } = await blockchainService.connectToNetwork();
-        if (!contract) {
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to connect to blockchain network'
-            });
-        }
-
-        try {
-            // STEP 1: Create detailed record in database
-            const batch = await prisma.batch.create({
-                data: {
-                    batchId: batchId,
-                    farmerId: farmerProfile.id,
-                    farmLocationId: farmerProfile.farmLocations[0]?.id, // Use first farm location
-                    cropType: cropType || null,
-                    productType: crop,
-                    variety: additionalData.variety || null,
-                    quantity: parseFloat(quantity),
-                    unit: additionalData.unit || 'kg',
-                    harvestDate: additionalData.harvestDate ? new Date(additionalData.harvestDate) : new Date(),
-                    cultivationMethod: additionalData.cultivationMethod || null,
-                    seedsSource: additionalData.seedsSource || null,
-                    irrigationMethod: additionalData.irrigationMethod || null,
-                    fertilizers: additionalData.fertilizers || [],
-                    pesticides: additionalData.pesticides || [],
-                    qualityGrade: additionalData.qualityGrade || null,
-                    moistureContent: additionalData.moistureContent ? parseFloat(additionalData.moistureContent) : null,
-                    proteinContent: additionalData.proteinContent ? parseFloat(additionalData.proteinContent) : null,
-                    images: additionalData.images || [],
-                    notes: additionalData.notes || null,
-                    // Pricing Information
-                    pricePerUnit: additionalData.pricePerUnit ? parseFloat(additionalData.pricePerUnit) : null,
-                    currency: additionalData.currency || 'MYR',
-                    totalBatchValue: additionalData.totalBatchValue ? parseFloat(additionalData.totalBatchValue) : null,
-                    paymentMethod: additionalData.paymentMethod || null,
-                    buyerName: additionalData.buyerName || null,
-                    // Certifications & Compliance
-                    certifications: additionalData.certifications || [],
-                    customCertification: additionalData.customCertification || null,
-                    myGapCertNumber: additionalData.myGapCertNumber || null, // Database only
-                    status: 'REGISTERED'
+      try {
+        // STEP 1: Create detailed record in database
+        const batch = await prisma.batch.create({
+          data: {
+            batchId: batchId,
+            farmerId: farmerProfile.id,
+            farmLocationId: farmerProfile.farmLocations[0]?.id, // Use first farm location
+            cropType: cropType || null,
+            productType: crop,
+            variety: additionalData.variety || null,
+            quantity: parseFloat(quantity),
+            unit: additionalData.unit || "kg",
+            harvestDate: additionalData.harvestDate
+              ? new Date(additionalData.harvestDate)
+              : new Date(),
+            cultivationMethod: additionalData.cultivationMethod || null,
+            seedsSource: additionalData.seedsSource || null,
+            irrigationMethod: additionalData.irrigationMethod || null,
+            fertilizers: additionalData.fertilizers || [],
+            pesticides: additionalData.pesticides || [],
+            qualityGrade: additionalData.qualityGrade || null,
+            moistureContent: additionalData.moistureContent
+              ? parseFloat(additionalData.moistureContent)
+              : null,
+            proteinContent: additionalData.proteinContent
+              ? parseFloat(additionalData.proteinContent)
+              : null,
+            images: additionalData.images || [],
+            notes: additionalData.notes || null,
+            // Pricing Information
+            pricePerUnit: additionalData.pricePerUnit
+              ? parseFloat(additionalData.pricePerUnit)
+              : null,
+            currency: additionalData.currency || "MYR",
+            totalBatchValue: additionalData.totalBatchValue
+              ? parseFloat(additionalData.totalBatchValue)
+              : null,
+            paymentMethod: additionalData.paymentMethod || null,
+            buyerName: additionalData.buyerName || null,
+            // Certifications & Compliance
+            certifications: additionalData.certifications || [],
+            customCertification: additionalData.customCertification || null,
+            myGapCertNumber: additionalData.myGapCertNumber || null, // Database only
+            status: "REGISTERED",
+          },
+          include: {
+            farmer: {
+              include: {
+                user: {
+                  select: { username: true, email: true },
                 },
-                include: {
-                    farmer: {
-                        include: {
-                            user: {
-                                select: { username: true, email: true }
-                            }
-                        }
-                    },
-                    farmLocation: true
-                }
-            });
-
-            // STEP 2: Create hash of database data for integrity
-            const dataHash = calculateStableHash(batch);
-
-            // STEP 3: Submit critical data to blockchain with pricing and certifications
-            const blockchainData = {
-                cropType: cropType,
-                variety: additionalData.variety,
-                unit: additionalData.unit || 'kg',
-                harvestDate: additionalData.harvestDate,
-                cultivationMethod: additionalData.cultivationMethod,
-                qualityGrade: additionalData.qualityGrade,
-                certifications: additionalData.certifications || [],
-                customCertification: additionalData.customCertification,
-                // Pricing Information
-                pricePerUnit: additionalData.pricePerUnit,
-                currency: additionalData.currency || 'MYR',
-                totalBatchValue: additionalData.totalBatchValue,
-                paymentMethod: additionalData.paymentMethod,
-                buyerName: additionalData.buyerName,
-                // Coordinates if available
-                coordinates: (additionalData.latitude && additionalData.longitude) ? {
-                    latitude: parseFloat(additionalData.latitude),
-                    longitude: parseFloat(additionalData.longitude)
-                } : null
-            };
-
-            const result = await blockchainService.submitTransactionWithRetry(
-                contract,
-                'createBatch',
-                [batchId, farmer, crop, quantity.toString(), location, JSON.stringify(blockchainData)]
-            );
-
-            // STEP 4: Update database with blockchain reference
-            const updatedBatch = await prisma.batch.update({
-                where: { id: batch.id },
-                data: {
-                    blockchainHash: result.toString(),
-                    dataHash: dataHash,
-                    qrCodeHash: crypto.createHash('sha256').update(`${batchId}_${Date.now()}`).digest('hex')
-                }
-            });
-
-            // STEP 5: Generate BOTH QR codes (verification + processing)
-            const verificationQR = await blockchainService.generateQRCode(batchId);
-            const processingQR = await blockchainService.generateProcessingQRCode(batchId);
-
-            await gateway.disconnect();
-            // STEP 6: Execute PostGIS logic to update FarmLocation
-            // 1. Get the Farmer's active Farm Location (or the one being used)
-            const activeFarmLocation = farmerProfile.farmLocations[0];
-
-            if (activeFarmLocation) {
-                // Use optional chaining just in case, though it should exist if farmerProfile does
-                const farmLocationId = activeFarmLocation.id; 
-
-                // 2. Update the Farm Location coordinates in the database (latitude/longitude columns)
-                const updatedFarmLocation = await prisma.farmLocation.update({
-                    where: { id: farmLocationId },
-                    data: {
-                        latitude: latitude ? parseFloat(latitude) : activeFarmLocation.latitude,
-                        longitude: longitude ? parseFloat(longitude) : activeFarmLocation.longitude,
-                    }
-                });
-
-                // 3. ⭐ EXECUTE RAW SQL TO POPULATE POSTGIS GEOMETRY
-                if (updatedFarmLocation.latitude && updatedFarmLocation.longitude) {
-                    await updateGeometryPoint(
-                        '"farm_locations"',
-                        farmLocationId, // Use the ID of the location, not the batch
-                        updatedFarmLocation.latitude,
-                        updatedFarmLocation.longitude
-                    );
-                }
-            }
-            // STEP 7: Log activity
-            await prisma.activityLog.create({
-                data: {
-                    userId: req.user.id,
-                    action: 'CREATE_BATCH',
-                    resource: batchId,
-                    ipAddress: req.ip,
-                    userAgent: req.get('User-Agent'),
-                    metadata: { batchId: batchId }
-                }
-            });
-
-            const response = {
-                success: true,
-                batchId: batchId,
-                batchData: JSON.parse(result.toString()),
-                databaseRecord: updatedBatch,
-                qrCodes: {
-                    verification: verificationQR,
-                    processing: processingQR
-                },
-                // Keep backward compatibility with old 'qrCode' field
-                qrCode: verificationQR,
-                verificationUrl: `${FRONTEND_URL}/verify/${batchId}`,
-                processingUrl: `${FRONTEND_URL}/process-batch/${batchId}`,
-                message: 'Crop batch created successfully on blockchain and database with both QR codes',
-                dataIntegrity: {
-                    blockchainHash: result.toString(),
-                    databaseHash: dataHash
-                }
-            };
-
-            console.log(`Successfully created batch: ${batchId}`);
-            res.status(201).json(response);
-
-        } catch (blockchainError) {
-            await gateway.disconnect();
-            console.error('Blockchain transaction failed:', blockchainError);
-            
-            res.status(500).json({
-                success: false,
-                error: 'Failed to create batch on blockchain',
-                details: blockchainError.message
-            });
-        }
-
-    } catch (error) {
-        console.error('API error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Internal server error',
-            details: error.message
-        });
-    }
-});
-
-// Get farmer's batches (ENHANCED)
-app.get('/api/farmer/my-batches', authenticate, authorize(['FARMER']), async (req, res) => {
-    try {
-        const farmerProfile = await prisma.farmerProfile.findUnique({
-            where: { userId: req.user.id }
-        });
-
-        if (!farmerProfile) {
-            return res.status(400).json({
-                success: false,
-                error: 'Farmer profile not found'
-            });
-        }
-
-        // Get batches from database
-        const batches = await prisma.batch.findMany({
-            where: { farmerId: farmerProfile.id },
-            include: {
-                farmLocation: true,
-                processingRecords: {
-                    include: {
-                        processor: {
-                            include: {
-                                user: { select: { username: true } }
-                            }
-                        }
-                    }
-                },
-                _count: {
-                    select: {
-                        processingRecords: true,
-                        transportRoutes: true,
-                        qualityTests: true
-                    }
-                }
+              },
             },
-            orderBy: { createdAt: 'desc' }
+            farmLocation: true,
+          },
         });
 
-        // Also get blockchain data for comparison
-        const { gateway, contract } = await blockchainService.connectToNetwork();
-        let blockchainBatches = [];
-        
-        if (contract) {
-            try {
-                const result = await contract.evaluateTransaction('getAllBatches');
-                const allBlockchainBatches = JSON.parse(result.toString());
-                blockchainBatches = allBlockchainBatches.filter(batch => 
-                    batch.farmer.toLowerCase() === req.user.username.toLowerCase()
-                );
-                await gateway.disconnect();
-            } catch (blockchainError) {
-                await gateway.disconnect();
-                console.error('Blockchain query failed:', blockchainError);
-            }
-        }
+        // STEP 2: Create hash of database data for integrity
+        const dataHash = calculateStableHash(batch);
 
-        res.json({
-            success: true,
-            farmer: req.user.username,
-            farmerProfile: {
-                farmName: farmerProfile.farmName,
-                totalBatches: batches.length
-            },
-            count: batches.length,
-            batches: batches,
-            blockchainBatches: formatBlockchainDates(blockchainBatches),
-            dataIntegrity: {
-                databaseCount: batches.length,
-                blockchainCount: blockchainBatches.length,
-                syncStatus: batches.length === blockchainBatches.length ? 'SYNCED' : 'OUT_OF_SYNC'
-            }
-        });
-
-    } catch (error) {
-        console.error('API error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Internal server error'
-        });
-    }
-});
-
-// Validate batch processing access (for mobile QR scanning)
-app.get('/api/batch/validate-access/:batchId', authenticate, async (req, res) => {
-    try {
-        const { batchId } = req.params;
-        const user = req.user;
-
-        // Fetch batch from database
-        const batch = await prisma.batch.findUnique({
-            where: { batchId: batchId },
-            select: {
-                id: true,
-                batchId: true,
-                status: true,
-                farmerId: true,
-                productType: true,
-                quantity: true,
-                farmer: {
-                    include: {
-                        user: {
-                            select: { username: true, email: true }
-                        }
-                    }
+        // STEP 3: Submit critical data to blockchain with pricing and certifications
+        const blockchainData = {
+          cropType: cropType,
+          variety: additionalData.variety,
+          unit: additionalData.unit || "kg",
+          harvestDate: additionalData.harvestDate,
+          cultivationMethod: additionalData.cultivationMethod,
+          qualityGrade: additionalData.qualityGrade,
+          certifications: additionalData.certifications || [],
+          customCertification: additionalData.customCertification,
+          // Pricing Information
+          pricePerUnit: additionalData.pricePerUnit,
+          currency: additionalData.currency || "MYR",
+          totalBatchValue: additionalData.totalBatchValue,
+          paymentMethod: additionalData.paymentMethod,
+          buyerName: additionalData.buyerName,
+          // Coordinates if available
+          coordinates:
+            additionalData.latitude && additionalData.longitude
+              ? {
+                  latitude: parseFloat(additionalData.latitude),
+                  longitude: parseFloat(additionalData.longitude),
                 }
-            }
-        });
-
-        if (!batch) {
-            return res.status(404).json({
-                success: false,
-                canProcess: false,
-                reason: 'Batch not found',
-                error: `Batch ${batchId} does not exist`
-            });
-        }
-
-        // Define access matrix based on role and batch status
-        const ACCESS_MATRIX = {
-            PROCESSOR: {
-                REGISTERED: {
-                    canProcess: true,
-                    action: 'PROCESS',
-                    redirectTo: `/processor/process/${batchId}`,
-                    message: 'You can start processing this batch'
-                }
-            },
-            DISTRIBUTOR: {
-                PROCESSED: {
-                    canProcess: true,
-                    action: 'RECEIVE',
-                    redirectTo: `/distributor/receive/${batchId}`,
-                    message: 'You can receive this batch from processor'
-                },
-                IN_DISTRIBUTION: {
-                    canProcess: true,
-                    action: 'DISTRIBUTE',
-                    redirectTo: `/distributor/distribute/${batchId}`,
-                    message: 'You can add distribution records for this batch'
-                }
-            },
-            RETAILER: {
-                RETAIL_READY: {
-                    canProcess: true,
-                    action: 'RETAIL',
-                    redirectTo: `/retailer/receive/${batchId}`,
-                    message: 'You can receive this batch for retail'
-                },
-                IN_RETAIL: {
-                    canProcess: true,
-                    action: 'SET_PRICE',
-                    redirectTo: `/retailer/price/${batchId}`,
-                    message: 'You can set retail pricing for this batch'
-                }
-            }
+              : null,
         };
 
-        // Check if user role has access to this batch status
-        const roleAccess = ACCESS_MATRIX[user.role];
+        const result = await blockchainService.submitTransactionWithRetry(
+          contract,
+          "createBatch",
+          [
+            batchId,
+            farmer,
+            crop,
+            quantity.toString(),
+            location,
+            JSON.stringify(blockchainData),
+          ]
+        );
 
-        if (!roleAccess) {
-            return res.status(403).json({
-                success: false,
-                canProcess: false,
-                reason: 'Invalid role',
-                error: `Role ${user.role} cannot process batches`
-            });
+        // STEP 4: Update database with blockchain reference
+        const updatedBatch = await prisma.batch.update({
+          where: { id: batch.id },
+          data: {
+            blockchainHash: result.toString(),
+            dataHash: dataHash,
+            qrCodeHash: crypto
+              .createHash("sha256")
+              .update(`${batchId}_${Date.now()}`)
+              .digest("hex"),
+          },
+        });
+
+        // STEP 5: Generate BOTH QR codes (verification + processing)
+        const verificationQR = await blockchainService.generateQRCode(batchId);
+        const processingQR = await blockchainService.generateProcessingQRCode(
+          batchId
+        );
+
+        await gateway.disconnect();
+        // STEP 6: Execute PostGIS logic to update FarmLocation
+        // 1. Get the Farmer's active Farm Location (or the one being used)
+        const activeFarmLocation = farmerProfile.farmLocations[0];
+
+        if (activeFarmLocation) {
+          // Use optional chaining just in case, though it should exist if farmerProfile does
+          const farmLocationId = activeFarmLocation.id;
+
+          // 2. Update the Farm Location coordinates in the database (latitude/longitude columns)
+          const updatedFarmLocation = await prisma.farmLocation.update({
+            where: { id: farmLocationId },
+            data: {
+              latitude: latitude
+                ? parseFloat(latitude)
+                : activeFarmLocation.latitude,
+              longitude: longitude
+                ? parseFloat(longitude)
+                : activeFarmLocation.longitude,
+            },
+          });
+
+          // 3. ⭐ EXECUTE RAW SQL TO POPULATE POSTGIS GEOMETRY
+          if (updatedFarmLocation.latitude && updatedFarmLocation.longitude) {
+            await updateGeometryPoint(
+              '"farm_locations"',
+              farmLocationId, // Use the ID of the location, not the batch
+              updatedFarmLocation.latitude,
+              updatedFarmLocation.longitude
+            );
+          }
         }
 
-        const statusAccess = roleAccess[batch.status];
+        if (activeFarmLocation) {
+          // Use optional chaining just in case, though it should exist if farmerProfile does
+          const farmLocationId = activeFarmLocation.id;
+          // 2. Update the Farm Location coordinates in the database (latitude/longitude/location columns)
+          const updatedFarmLocation = await prisma.farmLocation.update({
+            where: { id: farmLocationId },
+            data: {
+              location: location,
+              latitude: latitude
+                ? parseFloat(latitude)
+                : activeFarmLocation.latitude,
+              longitude: longitude
+                ? parseFloat(longitude)
+                : activeFarmLocation.longitude,
+              temperature: additionalData.temperature
+                ? parseFloat(additionalData.temperature)
+                : null,
+              humidity: additionalData.humidity
+                ? parseFloat(additionalData.humidity)
+                : null,
+              weather_main: additionalData.weather_main || null,
+              weather_desc: additionalData.weather_description || null,
+            },
+          });
 
-        if (!statusAccess) {
-            // Find what status this role CAN process
-            const validStatuses = Object.keys(roleAccess);
-
-            return res.status(403).json({
-                success: false,
-                canProcess: false,
-                reason: 'Invalid batch status for your role',
-                error: `As a ${user.role}, you can only process batches with status: ${validStatuses.join(', ')}. This batch has status: ${batch.status}`,
-                currentStatus: batch.status,
-                validStatuses: validStatuses,
-                batchInfo: {
-                    batchId: batch.batchId,
-                    product: batch.productType,
-                    farmer: batch.farmer.user.username
-                }
-            });
+          // EXECUTE RAW SQL TO POPULATE POSTGIS GEOMETRY
+          if (updatedFarmLocation.latitude && updatedFarmLocation.longitude) {
+            await updateGeometryPoint(
+              '"farm_locations"',
+              farmLocationId, // Use the ID of the location, not the batch
+              updatedFarmLocation.latitude,
+              updatedFarmLocation.longitude
+            );
+          }
         }
-
-        // User has access!
-        return res.json({
-            success: true,
-            canProcess: true,
-            action: statusAccess.action,
-            redirectTo: statusAccess.redirectTo,
-            message: statusAccess.message,
-            batchInfo: {
-                batchId: batch.batchId,
-                status: batch.status,
-                product: batch.productType,
-                quantity: batch.quantity,
-                farmer: batch.farmer.user.username
+        if (latitude && longitude && batch.id) {
+          await logBatchLocation(
+            batch.id,
+            batch.status,
+            parseFloat(latitude),
+            parseFloat(longitude),
+            {
+              location: location,
+              source: "Farmer Input",
+              productName: crop,
+              quality: additionalData.qualityGrade,
+              cropType: cropType,
+              quantity: quantity,
             }
+          );
+        } else {
+          console.log("try again");
+        }
+        // STEP: Log activity
+        await prisma.activityLog.create({
+          data: {
+            userId: req.user.id,
+            action: "CREATE_BATCH",
+            resource: batchId,
+            ipAddress: req.ip,
+            userAgent: req.get("User-Agent"),
+            metadata: { batchId: batchId },
+          },
         });
 
-    } catch (error) {
-        console.error('Error validating batch access:', error);
+        const response = {
+          success: true,
+          batchId: batchId,
+          batchData: JSON.parse(result.toString()),
+          databaseRecord: updatedBatch,
+          qrCodes: {
+            verification: verificationQR,
+            processing: processingQR,
+          },
+          // Keep backward compatibility with old 'qrCode' field
+          qrCode: verificationQR,
+          verificationUrl: `${FRONTEND_URL}/verify/${batchId}`,
+          processingUrl: `${FRONTEND_URL}/process-batch/${batchId}`,
+          message:
+            "Crop batch created successfully on blockchain and database with both QR codes",
+          dataIntegrity: {
+            blockchainHash: result.toString(),
+            databaseHash: dataHash,
+          },
+        };
+
+        console.log(`Successfully created batch: ${batchId}`);
+        res.status(201).json(response);
+      } catch (blockchainError) {
+        await gateway.disconnect();
+        console.error("Blockchain transaction failed:", blockchainError);
+
         res.status(500).json({
-            success: false,
-            canProcess: false,
-            reason: 'Server error',
-            error: 'Failed to validate batch access'
+          success: false,
+          error: "Failed to create batch on blockchain",
+          details: blockchainError.message,
         });
+      }
+    } catch (error) {
+      console.error("API error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Internal server error",
+        details: error.message,
+      });
     }
-});
+  }
+);
+
+// Get farmer's batches (ENHANCED)
+app.get(
+  "/api/farmer/my-batches",
+  authenticate,
+  authorize(["FARMER"]),
+  async (req, res) => {
+    try {
+      const farmerProfile = await prisma.farmerProfile.findUnique({
+        where: { userId: req.user.id },
+      });
+
+      if (!farmerProfile) {
+        return res.status(400).json({
+          success: false,
+          error: "Farmer profile not found",
+        });
+      }
+
+      // Get batches from database
+      const batches = await prisma.batch.findMany({
+        where: { farmerId: farmerProfile.id },
+        include: {
+          farmLocation: true,
+          processingRecords: {
+            include: {
+              processor: {
+                include: {
+                  user: { select: { username: true } },
+                },
+              },
+            },
+          },
+          _count: {
+            select: {
+              processingRecords: true,
+              transportRoutes: true,
+              qualityTests: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      // Also get blockchain data for comparison
+      const { gateway, contract } = await blockchainService.connectToNetwork();
+      let blockchainBatches = [];
+
+      if (contract) {
+        try {
+          const result = await contract.evaluateTransaction("getAllBatches");
+          const allBlockchainBatches = JSON.parse(result.toString());
+          blockchainBatches = allBlockchainBatches.filter(
+            (batch) =>
+              batch.farmer.toLowerCase() === req.user.username.toLowerCase()
+          );
+          await gateway.disconnect();
+        } catch (blockchainError) {
+          await gateway.disconnect();
+          console.error("Blockchain query failed:", blockchainError);
+        }
+      }
+
+      res.json({
+        success: true,
+        farmer: req.user.username,
+        farmerProfile: {
+          farmName: farmerProfile.farmName,
+          totalBatches: batches.length,
+        },
+        count: batches.length,
+        batches: batches,
+        blockchainBatches: formatBlockchainDates(blockchainBatches),
+        dataIntegrity: {
+          databaseCount: batches.length,
+          blockchainCount: blockchainBatches.length,
+          syncStatus:
+            batches.length === blockchainBatches.length
+              ? "SYNCED"
+              : "OUT_OF_SYNC",
+        },
+      });
+    } catch (error) {
+      console.error("API error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Internal server error",
+      });
+    }
+  }
+);
+
+// Validate batch processing access (for mobile QR scanning)
+app.get(
+  "/api/batch/validate-access/:batchId",
+  authenticate,
+  async (req, res) => {
+    try {
+      const { batchId } = req.params;
+      const user = req.user;
+
+      // Fetch batch from database
+      const batch = await prisma.batch.findUnique({
+        where: { batchId: batchId },
+        select: {
+          id: true,
+          batchId: true,
+          status: true,
+          farmerId: true,
+          productType: true,
+          quantity: true,
+          farmer: {
+            include: {
+              user: {
+                select: { username: true, email: true },
+              },
+            },
+          },
+        },
+      });
+
+      if (!batch) {
+        return res.status(404).json({
+          success: false,
+          canProcess: false,
+          reason: "Batch not found",
+          error: `Batch ${batchId} does not exist`,
+        });
+      }
+
+      // Define access matrix based on role and batch status
+      const ACCESS_MATRIX = {
+        PROCESSOR: {
+          REGISTERED: {
+            canProcess: true,
+            action: "PROCESS",
+            redirectTo: `/processor/process/${batchId}`,
+            message: "You can start processing this batch",
+          },
+        },
+        DISTRIBUTOR: {
+          PROCESSED: {
+            canProcess: true,
+            action: "RECEIVE",
+            redirectTo: `/distributor/receive/${batchId}`,
+            message: "You can receive this batch from processor",
+          },
+          IN_DISTRIBUTION: {
+            canProcess: true,
+            action: "DISTRIBUTE",
+            redirectTo: `/distributor/distribute/${batchId}`,
+            message: "You can add distribution records for this batch",
+          },
+        },
+        RETAILER: {
+          RETAIL_READY: {
+            canProcess: true,
+            action: "RETAIL",
+            redirectTo: `/retailer/receive/${batchId}`,
+            message: "You can receive this batch for retail",
+          },
+          IN_RETAIL: {
+            canProcess: true,
+            action: "SET_PRICE",
+            redirectTo: `/retailer/price/${batchId}`,
+            message: "You can set retail pricing for this batch",
+          },
+        },
+      };
+
+      // Check if user role has access to this batch status
+      const roleAccess = ACCESS_MATRIX[user.role];
+
+      if (!roleAccess) {
+        return res.status(403).json({
+          success: false,
+          canProcess: false,
+          reason: "Invalid role",
+          error: `Role ${user.role} cannot process batches`,
+        });
+      }
+
+      const statusAccess = roleAccess[batch.status];
+
+      if (!statusAccess) {
+        // Find what status this role CAN process
+        const validStatuses = Object.keys(roleAccess);
+
+        return res.status(403).json({
+          success: false,
+          canProcess: false,
+          reason: "Invalid batch status for your role",
+          error: `As a ${
+            user.role
+          }, you can only process batches with status: ${validStatuses.join(
+            ", "
+          )}. This batch has status: ${batch.status}`,
+          currentStatus: batch.status,
+          validStatuses: validStatuses,
+          batchInfo: {
+            batchId: batch.batchId,
+            product: batch.productType,
+            farmer: batch.farmer.user.username,
+          },
+        });
+      }
+
+      // User has access!
+      return res.json({
+        success: true,
+        canProcess: true,
+        action: statusAccess.action,
+        redirectTo: statusAccess.redirectTo,
+        message: statusAccess.message,
+        batchInfo: {
+          batchId: batch.batchId,
+          status: batch.status,
+          product: batch.productType,
+          quantity: batch.quantity,
+          farmer: batch.farmer.user.username,
+        },
+      });
+    } catch (error) {
+      console.error("Error validating batch access:", error);
+      res.status(500).json({
+        success: false,
+        canProcess: false,
+        reason: "Server error",
+        error: "Failed to validate batch access",
+      });
+    }
+  }
+);
 
 // Get specific batch details (ENHANCED)
-app.get('/api/batch/:batchId', authenticate, async (req, res) => {
-    try {
-        const { batchId } = req.params;
+app.get("/api/batch/:batchId", authenticate, async (req, res) => {
+  try {
+    const { batchId } = req.params;
 
-        // Get from database
-        const dbBatch = await prisma.batch.findUnique({
-            where: { batchId: batchId },
-            include: {
-                farmer: {
-                    include: {
-                        user: {
-                            select: { username: true, email: true, role: true }
-                        }
-                    }
-                },
-                farmLocation: true,
-                processingRecords: {
-                    include: {
-                        processor: {
-                            include: {
-                                user: { select: { username: true } }
-                            }
-                        },
-                        facility: true
-                    }
-                },
-                transportRoutes: {
-                    include: {
-                        distributor: {
-                            include: {
-                                user: { select: { username: true } }
-                            }
-                        }
-                    }
-                },
-                qualityTests: true,
-                transactions: true
-            }
+    // Get from database
+    const dbBatch = await prisma.batch.findUnique({
+      where: { batchId: batchId },
+      include: {
+        farmer: {
+          include: {
+            user: {
+              select: { username: true, email: true, role: true },
+            },
+          },
+        },
+        farmLocation: true,
+        processingRecords: {
+          include: {
+            processor: {
+              include: {
+                user: { select: { username: true } },
+              },
+            },
+            facility: true,
+          },
+        },
+        transportRoutes: {
+          include: {
+            distributor: {
+              include: {
+                user: { select: { username: true } },
+              },
+            },
+          },
+        },
+        qualityTests: true,
+        transactions: true,
+      },
+    });
+
+    // Get distribution records (they use batchId as string, not relation)
+    const distributionRecords = await prisma.distributionRecord.findMany({
+      where: { batchId: batchId },
+      orderBy: { distributionDate: "desc" },
+    });
+
+    // Get from blockchain
+    const { gateway, contract } = await blockchainService.connectToNetwork();
+    let blockchainBatch = null;
+
+    if (contract) {
+      try {
+        const result = await contract.evaluateTransaction("getBatch", batchId);
+        blockchainBatch = JSON.parse(result.toString());
+        await gateway.disconnect();
+      } catch (blockchainError) {
+        await gateway.disconnect();
+        if (!blockchainError.message.includes("does not exist")) {
+          console.error("Blockchain query failed:", blockchainError);
+        }
+      }
+    }
+
+    if (!dbBatch && !blockchainBatch) {
+      return res.status(404).json({
+        success: false,
+        error: `Batch ${batchId} not found`,
+      });
+    }
+
+    // Role-based data filtering (same as before but with database data)
+    let responseData = dbBatch;
+
+    switch (req.user.role) {
+      case "FARMER":
+        if (dbBatch && dbBatch.farmer.userId !== req.user.id) {
+          return res.status(403).json({
+            success: false,
+            error: "Access denied",
+          });
+        }
+        break;
+
+      case "PROCESSOR":
+        if (dbBatch) {
+          const hasProcessed = dbBatch.processingRecords.some(
+            (record) => record.processor.userId === req.user.id
+          );
+          if (!hasProcessed && dbBatch.farmer.userId !== req.user.id) {
+            // Filter sensitive information
+            responseData = {
+              ...dbBatch,
+              farmer: {
+                user: { username: "FARMER_***" },
+              },
+            };
+          }
+        }
+        break;
+
+      case "RETAILER":
+        // Retailers see limited information
+        if (dbBatch) {
+          responseData = {
+            batchId: dbBatch.batchId,
+            productType: dbBatch.productType,
+            variety: dbBatch.variety,
+            quantity: dbBatch.quantity,
+            harvestDate: dbBatch.harvestDate,
+            qualityGrade: dbBatch.qualityGrade,
+            qualityTests: dbBatch.qualityTests,
+            status: dbBatch.status,
+            farmLocation: {
+              farmName: dbBatch.farmLocation?.farmName || "Farm",
+            },
+          };
+        }
+        break;
+
+      case "REGULATOR":
+      case "ADMIN":
+        // Full access
+        break;
+
+      default:
+        return res.status(403).json({
+          success: false,
+          error: "Access denied",
         });
+    }
 
-        // Get distribution records (they use batchId as string, not relation)
-        const distributionRecords = await prisma.distributionRecord.findMany({
-            where: { batchId: batchId },
-            orderBy: { distributionDate: 'desc' }
-        });
+    // Data integrity check
+    let integrityStatus = "UNKNOWN";
+    if (dbBatch && blockchainBatch && dbBatch.dataHash) {
+      const currentHash = crypto
+        .createHash("sha256")
+        .update(JSON.stringify(dbBatch))
+        .digest("hex");
+      integrityStatus = currentHash === dbBatch.dataHash ? "VALID" : "MODIFIED";
+    }
 
-        // Get from blockchain
-        const { gateway, contract } = await blockchainService.connectToNetwork();
-        let blockchainBatch = null;
-        
-        if (contract) {
-            try {
-                const result = await contract.evaluateTransaction('getBatch', batchId);
-                blockchainBatch = JSON.parse(result.toString());
-                await gateway.disconnect();
-            } catch (blockchainError) {
-                await gateway.disconnect();
-                if (!blockchainError.message.includes('does not exist')) {
-                    console.error('Blockchain query failed:', blockchainError);
-                }
-            }
-        }
+    // Log activity
+    await prisma.activityLog.create({
+      data: {
+        userId: req.user.id,
+        action: "VIEW_BATCH",
+        resource: batchId,
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+      },
+    });
 
-        if (!dbBatch && !blockchainBatch) {
-            return res.status(404).json({
-                success: false,
-                error: `Batch ${batchId} not found`
-            });
-        }
-
-        // Role-based data filtering (same as before but with database data)
-        let responseData = dbBatch;
-        
-        switch (req.user.role) {
-            case 'FARMER':
-                if (dbBatch && dbBatch.farmer.userId !== req.user.id) {
-                    return res.status(403).json({
-                        success: false,
-                        error: 'Access denied'
-                    });
-                }
-                break;
-                
-            case 'PROCESSOR':
-                if (dbBatch) {
-                    const hasProcessed = dbBatch.processingRecords.some(
-                        record => record.processor.userId === req.user.id
-                    );
-                    if (!hasProcessed && dbBatch.farmer.userId !== req.user.id) {
-                        // Filter sensitive information
-                        responseData = {
-                            ...dbBatch,
-                            farmer: {
-                                user: { username: 'FARMER_***' }
-                            }
-                        };
-                    }
-                }
-                break;
-                
-            case 'RETAILER':
-                // Retailers see limited information
-                if (dbBatch) {
-                    responseData = {
-                        batchId: dbBatch.batchId,
-                        productType: dbBatch.productType,
-                        variety: dbBatch.variety,
-                        quantity: dbBatch.quantity,
-                        harvestDate: dbBatch.harvestDate,
-                        qualityGrade: dbBatch.qualityGrade,
-                        qualityTests: dbBatch.qualityTests,
-                        status: dbBatch.status,
-                        farmLocation: {
-                            farmName: dbBatch.farmLocation?.farmName || 'Farm'
-                        }
-                    };
-                }
-                break;
-                
-            case 'REGULATOR':
-            case 'ADMIN':
-                // Full access
-                break;
-                
-            default:
-                return res.status(403).json({
-                    success: false,
-                    error: 'Access denied'
-                });
-        }
-
-        // Data integrity check
-        let integrityStatus = 'UNKNOWN';
-        if (dbBatch && blockchainBatch && dbBatch.dataHash) {
-            const currentHash = crypto
-                .createHash('sha256')
-                .update(JSON.stringify(dbBatch))
-                .digest('hex');
-            integrityStatus = currentHash === dbBatch.dataHash ? 'VALID' : 'MODIFIED';
-        }
-
-        // Log activity
-        await prisma.activityLog.create({
-            data: {
-                userId: req.user.id,
-                action: 'VIEW_BATCH',
-                resource: batchId,
-                ipAddress: req.ip,
-                userAgent: req.get('User-Agent')
-            }
-        });
-
-        res.json({
-            success: true,
-            batchId: batchId,
-            batchData: responseData,
-            distributionRecords: distributionRecords, // Location & quantity at distributor level
-            blockchain: blockchainBatch ? formatBlockchainDates(blockchainBatch) : null,
-            accessLevel: req.user.role,
-            dataIntegrity: {
-                status: integrityStatus,
-                databaseExists: !!dbBatch,
-                blockchainExists: !!blockchainBatch,
-               lastVerified: new Date().toISOString()
-           }
-       });
-
-   } catch (error) {
-       console.error('API error:', error);
-       res.status(500).json({
-           success: false,
-           error: 'Internal server error',
-           details: error.message
-       });
-   }
+    res.json({
+      success: true,
+      batchId: batchId,
+      batchData: responseData,
+      distributionRecords: distributionRecords, // Location & quantity at distributor level
+      blockchain: blockchainBatch
+        ? formatBlockchainDates(blockchainBatch)
+        : null,
+      accessLevel: req.user.role,
+      dataIntegrity: {
+        status: integrityStatus,
+        databaseExists: !!dbBatch,
+        blockchainExists: !!blockchainBatch,
+        lastVerified: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error("API error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      details: error.message,
+    });
+  }
 });
 
 // Check if batch ID already exists (ENHANCED)
-app.get('/api/batch/check/:batchId', async (req, res) => {
-   try {
-       const { batchId } = req.params;
+app.get("/api/batch/check/:batchId", async (req, res) => {
+  try {
+    const { batchId } = req.params;
 
-       // Check in database first (faster)
-       const dbBatch = await prisma.batch.findUnique({
-           where: { batchId: batchId },
-           select: { batchId: true, status: true, createdAt: true }
-       });
+    // Check in database first (faster)
+    const dbBatch = await prisma.batch.findUnique({
+      where: { batchId: batchId },
+      select: { batchId: true, status: true, createdAt: true },
+    });
 
-       // Check in blockchain
-       const { gateway, contract } = await blockchainService.connectToNetwork();
-       let blockchainExists = false;
-       
-       if (contract) {
-           try {
-               await contract.evaluateTransaction('getBatch', batchId);
-               blockchainExists = true;
-               await gateway.disconnect();
-           } catch (blockchainError) {
-               await gateway.disconnect();
-               blockchainExists = !blockchainError.message.includes('does not exist');
-           }
-       }
+    // Check in blockchain
+    const { gateway, contract } = await blockchainService.connectToNetwork();
+    let blockchainExists = false;
 
-       const exists = !!dbBatch || blockchainExists;
+    if (contract) {
+      try {
+        await contract.evaluateTransaction("getBatch", batchId);
+        blockchainExists = true;
+        await gateway.disconnect();
+      } catch (blockchainError) {
+        await gateway.disconnect();
+        blockchainExists = !blockchainError.message.includes("does not exist");
+      }
+    }
 
-       res.json({
-           success: true,
-           exists: exists,
-           batchId: batchId,
-           sources: {
-               database: !!dbBatch,
-               blockchain: blockchainExists
-           },
-           message: exists 
-               ? `Batch ${batchId} already exists` 
-               : `Batch ID ${batchId} is available`,
-           batchInfo: dbBatch || null
-       });
+    const exists = !!dbBatch || blockchainExists;
 
-   } catch (error) {
-       console.error('API error:', error);
-       res.status(500).json({
-           success: false,
-           error: 'Internal server error'
-       });
-   }
+    res.json({
+      success: true,
+      exists: exists,
+      batchId: batchId,
+      sources: {
+        database: !!dbBatch,
+        blockchain: blockchainExists,
+      },
+      message: exists
+        ? `Batch ${batchId} already exists`
+        : `Batch ID ${batchId} is available`,
+      batchInfo: dbBatch || null,
+    });
+  } catch (error) {
+    console.error("API error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+    });
+  }
 });
 
 // Verify batch (QR code endpoint) (ENHANCED)
-app.get('/api/verify/:batchId', async (req, res) => {
-   try {
-       const { batchId } = req.params;
+app.get("/api/verify/:batchId", async (req, res) => {
+  try {
+    const { batchId } = req.params;
 
-       // Get from database
-       const dbBatch = await prisma.batch.findUnique({
-           where: { batchId: batchId },
-           include: {
-               farmer: {
-                   include: {
-                       user: { select: { username: true } }
-                   }
-               },
-               farmLocation: true,
-               processingRecords: {
-                   include: {
-                       processor: {
-                           include: {
-                               user: { select: { username: true } }
-                           }
-                       }
-                   }
-               },
-               qualityTests: {
-                   orderBy: { testDate: 'desc' },
-                   take: 3
-               }
-           }
-       });
+    // Get from database
+    const dbBatch = await prisma.batch.findUnique({
+      where: { batchId: batchId },
+      include: {
+        farmer: {
+          include: {
+            user: { select: { username: true } },
+          },
+        },
+        farmLocation: true,
+        processingRecords: {
+          include: {
+            processor: {
+              include: {
+                user: { select: { username: true } },
+              },
+            },
+          },
+        },
+        qualityTests: {
+          orderBy: { testDate: "desc" },
+          take: 3,
+        },
+      },
+    });
 
-       // Get from blockchain
-       const { gateway, contract } = await blockchainService.connectToNetwork();
-       let blockchainVerification = null;
-       
-       if (contract) {
-           try {
-               const result = await contract.evaluateTransaction('verifyBatch', batchId);
-               blockchainVerification = JSON.parse(result.toString());
-               await gateway.disconnect();
-           } catch (blockchainError) {
-               await gateway.disconnect();
-               if (!blockchainError.message.includes('does not exist')) {
-                   console.error('Blockchain verification failed:', blockchainError);
-               }
-           }
-       }
+    // Get from blockchain
+    const { gateway, contract } = await blockchainService.connectToNetwork();
+    let blockchainVerification = null;
 
-       if (!dbBatch && !blockchainVerification) {
-           return res.status(404).json({
-               success: false,
-               verified: false,
-               error: `Batch ${batchId} not found - potential fraud`,
-               verificationTime: new Date().toISOString()
-           });
-       }
+    if (contract) {
+      try {
+        const result = await contract.evaluateTransaction(
+          "verifyBatch",
+          batchId
+        );
+        blockchainVerification = JSON.parse(result.toString());
+        await gateway.disconnect();
+      } catch (blockchainError) {
+        await gateway.disconnect();
+        if (!blockchainError.message.includes("does not exist")) {
+          console.error("Blockchain verification failed:", blockchainError);
+        }
+      }
+    }
 
-       // Data integrity verification
-       let integrityCheck = {
-           valid: false,
-           message: 'Unable to verify integrity'
-       };
+    if (!dbBatch && !blockchainVerification) {
+      return res.status(404).json({
+        success: false,
+        verified: false,
+        error: `Batch ${batchId} not found - potential fraud`,
+        verificationTime: new Date().toISOString(),
+      });
+    }
 
-       if (dbBatch && blockchainVerification && dbBatch.dataHash) {
-           const currentHash = crypto
-               .createHash('sha256')
-               .update(JSON.stringify(dbBatch))
-               .digest('hex');
-           
-           integrityCheck = {
-               valid: currentHash === dbBatch.dataHash,
-               message: currentHash === dbBatch.dataHash 
-                   ? 'Data integrity verified' 
-                   : 'Data may have been modified',
-               databaseHash: dbBatch.dataHash,
-               currentHash: currentHash
-           };
-       }
+    // Data integrity verification
+    let integrityCheck = {
+      valid: false,
+      message: "Unable to verify integrity",
+    };
 
-       // Create comprehensive verification response
-       const verificationResponse = {
-           success: true,
-           verified: true,
-           batchId: batchId,
-           verificationTime: new Date().toISOString(),
-           
-           // Basic batch info (public)
-           batchInfo: {
-               productType: dbBatch?.productType || blockchainVerification?.crop,
-               quantity: dbBatch?.quantity || blockchainVerification?.quantity,
-               harvestDate: dbBatch?.harvestDate || blockchainVerification?.createdDate,
-               status: dbBatch?.status || blockchainVerification?.status,
-               farmer: dbBatch?.farmer?.user?.username || blockchainVerification?.farmer,
-               location: dbBatch?.farmLocation?.farmName || blockchainVerification?.location
-           },
-           
-           // Verification details
-           verification: {
-               blockchain: blockchainVerification ? formatVerificationData(blockchainVerification) : null,
-               database: {
-                   exists: !!dbBatch,
-                   recordCount: dbBatch ? {
-                       processingRecords: dbBatch.processingRecords?.length || 0,
-                       qualityTests: dbBatch.qualityTests?.length || 0
-                   } : null
-               },
-               dataIntegrity: integrityCheck
-           },
-           
-           // Supply chain summary
-           supplyChainSummary: dbBatch ? {
-               totalStages: [
-                   'HARVEST',
-                   ...(dbBatch.processingRecords?.length > 0 ? ['PROCESSING'] : []),
-                   ...(dbBatch.status === 'DELIVERED' ? ['DELIVERY'] : [])
-               ],
-               currentStage: dbBatch.status,
-               qualityAssurance: {
-                   testsPerformed: dbBatch.qualityTests?.length || 0,
-                   latestTest: dbBatch.qualityTests?.[0] ? {
-                       testType: dbBatch.qualityTests[0].testType,
-                       result: dbBatch.qualityTests[0].passFailStatus,
-                       date: dbBatch.qualityTests[0].testDate
-                   } : null
-               }
-           } : null,
-           
-           message: 'Batch verified successfully'
-       };
+    if (dbBatch && blockchainVerification && dbBatch.dataHash) {
+      const currentHash = crypto
+        .createHash("sha256")
+        .update(JSON.stringify(dbBatch))
+        .digest("hex");
 
-       res.json(verificationResponse);
+      integrityCheck = {
+        valid: currentHash === dbBatch.dataHash,
+        message:
+          currentHash === dbBatch.dataHash
+            ? "Data integrity verified"
+            : "Data may have been modified",
+        databaseHash: dbBatch.dataHash,
+        currentHash: currentHash,
+      };
+    }
 
-   } catch (error) {
-       console.error('API error:', error);
-       res.status(500).json({
-           success: false,
-           verified: false,
-           error: 'Internal server error',
-           verificationTime: new Date().toISOString()
-       });
-   }
+    // Create comprehensive verification response
+    const verificationResponse = {
+      success: true,
+      verified: true,
+      batchId: batchId,
+      verificationTime: new Date().toISOString(),
+
+      // Basic batch info (public)
+      batchInfo: {
+        productType: dbBatch?.productType || blockchainVerification?.crop,
+        quantity: dbBatch?.quantity || blockchainVerification?.quantity,
+        harvestDate:
+          dbBatch?.harvestDate || blockchainVerification?.createdDate,
+        status: dbBatch?.status || blockchainVerification?.status,
+        farmer:
+          dbBatch?.farmer?.user?.username || blockchainVerification?.farmer,
+        location:
+          dbBatch?.farmLocation?.farmName || blockchainVerification?.location,
+      },
+
+      // Verification details
+      verification: {
+        blockchain: blockchainVerification
+          ? formatVerificationData(blockchainVerification)
+          : null,
+        database: {
+          exists: !!dbBatch,
+          recordCount: dbBatch
+            ? {
+                processingRecords: dbBatch.processingRecords?.length || 0,
+                qualityTests: dbBatch.qualityTests?.length || 0,
+              }
+            : null,
+        },
+        dataIntegrity: integrityCheck,
+      },
+
+      // Supply chain summary
+      supplyChainSummary: dbBatch
+        ? {
+            totalStages: [
+              "HARVEST",
+              ...(dbBatch.processingRecords?.length > 0 ? ["PROCESSING"] : []),
+              ...(dbBatch.status === "DELIVERED" ? ["DELIVERY"] : []),
+            ],
+            currentStage: dbBatch.status,
+            qualityAssurance: {
+              testsPerformed: dbBatch.qualityTests?.length || 0,
+              latestTest: dbBatch.qualityTests?.[0]
+                ? {
+                    testType: dbBatch.qualityTests[0].testType,
+                    result: dbBatch.qualityTests[0].passFailStatus,
+                    date: dbBatch.qualityTests[0].testDate,
+                  }
+                : null,
+            },
+          }
+        : null,
+
+      message: "Batch verified successfully",
+    };
+
+    res.json(verificationResponse);
+  } catch (error) {
+    console.error("API error:", error);
+    res.status(500).json({
+      success: false,
+      verified: false,
+      error: "Internal server error",
+      verificationTime: new Date().toISOString(),
+    });
+  }
 });
 
 // Update user profile
-app.put('/api/auth/profile', authenticate, async (req, res) => {
-    try {
-        const { profileData, personalData } = req.body;
-        const userId = req.user.id;
+app.put("/api/auth/profile", authenticate, async (req, res) => {
+  try {
+    const { profileData, personalData } = req.body;
+    const userId = req.user.id;
 
-        // Update basic user info if provided
-        const userUpdateData = {};
-        if (personalData?.email && personalData.email !== req.user.email) {
-            // Check if email already exists
-            const existingUser = await prisma.user.findFirst({
-                where: { 
-                    email: personalData.email,
-                    NOT: { id: userId }
-                }
-            });
-            
-            if (existingUser) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Email already in use'
-                });
-            }
-            userUpdateData.email = personalData.email;
-        }
-        
-        if (personalData?.username && personalData.username !== req.user.username) {
-            // Check if username already exists
-            const existingUser = await prisma.user.findFirst({
-                where: { 
-                    username: personalData.username,
-                    NOT: { id: userId }
-                }
-            });
-            
-            if (existingUser) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Username already in use'
-                });
-            }
-            userUpdateData.username = personalData.username;
-        }
+    // Update basic user info if provided
+    const userUpdateData = {};
+    if (personalData?.email && personalData.email !== req.user.email) {
+      // Check if email already exists
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          email: personalData.email,
+          NOT: { id: userId },
+        },
+      });
 
-        // Update user if there are changes
-        if (Object.keys(userUpdateData).length > 0) {
-            await prisma.user.update({
-                where: { id: userId },
-                data: userUpdateData
-            });
-        }
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          error: "Email already in use",
+        });
+      }
+      userUpdateData.email = personalData.email;
+    }
 
-        // Update role-specific profile
-        let updatedProfile = null;
-        
-        switch (req.user.role) {
-            case 'FARMER':
-                updatedProfile = await prisma.farmerProfile.update({
-                    where: { userId: userId },
-                    data: {
-                        firstName: profileData.firstName,
-                        lastName: profileData.lastName,
-                        phone: profileData.phone,
-                        farmName: profileData.farmName,
-                        farmSize: profileData.farmSize ? parseFloat(profileData.farmSize) : null,
-                        address: profileData.address,
-                        state: profileData.state,
-                        primaryCrops: profileData.primaryCrops || [],
-                        farmingType: profileData.farmingType || [],
-                        certifications: profileData.certifications || [],
-                        licenseNumber: profileData.licenseNumber,
-                        profileImage: profileData.profileImage
-                    }
-                });
-                break;
+    if (personalData?.username && personalData.username !== req.user.username) {
+      // Check if username already exists
+      const existingUser = await prisma.user.findFirst({
+        where: {
+          username: personalData.username,
+          NOT: { id: userId },
+        },
+      });
 
-            case 'PROCESSOR':
-                updatedProfile = await prisma.processorProfile.update({
-                    where: { userId: userId },
-                    data: {
-                        companyName: profileData.companyName,
-                        contactPerson: profileData.contactPerson,
-                        phone: profileData.phone,
-                        email: profileData.email,
-                        address: profileData.address,
-                        state: profileData.state,
-                        facilityType: profileData.facilityType || [],
-                        processingCapacity: profileData.processingCapacity ? parseFloat(profileData.processingCapacity) : null,
-                        certifications: profileData.certifications || [],
-                        licenseNumber: profileData.licenseNumber
-                    }
-                });
-                        // ⭐ GEOCoding Logic: Check if address changed
-                if (profileData.address) {
-                    const geocodeResult = await geocodeAddress(
-                        profileData.address, 
-                        profileData.state, 
-                        profileData.country
-                    );
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          error: "Username already in use",
+        });
+      }
+      userUpdateData.username = personalData.username;
+    }
 
-                    if (geocodeResult) {
-                        // Store coordinates in standard columns
-                        updateData.latitude = geocodeResult.latitude;
-                        updateData.longitude = geocodeResult.longitude;
-                    }
-                }
+    // Update user if there are changes
+    if (Object.keys(userUpdateData).length > 0) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: userUpdateData,
+      });
+    }
 
-                const modelToUpdate = req.user.role === 'PROCESSOR' ? prisma.processorProfile : prisma.retailerProfile;
-                
-                updatedProfile = await modelToUpdate.update({
-                    where: { userId: userId },
-                    data: updateData
-                });
-                
-                // ⭐ POSTGIS LOGIC: Update geometry column
-                if (updatedProfile.latitude && updatedProfile.longitude) {
-                    await updateGeometryPoint(
-                        `"${req.user.role.toLowerCase()}_profiles"`,
-                        updatedProfile.id,
-                        updatedProfile.latitude,
-                        updatedProfile.longitude
-                    );
-                }
-                break;
+    // Update role-specific profile
+    let updatedProfile = null;
 
-            case 'ADMIN':
-                updatedProfile = await prisma.adminProfile.update({
-                    where: { userId: userId },
-                    data: {
-                        firstName: profileData.firstName,
-                        lastName: profileData.lastName,
-                        phone: profileData.phone,
-                        email: profileData.email,
-                        permissions: profileData.permissions || []
-                    }
-                });
-                break;
+    switch (req.user.role) {
+      case "FARMER":
+        updatedProfile = await prisma.farmerProfile.update({
+          where: { userId: userId },
+          data: {
+            firstName: profileData.firstName,
+            lastName: profileData.lastName,
+            phone: profileData.phone,
+            farmName: profileData.farmName,
+            farmSize: profileData.farmSize
+              ? parseFloat(profileData.farmSize)
+              : null,
+            address: profileData.address,
+            state: profileData.state,
+            primaryCrops: profileData.primaryCrops || [],
+            farmingType: profileData.farmingType || [],
+            certifications: profileData.certifications || [],
+            licenseNumber: profileData.licenseNumber,
+            profileImage: profileData.profileImage,
+          },
+        });
+        break;
 
-            default:
-                return res.status(400).json({
-                    success: false,
-                    error: 'Profile update not supported for this role'
-                });
+      case "PROCESSOR":
+        updatedProfile = await prisma.processorProfile.update({
+          where: { userId: userId },
+          data: {
+            companyName: profileData.companyName,
+            contactPerson: profileData.contactPerson,
+            phone: profileData.phone,
+            email: profileData.email,
+            address: profileData.address,
+            state: profileData.state,
+            facilityType: profileData.facilityType || [],
+            processingCapacity: profileData.processingCapacity
+              ? parseFloat(profileData.processingCapacity)
+              : null,
+            certifications: profileData.certifications || [],
+            licenseNumber: profileData.licenseNumber,
+          },
+        });
+        // ⭐ GEOCoding Logic: Check if address changed
+        if (profileData.address) {
+          const geocodeResult = await geocodeAddress(
+            profileData.address,
+            profileData.state,
+            profileData.country
+          );
+
+          if (geocodeResult) {
+            // Store coordinates in standard columns
+            updateData.latitude = geocodeResult.latitude;
+            updateData.longitude = geocodeResult.longitude;
+          }
         }
 
-        // Log activity
-        await prisma.activityLog.create({
-            data: {
-                userId: userId,
-                action: 'UPDATE_PROFILE',
-                ipAddress: req.ip,
-                userAgent: req.get('User-Agent'),
-                metadata: { updatedFields: Object.keys(profileData) }
-            }
+        const modelToUpdate =
+          req.user.role === "PROCESSOR"
+            ? prisma.processorProfile
+            : prisma.retailerProfile;
+
+        updatedProfile = await modelToUpdate.update({
+          where: { userId: userId },
+          data: updateData,
         });
 
-        res.json({
-            success: true,
-            message: 'Profile updated successfully',
-            profile: updatedProfile
-        });
+        // ⭐ POSTGIS LOGIC: Update geometry column
+        if (updatedProfile.latitude && updatedProfile.longitude) {
+          await updateGeometryPoint(
+            `"${req.user.role.toLowerCase()}_profiles"`,
+            updatedProfile.id,
+            updatedProfile.latitude,
+            updatedProfile.longitude
+          );
+        }
+        break;
 
-    } catch (error) {
-        console.error('Profile update error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to update profile',
-            details: error.message
+      case "ADMIN":
+        updatedProfile = await prisma.adminProfile.update({
+          where: { userId: userId },
+          data: {
+            firstName: profileData.firstName,
+            lastName: profileData.lastName,
+            phone: profileData.phone,
+            email: profileData.email,
+            permissions: profileData.permissions || [],
+          },
+        });
+        break;
+
+      default:
+        return res.status(400).json({
+          success: false,
+          error: "Profile update not supported for this role",
         });
     }
+
+    // Log activity
+    await prisma.activityLog.create({
+      data: {
+        userId: userId,
+        action: "UPDATE_PROFILE",
+        ipAddress: req.ip,
+        userAgent: req.get("User-Agent"),
+        metadata: { updatedFields: Object.keys(profileData) },
+      },
+    });
+
+    res.json({
+      success: true,
+      message: "Profile updated successfully",
+      profile: updatedProfile,
+    });
+  } catch (error) {
+    console.error("Profile update error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to update profile",
+      details: error.message,
+    });
+  }
 });
 
 // Upload profile picture
-app.post('/api/auth/profile/avatar', authenticate, upload.single('avatar'), async (req, res) => {
+app.post(
+  "/api/auth/profile/avatar",
+  authenticate,
+  upload.single("avatar"),
+  async (req, res) => {
     try {
-        if (!req.file) {
-            return res.status(400).json({
-                success: false,
-                error: 'No image file provided'
-            });
-        }
-
-        const imageUrl = `/uploads/profiles/${req.file.filename}`;
-        
-        // Update profile image in database based on user role
-        let updatedProfile = null;
-        
-        switch (req.user.role) {
-            case 'FARMER':
-                updatedProfile = await prisma.farmerProfile.update({
-                    where: { userId: req.user.id },
-                    data: { profileImage: imageUrl }
-                });
-                break;
-                
-            case 'PROCESSOR':
-                // For processor, we might store it in a different field or table
-                // For now, let's add a profileImage field to processor profile too
-                break;
-                
-            case 'ADMIN':
-                // Similar handling for admin
-                break;
-        }
-
-        // Log activity
-        await prisma.activityLog.create({
-            data: {
-                userId: req.user.id,
-                action: 'UPDATE_PROFILE_PICTURE',
-                ipAddress: req.ip,
-                userAgent: req.get('User-Agent'),
-                metadata: { imageUrl: imageUrl }
-            }
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          error: "No image file provided",
         });
+      }
 
-        res.json({
-            success: true,
-            message: 'Profile picture uploaded successfully',
-            imageUrl: imageUrl,
-            profile: updatedProfile
-        });
+      const imageUrl = `/uploads/profiles/${req.file.filename}`;
 
+      // Update profile image in database based on user role
+      let updatedProfile = null;
+
+      switch (req.user.role) {
+        case "FARMER":
+          updatedProfile = await prisma.farmerProfile.update({
+            where: { userId: req.user.id },
+            data: { profileImage: imageUrl },
+          });
+          break;
+
+        case "PROCESSOR":
+          // For processor, we might store it in a different field or table
+          // For now, let's add a profileImage field to processor profile too
+          break;
+
+        case "ADMIN":
+          // Similar handling for admin
+          break;
+      }
+
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "UPDATE_PROFILE_PICTURE",
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent"),
+          metadata: { imageUrl: imageUrl },
+        },
+      });
+
+      res.json({
+        success: true,
+        message: "Profile picture uploaded successfully",
+        imageUrl: imageUrl,
+        profile: updatedProfile,
+      });
     } catch (error) {
-        console.error('Profile picture upload error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to upload profile picture',
-            details: error.message
-        });
+      console.error("Profile picture upload error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to upload profile picture",
+        details: error.message,
+      });
     }
-});
+  }
+);
 // Update batch status (ENHANCED)
-app.put('/api/batch/:batchId/status', authenticate, authorize(['FARMER', 'PROCESSOR', 'DISTRIBUTOR', 'ADMIN']), async (req, res) => {
-   try {
-       const { batchId } = req.params;
-       const { status, updatedBy, notes } = req.body;
+app.put(
+  "/api/batch/:batchId/status",
+  authenticate,
+  authorize(["FARMER", "PROCESSOR", "DISTRIBUTOR", "ADMIN"]),
+  async (req, res) => {
+    try {
+      const { batchId } = req.params;
+      const { status, updatedBy, notes } = req.body;
 
-       // Get batch from database
-       const batch = await prisma.batch.findUnique({
-           where: { batchId: batchId },
-           include: {
-               farmer: true,
-               processingRecords: {
-                   include: { processor: true }
-               },
-               transportRoutes: {
-                   include: { distributor: true }
-               }
-           }
-       });
+      // Get batch from database
+      const batch = await prisma.batch.findUnique({
+        where: { batchId: batchId },
+        include: {
+          farmer: true,
+          processingRecords: {
+            include: { processor: true },
+          },
+          transportRoutes: {
+            include: { distributor: true },
+          },
+        },
+      });
 
-       if (!batch) {
-           return res.status(404).json({
-               success: false,
-               error: `Batch ${batchId} not found`
-           });
-       }
+      if (!batch) {
+        return res.status(404).json({
+          success: false,
+          error: `Batch ${batchId} not found`,
+        });
+      }
 
-       // Check authorization based on role and batch ownership
-       let canUpdate = false;
-       
-       switch (req.user.role) {
-           case 'FARMER':
-               canUpdate = batch.farmer.userId === req.user.id;
-               break;
-           case 'PROCESSOR':
-               canUpdate = batch.processingRecords.some(
-                   record => record.processor.userId === req.user.id
-               );
-               break;
-           case 'DISTRIBUTOR':
-               canUpdate = batch.transportRoutes.some(
-                   route => route.distributor.userId === req.user.id
-               );
-               break;
-           case 'ADMIN':
-               canUpdate = true;
-               break;
-       }
+      // Check authorization based on role and batch ownership
+      let canUpdate = false;
 
-       if (!canUpdate) {
-           return res.status(403).json({
-               success: false,
-               error: 'You cannot update this batch status'
-           });
-       }
+      switch (req.user.role) {
+        case "FARMER":
+          canUpdate = batch.farmer.userId === req.user.id;
+          break;
+        case "PROCESSOR":
+          canUpdate = batch.processingRecords.some(
+            (record) => record.processor.userId === req.user.id
+          );
+          break;
+        case "DISTRIBUTOR":
+          canUpdate = batch.transportRoutes.some(
+            (route) => route.distributor.userId === req.user.id
+          );
+          break;
+        case "ADMIN":
+          canUpdate = true;
+          break;
+      }
 
-       // Update database
-       const updatedBatch = await prisma.batch.update({
-           where: { batchId: batchId },
-           data: {
-               status: status,
-               notes: notes || batch.notes,
-               updatedAt: new Date()
-           }
-       });
+      if (!canUpdate) {
+        return res.status(403).json({
+          success: false,
+          error: "You cannot update this batch status",
+        });
+      }
 
-       // Update blockchain
-       const { gateway, contract } = await blockchainService.connectToNetwork();
-       if (contract) {
-           try {
-               const result = await blockchainService.submitTransactionWithRetry(
-                   contract,
-                   'updateBatchStatus',
-                   [batchId, status, updatedBy || req.user.username, new Date().toISOString()]
-               );
-               await gateway.disconnect();
-           } catch (blockchainError) {
-               await gateway.disconnect();
-               console.error('Blockchain update failed:', blockchainError);
-               // Continue anyway - database is updated
-           }
-       }
+      // Update database
+      const updatedBatch = await prisma.batch.update({
+        where: { batchId: batchId },
+        data: {
+          status: status,
+          notes: notes || batch.notes,
+          updatedAt: new Date(),
+        },
+      });
 
-       // Log activity
-       await prisma.activityLog.create({
-           data: {
-               userId: req.user.id,
-               action: 'UPDATE_BATCH_STATUS',
-               resource: batchId,
-               ipAddress: req.ip,
-               userAgent: req.get('User-Agent'),
-               metadata: { 
-                   newStatus: status, 
-                   oldStatus: batch.status,
-                   notes: notes
-               }
-           }
-       });
+      // Update blockchain
+      const { gateway, contract } = await blockchainService.connectToNetwork();
+      if (contract) {
+        try {
+          const result = await blockchainService.submitTransactionWithRetry(
+            contract,
+            "updateBatchStatus",
+            [
+              batchId,
+              status,
+              updatedBy || req.user.username,
+              new Date().toISOString(),
+            ]
+          );
+          await gateway.disconnect();
+        } catch (blockchainError) {
+          await gateway.disconnect();
+          console.error("Blockchain update failed:", blockchainError);
+          // Continue anyway - database is updated
+        }
+      }
 
-       res.json({
-           success: true,
-           batchId: batchId,
-           newStatus: status,
-           oldStatus: batch.status,
-           updatedBy: updatedBy || req.user.username,
-           updatedAt: updatedBatch.updatedAt,
-           message: 'Batch status updated successfully'
-       });
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "UPDATE_BATCH_STATUS",
+          resource: batchId,
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent"),
+          metadata: {
+            newStatus: status,
+            oldStatus: batch.status,
+            notes: notes,
+          },
+        },
+      });
 
-   } catch (error) {
-       console.error('API error:', error);
-       res.status(500).json({
-           success: false,
-           error: 'Internal server error'
-       });
-   }
-});
+      res.json({
+        success: true,
+        batchId: batchId,
+        newStatus: status,
+        oldStatus: batch.status,
+        updatedBy: updatedBy || req.user.username,
+        updatedAt: updatedBatch.updatedAt,
+        message: "Batch status updated successfully",
+      });
+    } catch (error) {
+      console.error("API error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Internal server error",
+      });
+    }
+  }
+);
 
 // Get all batches (ENHANCED - Admin/Regulator only)
-app.get('/api/batches', authenticate, authorize(['ADMIN', 'REGULATOR']), async (req, res) => {
-   try {
-       const { page = 1, limit = 10, status, farmer, crop } = req.query;
-       const skip = (parseInt(page) - 1) * parseInt(limit);
+app.get(
+  "/api/batches",
+  authenticate,
+  authorize(["ADMIN", "REGULATOR"]),
+  async (req, res) => {
+    try {
+      const { page = 1, limit = 10, status, farmer, crop } = req.query;
+      const skip = (parseInt(page) - 1) * parseInt(limit);
 
-       // Build where clause for filtering
-       const where = {};
-       if (status) where.status = status;
-       if (crop) where.productType = { contains: crop, mode: 'insensitive' };
-       if (farmer) {
-           where.farmer = {
-               user: {
-                   username: { contains: farmer, mode: 'insensitive' }
-               }
-           };
-       }
+      // Build where clause for filtering
+      const where = {};
+      if (status) where.status = status;
+      if (crop) where.productType = { contains: crop, mode: "insensitive" };
+      if (farmer) {
+        where.farmer = {
+          user: {
+            username: { contains: farmer, mode: "insensitive" },
+          },
+        };
+      }
 
-       // Get batches from database with pagination
-       const batches = await prisma.batch.findMany({
-           where,
-           include: {
-               farmer: {
-                   include: {
-                       user: { select: { username: true } }
-                   }
-               },
-               farmLocation: true,
-               _count: {
-                   select: {
-                       processingRecords: true,
-                       transportRoutes: true,
-                       qualityTests: true
-                   }
-               }
-           },
-           orderBy: { createdAt: 'desc' },
-           skip: skip,
-           take: parseInt(limit)
-       });
+      // Get batches from database with pagination
+      const batches = await prisma.batch.findMany({
+        where,
+        include: {
+          farmer: {
+            include: {
+              user: { select: { username: true } },
+            },
+          },
+          farmLocation: true,
+          _count: {
+            select: {
+              processingRecords: true,
+              transportRoutes: true,
+              qualityTests: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        skip: skip,
+        take: parseInt(limit),
+      });
 
-       const totalCount = await prisma.batch.count({ where });
+      const totalCount = await prisma.batch.count({ where });
 
-       // Also get blockchain data for comparison (if needed)
-       let blockchainBatches = [];
-       if (req.query.includeBlockchain === 'true') {
-           const { gateway, contract } = await blockchainService.connectToNetwork();
-           if (contract) {
-               try {
-                   const result = await contract.evaluateTransaction('getAllBatches');
-                   blockchainBatches = JSON.parse(result.toString());
-                   await gateway.disconnect();
-               } catch (blockchainError) {
-                   await gateway.disconnect();
-                   console.error('Blockchain query failed:', blockchainError);
-               }
-           }
-       }
+      // Also get blockchain data for comparison (if needed)
+      let blockchainBatches = [];
+      if (req.query.includeBlockchain === "true") {
+        const { gateway, contract } =
+          await blockchainService.connectToNetwork();
+        if (contract) {
+          try {
+            const result = await contract.evaluateTransaction("getAllBatches");
+            blockchainBatches = JSON.parse(result.toString());
+            await gateway.disconnect();
+          } catch (blockchainError) {
+            await gateway.disconnect();
+            console.error("Blockchain query failed:", blockchainError);
+          }
+        }
+      }
 
-       res.json({
-           success: true,
-           pagination: {
-               page: parseInt(page),
-               limit: parseInt(limit),
-               totalCount,
-               totalPages: Math.ceil(totalCount / parseInt(limit)),
-               hasNext: skip + parseInt(limit) < totalCount,
-               hasPrev: parseInt(page) > 1
-           },
-           filters: { status, farmer, crop },
-           count: batches.length,
-           batches: batches,
-           ...(req.query.includeBlockchain === 'true' && {
-               blockchainData: {
-                   count: blockchainBatches.length,
-                   batches: formatBlockchainDates(blockchainBatches)
-               }
-           })
-       });
-
-   } catch (error) {
-       console.error('API error:', error);
-       res.status(500).json({
-           success: false,
-           error: 'Internal server error'
-       });
-   }
-});
+      res.json({
+        success: true,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalCount,
+          totalPages: Math.ceil(totalCount / parseInt(limit)),
+          hasNext: skip + parseInt(limit) < totalCount,
+          hasPrev: parseInt(page) > 1,
+        },
+        filters: { status, farmer, crop },
+        count: batches.length,
+        batches: batches,
+        ...(req.query.includeBlockchain === "true" && {
+          blockchainData: {
+            count: blockchainBatches.length,
+            batches: formatBlockchainDates(blockchainBatches),
+          },
+        }),
+      });
+    } catch (error) {
+      console.error("API error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Internal server error",
+      });
+    }
+  }
+);
 
 // Get QR code for existing batch (ENHANCED)
-app.get('/api/qr/:batchId', async (req, res) => {
-   try {
-       const { batchId } = req.params;
-       const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:3001';
+app.get("/api/qr/:batchId", async (req, res) => {
+  try {
+    const { batchId } = req.params;
+    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3001";
 
-       // Check if batch exists in database first
-       const dbBatch = await prisma.batch.findUnique({
-           where: { batchId: batchId },
-           select: { batchId: true, status: true, qrCodeHash: true }
-       });
+    // Check if batch exists in database first
+    const dbBatch = await prisma.batch.findUnique({
+      where: { batchId: batchId },
+      select: { batchId: true, status: true, qrCodeHash: true },
+    });
 
-       // Also check blockchain
-       const { gateway, contract } = await blockchainService.connectToNetwork();
-       let blockchainExists = false;
-       
-       if (contract) {
-           try {
-               await contract.evaluateTransaction('getBatch', batchId);
-               blockchainExists = true;
-               await gateway.disconnect();
-           } catch (blockchainError) {
-               await gateway.disconnect();
-               blockchainExists = !blockchainError.message.includes('does not exist');
-           }
-       }
+    // Also check blockchain
+    const { gateway, contract } = await blockchainService.connectToNetwork();
+    let blockchainExists = false;
 
-       if (!dbBatch && !blockchainExists) {
-           return res.status(404).json({
-               success: false,
-               error: `Batch ${batchId} not found`
-           });
-       }
+    if (contract) {
+      try {
+        await contract.evaluateTransaction("getBatch", batchId);
+        blockchainExists = true;
+        await gateway.disconnect();
+      } catch (blockchainError) {
+        await gateway.disconnect();
+        blockchainExists = !blockchainError.message.includes("does not exist");
+      }
+    }
 
-       // Generate BOTH QR codes
-       const verificationQR = await blockchainService.generateQRCode(batchId);
-       const processingQR = await blockchainService.generateProcessingQRCode(batchId);
+    if (!dbBatch && !blockchainExists) {
+      return res.status(404).json({
+        success: false,
+        error: `Batch ${batchId} not found`,
+      });
+    }
 
-       res.json({
-           success: true,
-           batchId: batchId,
-           qrCode: verificationQR, // Backward compatibility
-           qrCodes: {
-               verification: verificationQR,
-               processing: processingQR
-           },
-           verificationUrl: `${FRONTEND_URL}/verify/${batchId}`,
-           processingUrl: `${FRONTEND_URL}/process-batch/${batchId}`,
-           batchStatus: dbBatch?.status || 'unknown',
-           sources: {
-               database: !!dbBatch,
-               blockchain: blockchainExists
-           }
-       });
+    // Generate BOTH QR codes
+    const verificationQR = await blockchainService.generateQRCode(batchId);
+    const processingQR = await blockchainService.generateProcessingQRCode(
+      batchId
+    );
 
-   } catch (error) {
-       console.error('API error:', error);
-       res.status(500).json({
-           success: false,
-           error: 'Internal server error'
-       });
-   }
+    res.json({
+      success: true,
+      batchId: batchId,
+      qrCode: verificationQR, // Backward compatibility
+      qrCodes: {
+        verification: verificationQR,
+        processing: processingQR,
+      },
+      verificationUrl: `${FRONTEND_URL}/verify/${batchId}`,
+      processingUrl: `${FRONTEND_URL}/process-batch/${batchId}`,
+      batchStatus: dbBatch?.status || "unknown",
+      sources: {
+        database: !!dbBatch,
+        blockchain: blockchainExists,
+      },
+    });
+  } catch (error) {
+    console.error("API error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+    });
+  }
 });
 
 // Dashboard endpoint (NEW)
-app.get('/api/dashboard', authenticate, async (req, res) => {
-   try {
-       let dashboardData = {};
-       
-       switch (req.user.role) {
-           case 'FARMER':
-               const farmerProfile = await prisma.farmerProfile.findUnique({
-                   where: { userId: req.user.id },
-                   include: {
-                       batches: {
-                           include: {
-                               _count: {
-                                   select: {
-                                       processingRecords: true,
-                                       transportRoutes: true
-                                   }
-                               }
-                           }
-                       },
-                       farmLocations: true
-                   }
-               });
-               
-               dashboardData = {
-                   farmerInfo: {
-                       farmName: farmerProfile?.farmName,
-                       farmSize: farmerProfile?.farmSize,
-                       primaryCrops: farmerProfile?.primaryCrops
-                   },
-                   statistics: {
-                       totalBatches: farmerProfile?.batches?.length || 0,
-                       activeBatches: farmerProfile?.batches?.filter(b => 
-                           ['REGISTERED', 'PROCESSING', 'IN_TRANSIT'].includes(b.status)
-                       ).length || 0,
-                       completedBatches: farmerProfile?.batches?.filter(b => 
-                           ['DELIVERED', 'SOLD'].includes(b.status)
-                       ).length || 0,
-                       farmLocations: farmerProfile?.farmLocations?.length || 0
-                   },
-                   recentBatches: farmerProfile?.batches?.slice(0, 5) || []
-               };
-               break;
-               
-           case 'ADMIN':
-               const totalUsers = await prisma.user.count();
-               const totalBatches = await prisma.batch.count();
-               const activeUsers = await prisma.user.count({
-                   where: { status: 'ACTIVE' }
-               });
-               
-               const usersByRole = await prisma.user.groupBy({
-                   by: ['role'],
-                   _count: { role: true }
-               });
-               
-               const batchesByStatus = await prisma.batch.groupBy({
-                   by: ['status'],
-                   _count: { status: true }
-               });
-               
-               dashboardData = {
-                   systemStats: {
-                       totalUsers,
-                       totalBatches,
-                       activeUsers,
-                       usersByRole: usersByRole.reduce((acc, item) => {
-                           acc[item.role] = item._count.role;
-                           return acc;
-                       }, {}),
-                       batchesByStatus: batchesByStatus.reduce((acc, item) => {
-                           acc[item.status] = item._count.status;
-                           return acc;
-                       }, {})
-                   },
-                   recentActivity: await prisma.activityLog.findMany({
-                       take: 10,
-                       orderBy: { timestamp: 'desc' },
-                       include: {
-                           user: {
-                               select: { username: true, role: true }
-                           }
-                       }
-                   })
-               };
-               break;
-               
-           default:
-               dashboardData = {
-                   message: 'Dashboard not configured for this role'
-               };
-       }
-       
-       res.json({
-           success: true,
-           user: {
-               id: req.user.id,
-               username: req.user.username,
-               role: req.user.role,
-               email: req.user.email
-           },
-           dashboard: dashboardData
-       });
-       
-   } catch (error) {
-       console.error('Dashboard error:', error);
-       res.status(500).json({
-           success: false,
-           error: 'Failed to load dashboard'
-       });
-   }
+app.get("/api/dashboard", authenticate, async (req, res) => {
+  try {
+    let dashboardData = {};
+
+    switch (req.user.role) {
+      case "FARMER":
+        const farmerProfile = await prisma.farmerProfile.findUnique({
+          where: { userId: req.user.id },
+          include: {
+            batches: {
+              include: {
+                _count: {
+                  select: {
+                    processingRecords: true,
+                    transportRoutes: true,
+                  },
+                },
+              },
+            },
+            farmLocations: true,
+          },
+        });
+
+        dashboardData = {
+          farmerInfo: {
+            farmName: farmerProfile?.farmName,
+            farmSize: farmerProfile?.farmSize,
+            primaryCrops: farmerProfile?.primaryCrops,
+          },
+          statistics: {
+            totalBatches: farmerProfile?.batches?.length || 0,
+            activeBatches:
+              farmerProfile?.batches?.filter((b) =>
+                ["REGISTERED", "PROCESSING", "IN_TRANSIT"].includes(b.status)
+              ).length || 0,
+            completedBatches:
+              farmerProfile?.batches?.filter((b) =>
+                ["DELIVERED", "SOLD"].includes(b.status)
+              ).length || 0,
+            farmLocations: farmerProfile?.farmLocations?.length || 0,
+          },
+          recentBatches: farmerProfile?.batches?.slice(0, 5) || [],
+        };
+        break;
+
+      case "ADMIN":
+        const totalUsers = await prisma.user.count();
+        const totalBatches = await prisma.batch.count();
+        const activeUsers = await prisma.user.count({
+          where: { status: "ACTIVE" },
+        });
+
+        const usersByRole = await prisma.user.groupBy({
+          by: ["role"],
+          _count: { role: true },
+        });
+
+        const batchesByStatus = await prisma.batch.groupBy({
+          by: ["status"],
+          _count: { status: true },
+        });
+
+        dashboardData = {
+          systemStats: {
+            totalUsers,
+            totalBatches,
+            activeUsers,
+            usersByRole: usersByRole.reduce((acc, item) => {
+              acc[item.role] = item._count.role;
+              return acc;
+            }, {}),
+            batchesByStatus: batchesByStatus.reduce((acc, item) => {
+              acc[item.status] = item._count.status;
+              return acc;
+            }, {}),
+          },
+          recentActivity: await prisma.activityLog.findMany({
+            take: 10,
+            orderBy: { timestamp: "desc" },
+            include: {
+              user: {
+                select: { username: true, role: true },
+              },
+            },
+          }),
+        };
+        break;
+
+      default:
+        dashboardData = {
+          message: "Dashboard not configured for this role",
+        };
+    }
+
+    res.json({
+      success: true,
+      user: {
+        id: req.user.id,
+        username: req.user.username,
+        role: req.user.role,
+        email: req.user.email,
+      },
+      dashboard: dashboardData,
+    });
+  } catch (error) {
+    console.error("Dashboard error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to load dashboard",
+    });
+  }
 });
 
 // Data integrity check endpoint (NEW)
-app.get('/api/batch/:batchId/integrity', authenticate, async (req, res) => {
-   try {
-       const { batchId } = req.params;
-       
-       // Get current database data
-       const dbBatch = await prisma.batch.findUnique({
-           where: { batchId: batchId }
-       });
-       
-       if (!dbBatch) {
-           return res.status(404).json({
-               success: false,
-               error: 'Batch not found in database'
-           });
-       }
-       
-       // Create current hash
-       const currentHash = calculateStableHash(dbBatch);
-           
-       // Compare with stored hash
-       const integrityValid = currentHash === dbBatch.dataHash;
-       
-       // Get blockchain verification if available
-       const { gateway, contract } = await blockchainService.connectToNetwork();
-       let blockchainVerification = null;
-       
-       if (contract) {
-           try {
-               const result = await contract.evaluateTransaction('verifyBatchIntegrity', batchId, currentHash);
-               blockchainVerification = JSON.parse(result.toString());
-               await gateway.disconnect();
-           } catch (blockchainError) {
-               await gateway.disconnect();
-               console.error('Blockchain integrity check failed:', blockchainError);
-           }
-       }
-       
-       res.json({
-           success: true,
-           batchId: batchId,
-           integrityCheck: {
-               valid: integrityValid,
-               storedHash: dbBatch.dataHash,
-               currentHash: currentHash,
-               lastModified: dbBatch.updatedAt,
-               message: integrityValid ? 'Data integrity verified' : 'Data has been modified'
-           },
-           blockchainVerification: blockchainVerification,
-           checkedAt: new Date().toISOString()
-       });
-       
-   } catch (error) {
-       console.error('Integrity check error:', error);
-       res.status(500).json({
-           success: false,
-           error: 'Integrity check failed'
-       });
-   }
+app.get("/api/batch/:batchId/integrity", authenticate, async (req, res) => {
+  try {
+    const { batchId } = req.params;
+
+    // Get current database data
+    const dbBatch = await prisma.batch.findUnique({
+      where: { batchId: batchId },
+    });
+
+    if (!dbBatch) {
+      return res.status(404).json({
+        success: false,
+        error: "Batch not found in database",
+      });
+    }
+
+    // Create current hash
+    const currentHash = calculateStableHash(dbBatch);
+
+    // Compare with stored hash
+    const integrityValid = currentHash === dbBatch.dataHash;
+
+    // Get blockchain verification if available
+    const { gateway, contract } = await blockchainService.connectToNetwork();
+    let blockchainVerification = null;
+
+    if (contract) {
+      try {
+        const result = await contract.evaluateTransaction(
+          "verifyBatchIntegrity",
+          batchId,
+          currentHash
+        );
+        blockchainVerification = JSON.parse(result.toString());
+        await gateway.disconnect();
+      } catch (blockchainError) {
+        await gateway.disconnect();
+        console.error("Blockchain integrity check failed:", blockchainError);
+      }
+    }
+
+    res.json({
+      success: true,
+      batchId: batchId,
+      integrityCheck: {
+        valid: integrityValid,
+        storedHash: dbBatch.dataHash,
+        currentHash: currentHash,
+        lastModified: dbBatch.updatedAt,
+        message: integrityValid
+          ? "Data integrity verified"
+          : "Data has been modified",
+      },
+      blockchainVerification: blockchainVerification,
+      checkedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Integrity check error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Integrity check failed",
+    });
+  }
 });
 
 // ===============================
@@ -2610,391 +2923,701 @@ app.get('/api/batch/:batchId/integrity', authenticate, async (req, res) => {
 // ===============================
 
 // Get available batches for processing
-app.get('/api/processor/available-batches', authenticate, authorize(['PROCESSOR']), async (req, res) => {
+app.get(
+  "/api/processor/available-batches",
+  authenticate,
+  authorize(["PROCESSOR"]),
+  async (req, res) => {
     try {
-        const batches = await prisma.batch.findMany({
-            where: {
-                status: {
-                    in: ['REGISTERED', 'PROCESSING']
-                }
+      const batches = await prisma.batch.findMany({
+        where: {
+          status: {
+            in: ["REGISTERED", "PROCESSING"],
+          },
+        },
+        orderBy: {
+          createdAt: "desc",
+        },
+        include: {
+          farmer: {
+            select: {
+              firstName: true,
+              lastName: true,
+              farmName: true,
+              user: {
+                select: {
+                  username: true,
+                },
+              },
             },
-            orderBy: {
-                createdAt: 'desc'
+          },
+          farmLocation: {
+            select: {
+              location: true,
             },
-            include: {
-                farmer: {
-                    select: {
-                        firstName: true,
-                        lastName: true,
-                        farmName: true,
-                        user: {
-                            select: {
-                                username: true
-                            }
-                        }
-                    }
-                }
-            }
-        });
+          },
+        },
+      });
 
-        res.json({
-            success: true,
-            batches: batches,
-            message: `Found ${batches.length} batches (available and in processing)`
-        });
-
+      res.json({
+        success: true,
+        batches: batches,
+        message: `Found ${batches.length} batches (available and in processing)`,
+      });
     } catch (error) {
-        console.error('Get available batches error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to fetch available batches'
-        });
+      console.error("Get available batches error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to fetch available batches",
+      });
     }
-});
+  }
+);
 
 // Process a batch
-app.post('/api/processor/process/:batchId', authenticate, authorize(['PROCESSOR']), async (req, res) => {
+app.post(
+  "/api/processor/process/:batchId",
+  authenticate,
+  authorize(["PROCESSOR"]),
+  async (req, res) => {
     try {
-        const { batchId } = req.params;
-        const {
-            processType,
-            notes,
-            processingLocation,
-            latitude,
-            longitude,
-            inputQuantity,
-            outputQuantity,
-            wasteQuantity,
-            processingTime,
-            energyUsage,
-            waterUsage
-        } = req.body;
-        const processorId = req.user.id;
+      const { batchId } = req.params;
+      const {
+        processType,
+        notes,
+        processingLocation,
+        latitude,
+        longitude,
+        inputQuantity,
+        outputQuantity,
+        wasteQuantity,
+        processingTime,
+        energyUsage,
+        waterUsage,
+        ...additionalData
+      } = req.body;
+      const processorId = req.user.id;
 
-        // Find the batch
-        const batch = await prisma.batch.findUnique({
-            where: { batchId: batchId }
+      // Find the batch
+      const batch = await prisma.batch.findUnique({
+        where: { batchId: batchId },
+      });
+
+      if (!batch) {
+        return res.status(404).json({
+          success: false,
+          error: "Batch not found",
         });
+      }
 
-        if (!batch) {
-            return res.status(404).json({
-                success: false,
-                error: 'Batch not found'
-            });
-        }
-
-        if (batch.status !== 'REGISTERED') {
-            return res.status(400).json({
-                success: false,
-                error: `Cannot process batch with status: ${batch.status}`
-            });
-        }
-
-        // Update batch status to PROCESSING
-        const updatedBatch = await prisma.batch.update({
-            where: { batchId: batchId },
-            data: {
-                status: 'PROCESSING',
-                updatedAt: new Date()
-            }
+      if (batch.status !== "REGISTERED") {
+        return res.status(400).json({
+          success: false,
+          error: `Cannot process batch with status: ${batch.status}`,
         });
+      }
 
-        // Get the processor profile ID
-        const processorProfile = await prisma.processorProfile.findUnique({
-            where: {
-                userId: processorId
-            }
+      // Update batch status to PROCESSING
+      const updatedBatch = await prisma.batch.update({
+        where: { batchId: batchId },
+        data: {
+          status: "PROCESSING",
+          updatedAt: new Date(),
+        },
+      });
+
+      // Get the processor profile ID
+      const processorProfile = await prisma.processorProfile.findUnique({
+        where: {
+          userId: processorId,
+        },
+      });
+
+      if (!processorProfile) {
+        return res.status(400).json({
+          success: false,
+          error: "Processor profile not found",
         });
+      }
 
-        if (!processorProfile) {
-            return res.status(400).json({
-                success: false,
-                error: 'Processor profile not found'
-            });
-        }
+      // Find or create a default processing facility for this processor
+      let facility = await prisma.processingFacility.findFirst({
+        where: {
+          processorId: processorProfile.id,
+          isActive: true,
+        },
+      });
 
-        // Find or create a default processing facility for this processor
-        let facility = await prisma.processingFacility.findFirst({
-            where: {
-                processorId: processorProfile.id,
-                isActive: true
-            }
+      if (!facility) {
+        // Create a default facility if none exists
+        facility = await prisma.processingFacility.create({
+          data: {
+            processorId: processorProfile.id,
+            facilityName: `${req.user.username}'s Processing Facility`,
+            facilityType: "processing",
+            latitude: 0.0, // Default coordinates, can be updated later
+            longitude: 0.0,
+            address: "Not specified",
+            isActive: true,
+            certifications: [],
+            equipmentList: [],
+          },
         });
+      }
 
-        if (!facility) {
-            // Create a default facility if none exists
-            facility = await prisma.processingFacility.create({
-                data: {
-                    processorId: processorProfile.id,
-                    facilityName: `${req.user.username}'s Processing Facility`,
-                    facilityType: 'processing',
-                    latitude: 0.0, // Default coordinates, can be updated later
-                    longitude: 0.0,
-                    address: 'Not specified',
-                    isActive: true,
-                    certifications: [],
-                    equipmentList: []
-                }
-            });
-        }
+      // Create processing record with location tracking
+      const processingRecord = await prisma.processingRecord.create({
+        data: {
+          batchId: batch.id,
+          processorId: processorProfile.id,
+          facilityId: facility.id,
+          processingDate: new Date(),
+          processingType: processType || "initial_processing",
+          inputQuantity: inputQuantity
+            ? parseFloat(inputQuantity)
+            : batch.quantity,
+          outputQuantity: outputQuantity
+            ? parseFloat(outputQuantity)
+            : batch.quantity,
+          wasteQuantity: wasteQuantity ? parseFloat(wasteQuantity) : null,
+          processingTime: processingTime ? parseInt(processingTime) : null,
+          energyUsage: energyUsage ? parseFloat(energyUsage) : null,
+          waterUsage: waterUsage ? parseFloat(waterUsage) : null,
+          operatorName: req.user.username,
+          // Location tracking
+          processingLocation: processingLocation || null,
+          latitude: latitude ? parseFloat(latitude) : null,
+          longitude: longitude ? parseFloat(longitude) : null,
+          temperature: additionalData.temperature
+            ? parseFloat(additionalData.temperature)
+            : null,
+          humidity: additionalData.humidity
+            ? parseFloat(additionalData.humidity)
+            : null,
+          weather_main: additionalData.weather_main || null,
+          weather_desc: additionalData.weather_description || null,
+        },
+      });
 
-        // Create processing record with location tracking
-        const processingRecord = await prisma.processingRecord.create({
-            data: {
-                batchId: batch.id,
-                processorId: processorProfile.id,
-                facilityId: facility.id,
-                processingDate: new Date(),
-                processingType: processType || 'initial_processing',
-                inputQuantity: inputQuantity ? parseFloat(inputQuantity) : batch.quantity,
-                outputQuantity: outputQuantity ? parseFloat(outputQuantity) : batch.quantity,
-                wasteQuantity: wasteQuantity ? parseFloat(wasteQuantity) : null,
-                processingTime: processingTime ? parseInt(processingTime) : null,
-                energyUsage: energyUsage ? parseFloat(energyUsage) : null,
-                waterUsage: waterUsage ? parseFloat(waterUsage) : null,
-                operatorName: req.user.username,
-                // Location tracking
-                processingLocation: processingLocation || null,
-                latitude: latitude ? parseFloat(latitude) : null,
-                longitude: longitude ? parseFloat(longitude) : null
-            }
-        });
+      // Update blockchain with processing details
+      try {
+        const { gateway, contract } =
+          await blockchainService.connectToNetwork();
 
-        // Update blockchain with processing details
-        try {
-            const { gateway, contract } = await blockchainService.connectToNetwork();
+        // Prepare processing data for blockchain
+        const processingData = {
+          processorId: req.user.username,
+          processingType: processType || "initial_processing",
+          processingLocation: processingLocation || null,
+          latitude: latitude ? parseFloat(latitude) : null,
+          longitude: longitude ? parseFloat(longitude) : null,
+          inputQuantity: inputQuantity
+            ? parseFloat(inputQuantity)
+            : batch.quantity,
+          outputQuantity: outputQuantity
+            ? parseFloat(outputQuantity)
+            : batch.quantity,
+          wasteQuantity: wasteQuantity ? parseFloat(wasteQuantity) : null,
+          processingTime: processingTime ? parseInt(processingTime) : null,
+          energyUsage: energyUsage ? parseFloat(energyUsage) : null,
+          waterUsage: waterUsage ? parseFloat(waterUsage) : null,
+          processingDate: new Date().toISOString(),
+        };
 
-            // Prepare processing data for blockchain
-            const processingData = {
-                processorId: req.user.username,
-                processingType: processType || 'initial_processing',
-                processingLocation: processingLocation || null,
-                latitude: latitude ? parseFloat(latitude) : null,
-                longitude: longitude ? parseFloat(longitude) : null,
-                inputQuantity: inputQuantity ? parseFloat(inputQuantity) : batch.quantity,
-                outputQuantity: outputQuantity ? parseFloat(outputQuantity) : batch.quantity,
-                wasteQuantity: wasteQuantity ? parseFloat(wasteQuantity) : null,
-                processingTime: processingTime ? parseInt(processingTime) : null,
-                energyUsage: energyUsage ? parseFloat(energyUsage) : null,
-                waterUsage: waterUsage ? parseFloat(waterUsage) : null,
-                processingDate: new Date().toISOString()
-            };
+        await contract.submitTransaction(
+          "updateBatchStatus",
+          batchId,
+          "PROCESSING",
+          req.user.username,
+          new Date().toISOString(),
+          JSON.stringify(processingData)
+        );
+        await gateway.disconnect();
+        console.log(
+          `✅ Blockchain updated: Batch ${batchId} set to PROCESSING with location & quantity data`
+        );
+      } catch (blockchainError) {
+        console.error("Blockchain update failed:", blockchainError);
+      }
 
-            await contract.submitTransaction(
-                'updateBatchStatus',
-                batchId,
-                'PROCESSING',
-                req.user.username,
-                new Date().toISOString(),
-                JSON.stringify(processingData)
-            );
-            await gateway.disconnect();
-            console.log(`✅ Blockchain updated: Batch ${batchId} set to PROCESSING with location & quantity data`);
-        } catch (blockchainError) {
-            console.error('Blockchain update failed:', blockchainError);
-        }
-
-        res.json({
-            success: true,
-            batch: updatedBatch,
-            processingRecord: processingRecord,
-            message: 'Batch processing started successfully'
-        });
-
+      res.json({
+        success: true,
+        batch: updatedBatch,
+        processingRecord: processingRecord,
+        message: "Batch processing started successfully",
+      });
     } catch (error) {
-        console.error('Process batch error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to start batch processing'
-        });
+      console.error("Process batch error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to start batch processing",
+      });
     }
-});
+  }
+);
 
 // Get processor's processing history
-app.get('/api/processor/my-processing', authenticate, authorize(['PROCESSOR']), async (req, res) => {
+app.get(
+  "/api/processor/my-processing",
+  authenticate,
+  authorize(["PROCESSOR"]),
+  async (req, res) => {
     try {
-        const processorId = req.user.id;
+      const processorId = req.user.id;
 
-        // Get the processor profile ID
-        const processorProfile = await prisma.processorProfile.findUnique({
-            where: {
-                userId: processorId
-            }
+      // Get the processor profile ID
+      const processorProfile = await prisma.processorProfile.findUnique({
+        where: {
+          userId: processorId,
+        },
+      });
+
+      if (!processorProfile) {
+        return res.status(400).json({
+          success: false,
+          error: "Processor profile not found",
         });
+      }
 
-        if (!processorProfile) {
-            return res.status(400).json({
-                success: false,
-                error: 'Processor profile not found'
-            });
-        }
-
-        const processingHistory = await prisma.processingRecord.findMany({
-            where: {
-                processorId: processorProfile.id
+      const processingHistory = await prisma.processingRecord.findMany({
+        where: {
+          processorId: processorProfile.id,
+        },
+        orderBy: {
+          processingDate: "desc",
+        },
+        include: {
+          batch: {
+            select: {
+              batchId: true,
+              productType: true,
+              variety: true,
+              status: true,
             },
-            orderBy: {
-                processingDate: 'desc'
-            },
-            include: {
-                batch: {
-                    select: {
-                        batchId: true,
-                        productType: true,
-                        variety: true,
-                        status: true
-                    }
-                }
-            }
-        });
+          },
+        },
+      });
 
-        // Transform data for frontend
-        const history = processingHistory.map(record => ({
-            id: record.id,
-            batchId: record.batch?.batchId || record.batchId,
-            productType: record.batch?.productType || 'Unknown',
-            variety: record.batch?.variety,
-            processType: record.processingType,
-            processDate: record.processingDate,
-            createdAt: record.processingDate, // For compatibility with dashboard
-            status: 'COMPLETED', // ProcessingRecord doesn't have a status field in our schema
-            notes: record.operatorName ? `Processed by ${record.operatorName}` : 'Processing completed'
-        }));
+      // Transform data for frontend
+      const history = processingHistory.map((record) => ({
+        id: record.id,
+        batchId: record.batch?.batchId || record.batchId,
+        productType: record.batch?.productType || "Unknown",
+        variety: record.batch?.variety,
+        processType: record.processingType,
+        processDate: record.processingDate,
+        createdAt: record.processingDate, // For compatibility with dashboard
+        status: "COMPLETED", // ProcessingRecord doesn't have a status field in our schema
+        notes: record.operatorName
+          ? `Processed by ${record.operatorName}`
+          : "Processing completed",
+      }));
 
-        res.json({
-            success: true,
-            history: history,
-            message: `Found ${history.length} processing records`
-        });
-
+      res.json({
+        success: true,
+        history: history,
+        message: `Found ${history.length} processing records`,
+      });
     } catch (error) {
-        console.error('Get processing history error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to fetch processing history'
-        });
+      console.error("Get processing history error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to fetch processing history",
+      });
     }
-});
+  }
+);
 
 // Complete processing for a batch
-app.put('/api/processor/complete/:batchId', authenticate, authorize(['PROCESSOR']), async (req, res) => {
+app.put(
+  "/api/processor/complete/:batchId",
+  authenticate,
+  authorize(["PROCESSOR"]),
+  async (req, res) => {
     try {
-        const { batchId } = req.params;
-        const { qualityGrade, completionNotes, outputQuantity, wasteQuantity } = req.body;
-        const processorId = req.user.id;
+      const { batchId } = req.params;
+      const { qualityGrade, completionNotes, outputQuantity, wasteQuantity } =
+        req.body;
+      const processorId = req.user.id;
 
-        // Get the processor profile ID
-        const processorProfile = await prisma.processorProfile.findUnique({
-            where: {
-                userId: processorId
-            }
+      // Get the processor profile ID
+      const processorProfile = await prisma.processorProfile.findUnique({
+        where: {
+          userId: processorId,
+        },
+      });
+
+      if (!processorProfile) {
+        return res.status(400).json({
+          success: false,
+          error: "Processor profile not found",
         });
+      }
 
-        if (!processorProfile) {
-            return res.status(400).json({
-                success: false,
-                error: 'Processor profile not found'
-            });
-        }
+      // Find the batch
+      const batch = await prisma.batch.findUnique({
+        where: { batchId: batchId },
+      });
 
-        // Find the batch
-        const batch = await prisma.batch.findUnique({
-            where: { batchId: batchId }
+      if (!batch) {
+        return res.status(404).json({
+          success: false,
+          error: "Batch not found",
         });
+      }
 
-        if (!batch) {
-            return res.status(404).json({
-                success: false,
-                error: 'Batch not found'
-            });
-        }
-
-        if (batch.status !== 'PROCESSING') {
-            return res.status(400).json({
-                success: false,
-                error: `Cannot complete batch with status: ${batch.status}`
-            });
-        }
-
-        // Update batch status to PROCESSED
-        const updatedBatch = await prisma.batch.update({
-            where: { batchId: batchId },
-            data: {
-                status: 'PROCESSED',
-                qualityGrade: qualityGrade,
-                updatedAt: new Date()
-            }
+      if (batch.status !== "PROCESSING") {
+        return res.status(400).json({
+          success: false,
+          error: `Cannot complete batch with status: ${batch.status}`,
         });
+      }
 
-        // Update processing record - update the most recent processing record for this batch and processor
-        const mostRecentRecord = await prisma.processingRecord.findFirst({
-            where: {
-                batch: {
-                    batchId: batchId
-                },
-                processorId: processorProfile.id
-            },
-            orderBy: {
-                processingDate: 'desc'
-            }
+      // Update batch status to PROCESSED
+      const updatedBatch = await prisma.batch.update({
+        where: { batchId: batchId },
+        data: {
+          status: "PROCESSED",
+          qualityGrade: qualityGrade,
+          updatedAt: new Date(),
+        },
+      });
+
+      // Update processing record - update the most recent processing record for this batch and processor
+      const mostRecentRecord = await prisma.processingRecord.findFirst({
+        where: {
+          batch: {
+            batchId: batchId,
+          },
+          processorId: processorProfile.id,
+        },
+        orderBy: {
+          processingDate: "desc",
+        },
+      });
+
+      if (mostRecentRecord) {
+        await prisma.processingRecord.update({
+          where: {
+            id: mostRecentRecord.id,
+          },
+          data: {
+            outputQuantity: outputQuantity
+              ? parseFloat(outputQuantity)
+              : batch.quantity,
+            wasteQuantity: wasteQuantity
+              ? parseFloat(wasteQuantity)
+              : mostRecentRecord.wasteQuantity,
+            operatorName: `${req.user.username} (completed)`,
+            qualityTests: qualityGrade
+              ? JSON.stringify({ grade: qualityGrade, notes: completionNotes })
+              : null,
+          },
         });
+      }
 
-        if (mostRecentRecord) {
-            await prisma.processingRecord.update({
-                where: {
-                    id: mostRecentRecord.id
-                },
-                data: {
-                    outputQuantity: outputQuantity ? parseFloat(outputQuantity) : batch.quantity,
-                    wasteQuantity: wasteQuantity ? parseFloat(wasteQuantity) : mostRecentRecord.wasteQuantity,
-                    operatorName: `${req.user.username} (completed)`,
-                    qualityTests: qualityGrade ? JSON.stringify({ grade: qualityGrade, notes: completionNotes }) : null
-                }
-            });
-        }
+      // Update blockchain with completion details including quantities
+      try {
+        const { gateway, contract } =
+          await blockchainService.connectToNetwork();
+        await contract.submitTransaction(
+          "updateBatchStatus",
+          batchId,
+          "PROCESSED",
+          req.user.username,
+          new Date().toISOString(),
+          JSON.stringify({
+            processedBy: req.user.username,
+            processorId: processorId,
+            completionDate: new Date().toISOString(),
+            qualityGrade: qualityGrade,
+            notes: completionNotes,
+            // Include final quantities
+            outputQuantity: outputQuantity
+              ? parseFloat(outputQuantity)
+              : batch.quantity,
+            wasteQuantity: wasteQuantity ? parseFloat(wasteQuantity) : null,
+            processingLocation: mostRecentRecord?.processingLocation || null,
+            latitude: mostRecentRecord?.latitude || null,
+            longitude: mostRecentRecord?.longitude || null,
+          })
+        );
+        await gateway.disconnect();
+        console.log(
+          `✅ Blockchain updated: Batch ${batchId} completed processing with final quantities`
+        );
+      } catch (blockchainError) {
+        console.error("Blockchain update failed:", blockchainError);
+      }
 
-        // Update blockchain with completion details including quantities
-        try {
-            const { gateway, contract } = await blockchainService.connectToNetwork();
-            await contract.submitTransaction(
-                'updateBatchStatus',
-                batchId,
-                'PROCESSED',
-                req.user.username,
-                new Date().toISOString(),
-                JSON.stringify({
-                    processedBy: req.user.username,
-                    processorId: processorId,
-                    completionDate: new Date().toISOString(),
-                    qualityGrade: qualityGrade,
-                    notes: completionNotes,
-                    // Include final quantities
-                    outputQuantity: outputQuantity ? parseFloat(outputQuantity) : batch.quantity,
-                    wasteQuantity: wasteQuantity ? parseFloat(wasteQuantity) : null,
-                    processingLocation: mostRecentRecord?.processingLocation || null,
-                    latitude: mostRecentRecord?.latitude || null,
-                    longitude: mostRecentRecord?.longitude || null
-                })
-            );
-            await gateway.disconnect();
-            console.log(`✅ Blockchain updated: Batch ${batchId} completed processing with final quantities`);
-        } catch (blockchainError) {
-            console.error('Blockchain update failed:', blockchainError);
-        }
-
-        res.json({
-            success: true,
-            batch: updatedBatch,
-            message: 'Batch processing completed successfully'
-        });
-
+      res.json({
+        success: true,
+        batch: updatedBatch,
+        message: "Batch processing completed successfully",
+      });
     } catch (error) {
-        console.error('Complete processing error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to complete batch processing'
-        });
+      console.error("Complete processing error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to complete batch processing",
+      });
     }
+  }
+);
+
+app.get("/api/batches/active-locations", async (req, res) => {
+  try {
+    // Find all batches that are currently active
+    const activeBatches = await prisma.batch.findMany({
+      where: {
+        status: {
+          in: [
+            "REGISTERED",
+            "PROCESSING",
+            "PROCESSED",
+            "IN_TRANSIT",
+            "IN_DISTRIBUTION",
+            "RETAIL_READY",
+            "IN_RETAIL",
+            "SOLD",
+          ],
+        },
+      },
+      select: {
+        batchId: true,
+        status: true,
+        id: true,
+        createdAt: true,
+        farmLocationId: true,
+        cropType: true,
+        quantity: true,
+        productType: true,
+      },
+    });
+
+    if (activeBatches.length === 0) {
+      return res.status(200).json({
+        success: true,
+        locations: [],
+        message: "No active batches found.",
+      });
+    }
+
+    const allLocations = [];
+
+    for (const batch of activeBatches) {
+      // 1. Get farm location
+      let farmLocation = null;
+      if (batch.farmLocationId) {
+        farmLocation = await prisma.farmLocation.findUnique({
+          where: { id: batch.farmLocationId },
+          select: {
+            latitude: true,
+            longitude: true,
+            location: true,
+            temperature: true,
+            humidity: true,
+            weather_main: true,
+            weather_desc: true,
+          },
+        });
+      }
+
+      // 2. Get processing records
+      const processingRecords = await prisma.processingRecord.findMany({
+        where: { batchId: batch.id },
+        orderBy: { processingDate: "asc" },
+        select: {
+          latitude: true,
+          longitude: true,
+          processingLocation: true,
+          processingDate: true,
+          temperature: true,
+          humidity: true,
+          weather_main: true,
+          weather_desc: true,
+        },
+      });
+
+      // 3. Get transport routes
+      const transportRoutes = await prisma.transportRoute.findMany({
+        where: { batchId: batch.id },
+        orderBy: { departureTime: "asc" },
+        select: {
+          originLat: true,
+          originLng: true,
+          destinationLat: true,
+          destinationLng: true,
+          departureTime: true,
+          arrivalTime: true,
+          status: true,
+        },
+      });
+
+      // 4. Get distribution records
+      const distributionRecords = await prisma.distributionRecord.findMany({
+        where: { batchId: batch.batchId },
+        orderBy: { distributionDate: "asc" },
+        select: {
+          warehouseLat: true,
+          warehouseLng: true,
+          warehouseLocation: true,
+          distributionDate: true,
+          temperature: true,
+          humidity: true,
+          weather_main: true,
+          weather_desc: true,
+        },
+      });
+
+      const retailerRecords = await prisma.batchTransfer.findMany({
+        where: { batchId: batch.batchId },
+        orderBy: { transferDate: "asc" },
+        select: {
+          transferLocation: true,
+          latitude: true,
+          longitude: true,
+          notes: true,
+          temperature: true,
+          humidity: true,
+          weather_main: true,
+          weather_desc: true,
+        },
+      });
+
+      // Build history points
+      const historyPoints = [];
+      // Farm registration
+      if (farmLocation) {
+        historyPoints.push({
+          eventType: "REGISTERED",
+          latitude: farmLocation.latitude,
+          longitude: farmLocation.longitude,
+          timestamp: batch.createdAt,
+          metadata: {
+            location: farmLocation.location,
+            temperature: farmLocation.temperature,
+            humidity: farmLocation.humidity,
+            weather_main: farmLocation.weather_main,
+            weather_desc: farmLocation.weather_desc,
+            stage: "Farm",
+          },
+        });
+      }
+      // Processing records
+      for (const record of processingRecords) {
+        historyPoints.push({
+          eventType: "PROCESSING",
+          latitude: record.latitude,
+          longitude: record.longitude,
+          timestamp: record.processingDate,
+          metadata: {
+            location: record.processingLocation,
+            temperature: record.temperature,
+            humidity: record.humidity,
+            weather_main: record.weather_main,
+            weather_desc: record.weather_desc,
+            stage: "Processing",
+          },
+        });
+      }
+      // Transport routes
+      for (const route of transportRoutes) {
+        historyPoints.push({
+          eventType: "IN_TRANSIT_DEPARTURE",
+          latitude: route.originLat,
+          longitude: route.originLng,
+          timestamp: route.departureTime,
+          metadata: {
+            stage: "Transport",
+            status: route.status,
+          },
+        });
+        historyPoints.push({
+          eventType: "TRANSPORT_ARRIVAL",
+          latitude: route.destinationLat,
+          longitude: route.destinationLng,
+          timestamp: route.arrivalTime,
+          metadata: {
+            stage: "Transport",
+            status: route.status,
+          },
+        });
+      }
+      // Distribution records
+      for (const dist of distributionRecords) {
+        historyPoints.push({
+          eventType: "DISTRIBUTION_ARRIVAL",
+          latitude: dist.warehouseLat,
+          longitude: dist.warehouseLng,
+          timestamp: dist.distributionDate,
+          metadata: {
+            location: dist.warehouseLocation,
+            temperature: dist.temperature,
+            humidity: dist.humidity,
+            weather_main: dist.weather_main,
+            weather_desc: dist.weather_desc,
+            stage: "Distribution",
+          },
+        });
+      }
+      for (const retail of retailerRecords) {
+        if (retail.latitude && retail.longitude) {
+          historyPoints.push({
+            eventType: "RETAIL_READY", // Ensure this matches your frontend switch case
+            latitude: parseFloat(retail.latitude), // Ensure they are numbers
+            longitude: parseFloat(retail.longitude),
+            timestamp: batch.createdAt, // Or retail.transferDate if available
+            metadata: {
+              location: retail.transferLocation,
+              notes: retail.notes,
+              stage: "Retail",
+              temperature: retail.temperature || null,
+              humidity: retail.humidity || null,
+              weather_main: retail.weather_main || null,
+              weather_desc: retail.weather_desc || null,
+            },
+          });
+        }
+      }
+
+      // 5. Get active transport routes (for line segments)
+      const activeRoutes = await prisma.transportRoute.findMany({
+        where: { batchId: batch.id },
+        orderBy: { departureTime: "asc" },
+        select: {
+          routePolyline: true,
+          status: true,
+          originLat: true,
+          originLng: true,
+          destinationLat: true,
+          destinationLng: true,
+        },
+      });
+
+      allLocations.push({
+        batchId: batch.batchId,
+        status: batch.status,
+        cropType: batch.cropType,
+        quantity: batch.quantity,
+        productType: batch.productType,
+        historyPoints: historyPoints,
+        activeRoutes: activeRoutes,
+      });
+    }
+
+    res.json({
+      success: true,
+      count: allLocations.length,
+      batchesData: allLocations,
+    });
+  } catch (error) {
+    console.error("API error fetching all active batch locations:", error);
+    res.status(500).json({
+      success: false,
+      error: "Internal server error fetching collective location data",
+    });
+  }
 });
 
 // ============================================
@@ -3002,1436 +3625,1666 @@ app.put('/api/processor/complete/:batchId', authenticate, authorize(['PROCESSOR'
 // ============================================
 
 // Add pricing record (for PROCESSOR, DISTRIBUTOR, RETAILER)
-app.post('/api/pricing/add', authenticate, authorize(['PROCESSOR', 'DISTRIBUTOR', 'RETAILER', 'ADMIN']), async (req, res) => {
+app.post(
+  "/api/pricing/add",
+  authenticate,
+  authorize(["PROCESSOR", "DISTRIBUTOR", "RETAILER", "ADMIN"]),
+  async (req, res) => {
     try {
-        const { batchId, level, pricePerUnit, totalValue, breakdown, notes } = req.body;
+      const { batchId, level, pricePerUnit, totalValue, breakdown, notes } =
+        req.body;
 
-        // Validate required fields
-        if (!batchId || !level || !pricePerUnit || !totalValue) {
-            return res.status(400).json({
-                success: false,
-                error: 'Missing required fields: batchId, level, pricePerUnit, totalValue'
-            });
-        }
-
-        // Validate level
-        const validLevels = ['PROCESSOR', 'DISTRIBUTOR', 'RETAILER'];
-        if (!validLevels.includes(level)) {
-            return res.status(400).json({
-                success: false,
-                error: `Invalid level. Must be one of: ${validLevels.join(', ')}`
-            });
-        }
-
-        // Check if batch exists in database
-        const batch = await prisma.batch.findUnique({
-            where: { batchId: batchId }
+      // Validate required fields
+      if (!batchId || !level || !pricePerUnit || !totalValue) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Missing required fields: batchId, level, pricePerUnit, totalValue",
         });
+      }
 
-        if (!batch) {
-            return res.status(404).json({
-                success: false,
-                error: 'Batch not found'
-            });
-        }
-
-        // Prepare pricing data
-        const pricingData = {
-            level,
-            pricePerUnit: parseFloat(pricePerUnit),
-            totalValue: parseFloat(totalValue),
-            breakdown: breakdown || {},
-            notes: notes || ''
-        };
-
-        // Submit to blockchain (with retry for MVCC conflicts)
-        const { gateway, contract } = await blockchainService.connectToNetwork();
-
-        const result = await retryOnMVCCConflict(async () => {
-            return await contract.submitTransaction(
-                'addPricingRecord',
-                batchId,
-                JSON.stringify(pricingData)
-            );
+      // Validate level
+      const validLevels = ["PROCESSOR", "DISTRIBUTOR", "RETAILER"];
+      if (!validLevels.includes(level)) {
+        return res.status(400).json({
+          success: false,
+          error: `Invalid level. Must be one of: ${validLevels.join(", ")}`,
         });
+      }
 
-        await gateway.disconnect();
+      // Check if batch exists in database
+      const batch = await prisma.batch.findUnique({
+        where: { batchId: batchId },
+      });
 
-        const pricingRecord = JSON.parse(result.toString());
-
-        res.json({
-            success: true,
-            pricing: pricingRecord,
-            message: `Pricing record added successfully for ${level}`
+      if (!batch) {
+        return res.status(404).json({
+          success: false,
+          error: "Batch not found",
         });
+      }
 
+      // Prepare pricing data
+      const pricingData = {
+        level,
+        pricePerUnit: parseFloat(pricePerUnit),
+        totalValue: parseFloat(totalValue),
+        breakdown: breakdown || {},
+        notes: notes || "",
+      };
+
+      // Submit to blockchain (with retry for MVCC conflicts)
+      const { gateway, contract } = await blockchainService.connectToNetwork();
+
+      const result = await retryOnMVCCConflict(async () => {
+        return await contract.submitTransaction(
+          "addPricingRecord",
+          batchId,
+          JSON.stringify(pricingData)
+        );
+      });
+
+      await gateway.disconnect();
+
+      const pricingRecord = JSON.parse(result.toString());
+
+      res.json({
+        success: true,
+        pricing: pricingRecord,
+        message: `Pricing record added successfully for ${level}`,
+      });
     } catch (error) {
-        console.error('Add pricing record error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to add pricing record',
-            details: error.message
-        });
+      console.error("Add pricing record error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to add pricing record",
+        details: error.message,
+      });
     }
-});
+  }
+);
 
 // Get pricing history for a batch (public endpoint)
-app.get('/api/pricing/history/:batchId', async (req, res) => {
-    try {
-        const { batchId } = req.params;
+app.get("/api/pricing/history/:batchId", async (req, res) => {
+  try {
+    const { batchId } = req.params;
 
-        // Check if batch exists
-        const batch = await prisma.batch.findUnique({
-            where: { batchId: batchId }
-        });
+    // Check if batch exists
+    const batch = await prisma.batch.findUnique({
+      where: { batchId: batchId },
+    });
 
-        if (!batch) {
-            return res.status(404).json({
-                success: false,
-                error: 'Batch not found'
-            });
-        }
-
-        // Query blockchain for pricing history
-        const { gateway, contract } = await blockchainService.connectToNetwork();
-
-        const result = await contract.evaluateTransaction(
-            'getPricingHistory',
-            batchId
-        );
-
-        await gateway.disconnect();
-
-        const pricingHistory = JSON.parse(result.toString());
-
-        res.json({
-            success: true,
-            data: pricingHistory
-        });
-
-    } catch (error) {
-        console.error('Get pricing history error:', error);
-
-        // If chaincode returns error about no pricing records, return empty history
-        if (error.message.includes('No pricing records found')) {
-            return res.json({
-                success: true,
-                data: {
-                    batchId: req.params.batchId,
-                    currentPrice: null,
-                    pricingHistory: [],
-                    priceIncrease: null,
-                    totalLevels: 0
-                }
-            });
-        }
-
-        res.status(500).json({
-            success: false,
-            error: 'Failed to get pricing history',
-            details: error.message
-        });
+    if (!batch) {
+      return res.status(404).json({
+        success: false,
+        error: "Batch not found",
+      });
     }
+
+    // Query blockchain for pricing history
+    const { gateway, contract } = await blockchainService.connectToNetwork();
+
+    const result = await contract.evaluateTransaction(
+      "getPricingHistory",
+      batchId
+    );
+
+    await gateway.disconnect();
+
+    const pricingHistory = JSON.parse(result.toString());
+
+    res.json({
+      success: true,
+      data: pricingHistory,
+    });
+  } catch (error) {
+    console.error("Get pricing history error:", error);
+
+    // If chaincode returns error about no pricing records, return empty history
+    if (error.message.includes("No pricing records found")) {
+      return res.json({
+        success: true,
+        data: {
+          batchId: req.params.batchId,
+          currentPrice: null,
+          pricingHistory: [],
+          priceIncrease: null,
+          totalLevels: 0,
+        },
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: "Failed to get pricing history",
+      details: error.message,
+    });
+  }
 });
 
 // Get price markup calculation for a batch (public endpoint)
-app.get('/api/pricing/markup/:batchId', async (req, res) => {
-    try {
-        const { batchId } = req.params;
+app.get("/api/pricing/markup/:batchId", async (req, res) => {
+  try {
+    const { batchId } = req.params;
 
-        // Check if batch exists
-        const batch = await prisma.batch.findUnique({
-            where: { batchId: batchId }
-        });
+    // Check if batch exists
+    const batch = await prisma.batch.findUnique({
+      where: { batchId: batchId },
+    });
 
-        if (!batch) {
-            return res.status(404).json({
-                success: false,
-                error: 'Batch not found'
-            });
-        }
-
-        // Query blockchain for markup calculation
-        const { gateway, contract } = await blockchainService.connectToNetwork();
-
-        const result = await contract.evaluateTransaction(
-            'calculatePriceMarkup',
-            batchId
-        );
-
-        await gateway.disconnect();
-
-        const markupData = JSON.parse(result.toString());
-
-        res.json({
-            success: true,
-            data: markupData
-        });
-
-    } catch (error) {
-        console.error('Get price markup error:', error);
-
-        // If chaincode returns error about insufficient pricing records
-        if (error.message.includes('at least 2 pricing records')) {
-            return res.json({
-                success: true,
-                data: {
-                    batchId: req.params.batchId,
-                    markups: [],
-                    totalMarkup: 0,
-                    averageMarkupPercentage: "0.00"
-                }
-            });
-        }
-
-        res.status(500).json({
-            success: false,
-            error: 'Failed to calculate price markup',
-            details: error.message
-        });
+    if (!batch) {
+      return res.status(404).json({
+        success: false,
+        error: "Batch not found",
+      });
     }
+
+    // Query blockchain for markup calculation
+    const { gateway, contract } = await blockchainService.connectToNetwork();
+
+    const result = await contract.evaluateTransaction(
+      "calculatePriceMarkup",
+      batchId
+    );
+
+    await gateway.disconnect();
+
+    const markupData = JSON.parse(result.toString());
+
+    res.json({
+      success: true,
+      data: markupData,
+    });
+  } catch (error) {
+    console.error("Get price markup error:", error);
+
+    // If chaincode returns error about insufficient pricing records
+    if (error.message.includes("at least 2 pricing records")) {
+      return res.json({
+        success: true,
+        data: {
+          batchId: req.params.batchId,
+          markups: [],
+          totalMarkup: 0,
+          averageMarkupPercentage: "0.00",
+        },
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: "Failed to calculate price markup",
+      details: error.message,
+    });
+  }
 });
 
 // ===== BATCH TRANSFER & OWNERSHIP ENDPOINTS =====
 
 // Transfer batch ownership between supply chain actors
-app.post('/api/batch/transfer', authenticate, authorize(['FARMER', 'PROCESSOR', 'DISTRIBUTOR', 'RETAILER', 'ADMIN']), async (req, res) => {
+app.post(
+  "/api/batch/transfer",
+  authenticate,
+  authorize(["FARMER", "PROCESSOR", "DISTRIBUTOR", "RETAILER", "ADMIN"]),
+  async (req, res) => {
     try {
-        const {
-            batchId,
-            toActorId,
-            toActorRole,
-            transferLocation,
-            latitude,
-            longitude,
-            notes,
-            conditions,
-            documents,
-            signature
-        } = req.body;
+      const {
+        batchId,
+        toActorId,
+        toActorRole,
+        transferLocation,
+        latitude,
+        longitude,
+        notes,
+        conditions,
+        documents,
+        signature,
+      } = req.body;
 
-        // Validation
-        if (!batchId || !toActorId || !toActorRole) {
-            return res.status(400).json({
-                success: false,
-                error: 'Missing required fields: batchId, toActorId, toActorRole'
-            });
-        }
-
-        // Validate role
-        const validRoles = ['FARMER', 'PROCESSOR', 'DISTRIBUTOR', 'RETAILER'];
-        if (!validRoles.includes(toActorRole)) {
-            return res.status(400).json({
-                success: false,
-                error: 'Invalid toActorRole. Must be FARMER, PROCESSOR, DISTRIBUTOR, or RETAILER'
-            });
-        }
-
-        // Get batch to verify ownership
-        const { gateway, contract } = await blockchainService.connectToNetwork();
-
-        const batchResult = await contract.evaluateTransaction('getBatch', batchId);
-        const batch = JSON.parse(batchResult.toString());
-
-        // Current actor info
-        const fromActorId = req.user.id;
-        const fromActorRole = req.user.role;
-
-        // Prepare transfer data
-        const transferData = {
-            transferLocation: transferLocation || null,
-            latitude: latitude || null,
-            longitude: longitude || null,
-            notes: notes || '',
-            conditions: conditions || null,
-            documents: documents || [],
-            signature: signature || null
-        };
-
-        // Call blockchain transferBatch function
-        const timestamp = new Date().toISOString();
-        const result = await contract.submitTransaction(
-            'transferBatch',
-            batchId,
-            fromActorId,
-            fromActorRole,
-            toActorId,
-            toActorRole,
-            JSON.stringify(transferData)
-        );
-
-        const transferRecord = JSON.parse(result.toString());
-
-        // Store in database
-        const dbTransfer = await prisma.batchTransfer.create({
-            data: {
-                batchId: batchId,
-                fromActorId: fromActorId,
-                fromActorRole: fromActorRole,
-                toActorId: toActorId,
-                toActorRole: toActorRole,
-                transferType: 'OWNERSHIP_TRANSFER',
-                transferLocation: transferLocation || null,
-                latitude: latitude || null,
-                longitude: longitude || null,
-                conditions: conditions ? conditions : null,
-                documents: documents || [],
-                signature: signature || null,
-                notes: notes || '',
-                status: 'COMPLETED',
-                statusBefore: batch.status || 'REGISTERED',
-                statusAfter: transferRecord.statusAfter || batch.status,
-                blockchainTxId: transferRecord.txId || null,
-                blockchainHash: null // You can add hash calculation if needed
-            }
+      // Validation
+      if (!batchId || !toActorId || !toActorRole) {
+        return res.status(400).json({
+          success: false,
+          error: "Missing required fields: batchId, toActorId, toActorRole",
         });
+      }
 
-        // Update batch status in database if it exists
-        const dbBatch = await prisma.batch.findUnique({
-            where: { batchId: batchId }
+      // Validate role
+      const validRoles = ["FARMER", "PROCESSOR", "DISTRIBUTOR", "RETAILER"];
+      if (!validRoles.includes(toActorRole)) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Invalid toActorRole. Must be FARMER, PROCESSOR, DISTRIBUTOR, or RETAILER",
         });
+      }
 
-        if (dbBatch) {
-            await prisma.batch.update({
-                where: { batchId: batchId },
-                data: {
-                    status: transferRecord.statusAfter || dbBatch.status
-                }
-            });
-        }
+      // Get batch to verify ownership
+      const { gateway, contract } = await blockchainService.connectToNetwork();
 
-        await gateway.disconnect();
+      const batchResult = await contract.evaluateTransaction(
+        "getBatch",
+        batchId
+      );
+      const batch = JSON.parse(batchResult.toString());
 
-        // Log activity
-        await prisma.activityLog.create({
-            data: {
-                userId: req.user.id,
-                action: 'TRANSFER_BATCH',
-                resource: batchId,
-                ipAddress: req.ip,
-                userAgent: req.get('user-agent'),
-                metadata: {
-                    fromRole: fromActorRole,
-                    toActorId: toActorId,
-                    toRole: toActorRole,
-                    transferId: dbTransfer.id
-                }
-            }
+      // Current actor info
+      const fromActorId = req.user.id;
+      const fromActorRole = req.user.role;
+
+      // Prepare transfer data
+      const transferData = {
+        transferLocation: transferLocation || null,
+        latitude: latitude || null,
+        longitude: longitude || null,
+        notes: notes || "",
+        conditions: conditions || null,
+        documents: documents || [],
+        signature: signature || null,
+      };
+
+      // Call blockchain transferBatch function
+      const timestamp = new Date().toISOString();
+      const result = await contract.submitTransaction(
+        "transferBatch",
+        batchId,
+        fromActorId,
+        fromActorRole,
+        toActorId,
+        toActorRole,
+        JSON.stringify(transferData)
+      );
+
+      const transferRecord = JSON.parse(result.toString());
+
+      // Store in database
+      const dbTransfer = await prisma.batchTransfer.create({
+        data: {
+          batchId: batchId,
+          fromActorId: fromActorId,
+          fromActorRole: fromActorRole,
+          toActorId: toActorId,
+          toActorRole: toActorRole,
+          transferType: "OWNERSHIP_TRANSFER",
+          transferLocation: transferLocation || null,
+          latitude: latitude || null,
+          longitude: longitude || null,
+          conditions: conditions ? conditions : null,
+          documents: documents || [],
+          signature: signature || null,
+          notes: notes || "",
+          status: "COMPLETED",
+          statusBefore: batch.status || "REGISTERED",
+          statusAfter: transferRecord.statusAfter || batch.status,
+          blockchainTxId: transferRecord.txId || null,
+          blockchainHash: null, // You can add hash calculation if needed
+        },
+      });
+
+      // Update batch status in database if it exists
+      const dbBatch = await prisma.batch.findUnique({
+        where: { batchId: batchId },
+      });
+
+      if (dbBatch) {
+        await prisma.batch.update({
+          where: { batchId: batchId },
+          data: {
+            status: transferRecord.statusAfter || dbBatch.status,
+          },
         });
+      }
 
-        res.json({
-            success: true,
-            message: `Batch ${batchId} successfully transferred to ${toActorRole}`,
-            data: {
-                blockchainRecord: transferRecord,
-                databaseRecord: dbTransfer
-            }
-        });
+      await gateway.disconnect();
 
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "TRANSFER_BATCH",
+          resource: batchId,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+          metadata: {
+            fromRole: fromActorRole,
+            toActorId: toActorId,
+            toRole: toActorRole,
+            transferId: dbTransfer.id,
+          },
+        },
+      });
+
+      res.json({
+        success: true,
+        message: `Batch ${batchId} successfully transferred to ${toActorRole}`,
+        data: {
+          blockchainRecord: transferRecord,
+          databaseRecord: dbTransfer,
+        },
+      });
     } catch (error) {
-        console.error('Batch transfer error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to transfer batch',
-            details: error.message
-        });
+      console.error("Batch transfer error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to transfer batch",
+        details: error.message,
+      });
     }
-});
+  }
+);
 
 // Add transport/logistics record
-app.post('/api/transport/add', authenticate, authorize(['DISTRIBUTOR', 'PROCESSOR', 'ADMIN']), async (req, res) => {
+app.post(
+  "/api/transport/add",
+  authenticate,
+  authorize(["DISTRIBUTOR", "PROCESSOR", "ADMIN"]),
+  async (req, res) => {
     try {
-        const {
-            batchId,
-            origin,
-            originCoordinates,
-            destination,
-            destinationCoordinates,
-            carrier,
-            vehicleType,
-            vehicleId,
-            driverName,
-            departureTime,
-            estimatedArrival,
-            transportCost,
-            currency,
-            fuelCost,
-            tollFees,
-            waybillNumber,
-            notes,
-            updateStatus
-        } = req.body;
+      const {
+        batchId,
+        origin,
+        originCoordinates,
+        destination,
+        destinationCoordinates,
+        carrier,
+        vehicleType,
+        vehicleId,
+        driverName,
+        departureTime,
+        estimatedArrival,
+        transportCost,
+        currency,
+        fuelCost,
+        tollFees,
+        waybillNumber,
+        notes,
+        updateStatus,
+      } = req.body;
 
-        // Validation
-        if (!batchId) {
-            return res.status(400).json({
-                success: false,
-                error: 'batchId is required'
-            });
-        }
-
-        // Prepare transport data
-        const transportData = {
-            origin: origin || null,
-            originCoordinates: originCoordinates || null,
-            destination: destination || null,
-            destinationCoordinates: destinationCoordinates || null,
-            carrier: carrier || null,
-            vehicleType: vehicleType || null,
-            vehicleId: vehicleId || null,
-            driverName: driverName || null,
-            departureTime: departureTime || null,
-            estimatedArrival: estimatedArrival || null,
-            transportCost: transportCost || null,
-            currency: currency || 'MYR',
-            fuelCost: fuelCost || null,
-            tollFees: tollFees || null,
-            waybillNumber: waybillNumber || null,
-            notes: notes || '',
-            updateStatus: updateStatus || false
-        };
-
-        // Call blockchain addTransportRecord function
-        const { gateway, contract } = await blockchainService.connectToNetwork();
-
-        const result = await contract.submitTransaction(
-            'addTransportRecord',
-            batchId,
-            JSON.stringify(transportData)
-        );
-
-        const transportRecord = JSON.parse(result.toString());
-
-        // Store in database (TransportRoute table)
-        const dbTransport = await prisma.transportRoute.create({
-            data: {
-                batchId: batchId,
-                distributorId: req.user.id,
-                vehicleId: vehicleId || null,
-                originLat: originCoordinates?.latitude || 0,
-                originLng: originCoordinates?.longitude || 0,
-                destinationLat: destinationCoordinates?.latitude || 0,
-                destinationLng: destinationCoordinates?.longitude || 0,
-                departureTime: departureTime ? new Date(departureTime) : null,
-                estimatedTime: estimatedArrival ? new Date(estimatedArrival) : null,
-                transportCost: transportCost ? parseFloat(transportCost) : null,
-                status: updateStatus ? 'IN_TRANSIT' : 'PLANNED',
-                blockchainHash: transportRecord.txId || null
-            }
+      // Validation
+      if (!batchId) {
+        return res.status(400).json({
+          success: false,
+          error: "batchId is required",
         });
+      }
 
-        await gateway.disconnect();
+      // Prepare transport data
+      const transportData = {
+        origin: origin || null,
+        originCoordinates: originCoordinates || null,
+        destination: destination || null,
+        destinationCoordinates: destinationCoordinates || null,
+        carrier: carrier || null,
+        vehicleType: vehicleType || null,
+        vehicleId: vehicleId || null,
+        driverName: driverName || null,
+        departureTime: departureTime || null,
+        estimatedArrival: estimatedArrival || null,
+        transportCost: transportCost || null,
+        currency: currency || "MYR",
+        fuelCost: fuelCost || null,
+        tollFees: tollFees || null,
+        waybillNumber: waybillNumber || null,
+        notes: notes || "",
+        updateStatus: updateStatus || false,
+      };
 
-        // Log activity
-        await prisma.activityLog.create({
-            data: {
-                userId: req.user.id,
-                action: 'ADD_TRANSPORT_RECORD',
-                resource: batchId,
-                ipAddress: req.ip,
-                userAgent: req.get('user-agent'),
-                metadata: {
-                    transportId: transportRecord.transportId,
-                    origin: origin,
-                    destination: destination
-                }
-            }
-        });
+      // Call blockchain addTransportRecord function
+      const { gateway, contract } = await blockchainService.connectToNetwork();
 
-        res.json({
-            success: true,
-            message: 'Transport record added successfully',
-            data: {
-                blockchainRecord: transportRecord,
-                databaseRecord: dbTransport
-            }
-        });
+      const result = await contract.submitTransaction(
+        "addTransportRecord",
+        batchId,
+        JSON.stringify(transportData)
+      );
 
+      const transportRecord = JSON.parse(result.toString());
+
+      // Store in database (TransportRoute table)
+      const dbTransport = await prisma.transportRoute.create({
+        data: {
+          batchId: batchId,
+          distributorId: req.user.id,
+          vehicleId: vehicleId || null,
+          originLat: originCoordinates?.latitude || 0,
+          originLng: originCoordinates?.longitude || 0,
+          destinationLat: destinationCoordinates?.latitude || 0,
+          destinationLng: destinationCoordinates?.longitude || 0,
+          departureTime: departureTime ? new Date(departureTime) : null,
+          estimatedTime: estimatedArrival ? new Date(estimatedArrival) : null,
+          transportCost: transportCost ? parseFloat(transportCost) : null,
+          status: updateStatus ? "IN_TRANSIT" : "PLANNED",
+          blockchainHash: transportRecord.txId || null,
+        },
+      });
+
+      await gateway.disconnect();
+
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "ADD_TRANSPORT_RECORD",
+          resource: batchId,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+          metadata: {
+            transportId: transportRecord.transportId,
+            origin: origin,
+            destination: destination,
+          },
+        },
+      });
+
+      res.json({
+        success: true,
+        message: "Transport record added successfully",
+        data: {
+          blockchainRecord: transportRecord,
+          databaseRecord: dbTransport,
+        },
+      });
     } catch (error) {
-        console.error('Add transport record error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to add transport record',
-            details: error.message
-        });
+      console.error("Add transport record error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to add transport record",
+        details: error.message,
+      });
     }
-});
+  }
+);
 
 // Get transport history for a batch
-app.get('/api/transport/:batchId', authenticate, async (req, res) => {
-    try {
-        const { batchId } = req.params;
+app.get("/api/transport/:batchId", authenticate, async (req, res) => {
+  try {
+    const { batchId } = req.params;
 
-        // Get from blockchain
-        const { gateway, contract } = await blockchainService.connectToNetwork();
+    // Get from blockchain
+    const { gateway, contract } = await blockchainService.connectToNetwork();
 
-        const result = await contract.evaluateTransaction(
-            'getTransportHistory',
-            batchId
-        );
+    const result = await contract.evaluateTransaction(
+      "getTransportHistory",
+      batchId
+    );
 
-        const transportHistory = JSON.parse(result.toString());
+    const transportHistory = JSON.parse(result.toString());
 
-        // Get from database
-        const dbTransports = await prisma.transportRoute.findMany({
-            where: { batchId: batchId },
-            orderBy: { departureTime: 'desc' }
-        });
+    // Get from database
+    const dbTransports = await prisma.transportRoute.findMany({
+      where: { batchId: batchId },
+      orderBy: { departureTime: "desc" },
+    });
 
-        // Get batch transfers from database
-        const dbTransfers = await prisma.batchTransfer.findMany({
-            where: { batchId: batchId },
-            orderBy: { createdAt: 'desc' }
-        });
+    // Get batch transfers from database
+    const dbTransfers = await prisma.batchTransfer.findMany({
+      where: { batchId: batchId },
+      orderBy: { createdAt: "desc" },
+    });
 
-        await gateway.disconnect();
+    await gateway.disconnect();
 
-        res.json({
-            success: true,
-            data: {
-                blockchain: transportHistory,
-                database: {
-                    transportRecords: dbTransports,
-                    batchTransfers: dbTransfers
-                }
-            }
-        });
-
-    } catch (error) {
-        console.error('Get transport history error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to get transport history',
-            details: error.message
-        });
-    }
+    res.json({
+      success: true,
+      data: {
+        blockchain: transportHistory,
+        database: {
+          transportRecords: dbTransports,
+          batchTransfers: dbTransfers,
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get transport history error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get transport history",
+      details: error.message,
+    });
+  }
 });
 
 // Get ownership history for a batch
-app.get('/api/ownership/:batchId', authenticate, async (req, res) => {
-    try {
-        const { batchId } = req.params;
+app.get("/api/ownership/:batchId", authenticate, async (req, res) => {
+  try {
+    const { batchId } = req.params;
 
-        // Get from blockchain
-        const { gateway, contract } = await blockchainService.connectToNetwork();
+    // Get from blockchain
+    const { gateway, contract } = await blockchainService.connectToNetwork();
 
-        const result = await contract.evaluateTransaction(
-            'getOwnershipHistory',
-            batchId
-        );
+    const result = await contract.evaluateTransaction(
+      "getOwnershipHistory",
+      batchId
+    );
 
-        const ownershipHistory = JSON.parse(result.toString());
+    const ownershipHistory = JSON.parse(result.toString());
 
-        // Get from database
-        const dbTransfers = await prisma.batchTransfer.findMany({
-            where: { batchId: batchId },
-            orderBy: { createdAt: 'asc' }
-        });
+    // Get from database
+    const dbTransfers = await prisma.batchTransfer.findMany({
+      where: { batchId: batchId },
+      orderBy: { createdAt: "asc" },
+    });
 
-        await gateway.disconnect();
+    await gateway.disconnect();
 
-        res.json({
-            success: true,
-            data: {
-                blockchain: ownershipHistory,
-                database: dbTransfers
-            }
-        });
-
-    } catch (error) {
-        console.error('Get ownership history error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to get ownership history',
-            details: error.message
-        });
-    }
+    res.json({
+      success: true,
+      data: {
+        blockchain: ownershipHistory,
+        database: dbTransfers,
+      },
+    });
+  } catch (error) {
+    console.error("Get ownership history error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get ownership history",
+      details: error.message,
+    });
+  }
 });
 
 // ===== DISTRIBUTOR ENDPOINTS =====
 
 // Get batches available for distribution (PROCESSED status)
-app.get('/api/distributor/available-batches', authenticate, authorize(['DISTRIBUTOR', 'ADMIN']), async (req, res) => {
+app.get(
+  "/api/distributor/available-batches",
+  authenticate,
+  authorize(["DISTRIBUTOR", "ADMIN"]),
+  async (req, res) => {
     try {
-        const { gateway, contract } = await blockchainService.connectToNetwork();
+      const { gateway, contract } = await blockchainService.connectToNetwork();
 
-        const result = await contract.evaluateTransaction('getAvailableBatchesForDistributor');
-        const availableBatches = JSON.parse(result.toString());
+      const result = await contract.evaluateTransaction(
+        "getAvailableBatchesForDistributor"
+      );
+      const availableBatches = JSON.parse(result.toString());
 
-        await gateway.disconnect();
+      await gateway.disconnect();
 
-        res.json({
-            success: true,
-            data: availableBatches,
-            count: availableBatches.length
-        });
-
+      res.json({
+        success: true,
+        data: availableBatches,
+        count: availableBatches.length,
+      });
     } catch (error) {
-        console.error('Get available batches for distributor error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to get available batches',
-            details: error.message
-        });
+      console.error("Get available batches for distributor error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to get available batches",
+        details: error.message,
+      });
     }
-});
+  }
+);
 
 // Receive batch from processor (transfer ownership) - BLOCKCHAIN + DATABASE
-app.post('/api/distributor/receive/:batchId', authenticate, authorize(['DISTRIBUTOR', 'ADMIN']), async (req, res) => {
+app.post(
+  "/api/distributor/receive/:batchId",
+  authenticate,
+  authorize(["DISTRIBUTOR", "ADMIN"]),
+  async (req, res) => {
     try {
-        const { batchId } = req.params;
-        const { fromProcessorId, transferLocation, latitude, longitude, notes, conditions, documents, signature } = req.body;
+      const { batchId } = req.params;
+      const {
+        fromProcessorId,
+        transferLocation,
+        latitude,
+        longitude,
+        notes,
+        conditions,
+        documents,
+        signature,
+      } = req.body;
 
-        const distributorId = req.user.id;
-        console.log('🚛 Receive batch - User:', { id: distributorId, email: req.user.email, role: req.user.role });
+      const distributorId = req.user.id;
+      console.log("🚛 Receive batch - User:", {
+        id: distributorId,
+        email: req.user.email,
+        role: req.user.role,
+      });
 
-        const { gateway, contract } = await blockchainService.connectToNetwork();
+      const { gateway, contract } = await blockchainService.connectToNetwork();
 
-        // Get batch to determine current owner
-        console.log('📦 Fetching batch from blockchain:', batchId);
-        const batchResult = await contract.evaluateTransaction('getBatch', batchId);
-        const batch = JSON.parse(batchResult.toString());
-        console.log('✅ Batch current owner:', batch.currentOwner);
+      // Get batch to determine current owner
+      console.log("📦 Fetching batch from blockchain:", batchId);
+      const batchResult = await contract.evaluateTransaction(
+        "getBatch",
+        batchId
+      );
+      const batch = JSON.parse(batchResult.toString());
+      console.log("✅ Batch current owner:", batch.currentOwner);
 
-        // Determine fromActorId
-        let fromActorId = batch.currentOwner?.actorId || fromProcessorId;
-        let fromActorRole = batch.currentOwner?.actorRole || 'PROCESSOR';
+      // Determine fromActorId
+      let fromActorId = batch.currentOwner?.actorId || fromProcessorId;
+      let fromActorRole = batch.currentOwner?.actorRole || "PROCESSOR";
 
-        // If currentOwner is not set, try to get from processing records or farmer
-        if (!fromActorId) {
-            if (batch.processingRecords && batch.processingRecords.length > 0) {
-                // Get the last processor
-                const lastProcessing = batch.processingRecords[batch.processingRecords.length - 1];
-                fromActorId = lastProcessing.processorId;
-                fromActorRole = 'PROCESSOR';
-                console.log('⚠️ No currentOwner, using last processor:', fromActorId);
-            } else {
-                // Fallback to farmer
-                fromActorId = batch.farmer;
-                fromActorRole = 'FARMER';
-                console.log('⚠️ No currentOwner or processor, using farmer:', fromActorId);
-            }
+      // If currentOwner is not set, try to get from processing records or farmer
+      if (!fromActorId) {
+        if (batch.processingRecords && batch.processingRecords.length > 0) {
+          // Get the last processor
+          const lastProcessing =
+            batch.processingRecords[batch.processingRecords.length - 1];
+          fromActorId = lastProcessing.processorId;
+          fromActorRole = "PROCESSOR";
+          console.log("⚠️ No currentOwner, using last processor:", fromActorId);
+        } else {
+          // Fallback to farmer
+          fromActorId = batch.farmer;
+          fromActorRole = "FARMER";
+          console.log(
+            "⚠️ No currentOwner or processor, using farmer:",
+            fromActorId
+          );
         }
+      }
 
-        const transferData = {
-            transferLocation: transferLocation || null,
-            latitude: latitude || null,
-            longitude: longitude || null,
-            notes: notes || 'Batch received by distributor',
-            conditions: conditions || null,
-            documents: documents || [],
-            signature: signature || null
-        };
+      const transferData = {
+        transferLocation: transferLocation || null,
+        latitude: latitude || null,
+        longitude: longitude || null,
+        notes: notes || "Batch received by distributor",
+        conditions: conditions || null,
+        documents: documents || [],
+        signature: signature || null,
+      };
 
-        console.log('🔄 Transfer params:', { batchId, fromActorId, fromActorRole, toActorId: distributorId, toActorRole: 'DISTRIBUTOR' });
+      console.log("🔄 Transfer params:", {
+        batchId,
+        fromActorId,
+        fromActorRole,
+        toActorId: distributorId,
+        toActorRole: "DISTRIBUTOR",
+      });
 
-        // BLOCKCHAIN: Transfer batch
-        const result = await contract.submitTransaction('transferBatch', batchId, fromActorId, fromActorRole, distributorId, 'DISTRIBUTOR', JSON.stringify(transferData));
-        const transferRecord = JSON.parse(result.toString());
+      // BLOCKCHAIN: Transfer batch
+      const result = await contract.submitTransaction(
+        "transferBatch",
+        batchId,
+        fromActorId,
+        fromActorRole,
+        distributorId,
+        "DISTRIBUTOR",
+        JSON.stringify(transferData)
+      );
+      const transferRecord = JSON.parse(result.toString());
 
-        // DATABASE: Store transfer record
-        const dbTransfer = await prisma.batchTransfer.create({
-            data: {
-                batchId: batchId,
-                fromActorId: fromActorId,
-                fromActorRole: fromActorRole,
-                toActorId: distributorId,
-                toActorRole: 'DISTRIBUTOR',
-                transferType: 'OWNERSHIP_TRANSFER',
-                transferLocation: transferLocation || null,
-                latitude: latitude || null,
-                longitude: longitude || null,
-                conditions: conditions ? conditions : null,
-                documents: documents || [],
-                signature: signature || null,
-                notes: notes || 'Batch received by distributor',
-                status: 'COMPLETED',
-                statusBefore: batch.status || 'PROCESSED',
-                statusAfter: 'IN_DISTRIBUTION',
-                blockchainTxId: transferRecord.txId || null,
-                blockchainHash: null
-            }
+      // DATABASE: Store transfer record
+      const dbTransfer = await prisma.batchTransfer.create({
+        data: {
+          batchId: batchId,
+          fromActorId: fromActorId,
+          fromActorRole: fromActorRole,
+          toActorId: distributorId,
+          toActorRole: "DISTRIBUTOR",
+          transferType: "OWNERSHIP_TRANSFER",
+          transferLocation: transferLocation || null,
+          latitude: latitude || null,
+          longitude: longitude || null,
+          conditions: conditions ? conditions : null,
+          documents: documents || [],
+          signature: signature || null,
+          notes: notes || "Batch received by distributor",
+          status: "COMPLETED",
+          statusBefore: batch.status || "PROCESSED",
+          statusAfter: "IN_DISTRIBUTION",
+          blockchainTxId: transferRecord.txId || null,
+          blockchainHash: null,
+        },
+      });
+
+      // Update batch status in database if exists
+      const dbBatch = await prisma.batch.findUnique({
+        where: { batchId: batchId },
+      });
+      if (dbBatch) {
+        await prisma.batch.update({
+          where: { batchId: batchId },
+          data: { status: "IN_DISTRIBUTION" },
         });
+      }
 
-        // Update batch status in database if exists
-        const dbBatch = await prisma.batch.findUnique({ where: { batchId: batchId } });
-        if (dbBatch) {
-            await prisma.batch.update({
-                where: { batchId: batchId },
-                data: { status: 'IN_DISTRIBUTION' }
-            });
-        }
+      await gateway.disconnect();
 
-        await gateway.disconnect();
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "RECEIVE_BATCH",
+          resource: batchId,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+          metadata: {
+            fromActorId: fromActorId,
+            fromRole: fromActorRole,
+            transferId: dbTransfer.id,
+          },
+        },
+      });
 
-        // Log activity
-        await prisma.activityLog.create({
-            data: {
-                userId: req.user.id,
-                action: 'RECEIVE_BATCH',
-                resource: batchId,
-                ipAddress: req.ip,
-                userAgent: req.get('user-agent'),
-                metadata: { fromActorId: fromActorId, fromRole: fromActorRole, transferId: dbTransfer.id }
-            }
-        });
-
-        res.json({
-            success: true,
-            message: `Batch ${batchId} successfully received by distributor`,
-            data: { blockchainRecord: transferRecord, databaseRecord: dbTransfer }
-        });
-
+      res.json({
+        success: true,
+        message: `Batch ${batchId} successfully received by distributor`,
+        data: { blockchainRecord: transferRecord, databaseRecord: dbTransfer },
+      });
     } catch (error) {
-        console.error('❌ Receive batch error:', error);
-        console.error('Error details:', {
-            message: error.message,
-            stack: error.stack,
-            endorsements: error.endorsements,
-            responses: error.responses
-        });
-        res.status(500).json({
-            success: false,
-            error: 'Failed to receive batch',
-            details: error.message,
-            hint: 'Check backend logs for detailed error information'
-        });
+      console.error("❌ Receive batch error:", error);
+      console.error("Error details:", {
+        message: error.message,
+        stack: error.stack,
+        endorsements: error.endorsements,
+        responses: error.responses,
+      });
+      res.status(500).json({
+        success: false,
+        error: "Failed to receive batch",
+        details: error.message,
+        hint: "Check backend logs for detailed error information",
+      });
     }
-});
+  }
+);
 
 // Get batches owned by current distributor
-app.get('/api/distributor/my-batches', authenticate, authorize(['DISTRIBUTOR', 'ADMIN']), async (req, res) => {
+app.get(
+  "/api/distributor/my-batches",
+  authenticate,
+  authorize(["DISTRIBUTOR", "ADMIN"]),
+  async (req, res) => {
     try {
-        const distributorId = req.user.id;
-        const { gateway, contract } = await blockchainService.connectToNetwork();
+      const distributorId = req.user.id;
+      const { gateway, contract } = await blockchainService.connectToNetwork();
 
-        const result = await contract.evaluateTransaction('getBatchesByDistributor', distributorId);
-        const distributorBatches = JSON.parse(result.toString());
+      const result = await contract.evaluateTransaction(
+        "getBatchesByDistributor",
+        distributorId
+      );
+      const distributorBatches = JSON.parse(result.toString());
 
-        await gateway.disconnect();
+      await gateway.disconnect();
 
-        res.json({
-            success: true,
-            data: distributorBatches,
-            count: distributorBatches.length
-        });
-
+      res.json({
+        success: true,
+        data: distributorBatches,
+        count: distributorBatches.length,
+      });
     } catch (error) {
-        console.error('Get distributor batches error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to get distributor batches',
-            details: error.message
-        });
+      console.error("Get distributor batches error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to get distributor batches",
+        details: error.message,
+      });
     }
-});
+  }
+);
 
 // Add distribution record - BLOCKCHAIN + DATABASE
-app.post('/api/distributor/add-distribution/:batchId', authenticate, authorize(['DISTRIBUTOR', 'ADMIN']), async (req, res) => {
+app.post(
+  "/api/distributor/add-distribution/:batchId",
+  authenticate,
+  authorize(["DISTRIBUTOR", "ADMIN"]),
+  async (req, res) => {
     try {
-        const { batchId } = req.params;
-        const {
-            distributionType, warehouseLocation, warehouseCoordinates, storageConditions,
-            temperatureControl, humidity, vehicleType, vehicleId, driverName, route,
-            quantityReceived, quantityDistributed, distributionCost, storageCost,
-            handlingCost, currency, qualityCheckPassed, qualityNotes, documents,
-            notes, destinationType, destination
-        } = req.body;
+      const { batchId } = req.params;
+      const {
+        distributionType,
+        warehouseLocation,
+        warehouseCoordinates,
+        storageConditions,
+        temperatureControl,
+        vehicleType,
+        vehicleId,
+        driverName,
+        route,
+        quantityReceived,
+        quantityDistributed,
+        distributionCost,
+        storageCost,
+        handlingCost,
+        currency,
+        qualityCheckPassed,
+        qualityNotes,
+        documents,
+        notes,
+        destinationType,
+        destination,
+        weatherData,
+      } = req.body;
 
-        const distributorId = req.user.id;
+      const distributorId = req.user.id;
+      const temperature = weatherData?.temperature;
+      const weather_desc = weatherData?.weather_description;
+      const weather_main = weatherData?.weather_main;
+      const humidity = weatherData?.humidity;
 
-        const distributionData = {
-            distributionType: distributionType || null,
-            warehouseLocation: warehouseLocation || null,
-            warehouseCoordinates: warehouseCoordinates || null,
-            storageConditions: storageConditions || null,
-            temperatureControl: temperatureControl || null,
-            humidity: humidity || null,
-            vehicleType: vehicleType || null,
-            vehicleId: vehicleId || null,
-            driverName: driverName || null,
-            route: route || [],
-            quantityReceived: quantityReceived || null,
-            quantityDistributed: quantityDistributed || null,
-            distributionCost: distributionCost || null,
-            storageCost: storageCost || null,
-            handlingCost: handlingCost || null,
-            currency: currency || 'MYR',
-            qualityCheckPassed: qualityCheckPassed || null,
-            qualityNotes: qualityNotes || '',
-            documents: documents || [],
-            notes: notes || '',
-            destinationType: destinationType || null,
-            destination: destination || null
-        };
+      const distributionData = {
+        distributionType: distributionType || null,
+        warehouseLocation: warehouseLocation || null,
+        warehouseCoordinates: warehouseCoordinates || null,
+        storageConditions: storageConditions || null,
+        temperatureControl: temperatureControl || null,
+        humidity: humidity || null,
+        vehicleType: vehicleType || null,
+        vehicleId: vehicleId || null,
+        driverName: driverName || null,
+        route: route || [],
+        quantityReceived: quantityReceived || null,
+        quantityDistributed: quantityDistributed || null,
+        distributionCost: distributionCost || null,
+        storageCost: storageCost || null,
+        handlingCost: handlingCost || null,
+        currency: currency || "MYR",
+        qualityCheckPassed: qualityCheckPassed || null,
+        qualityNotes: qualityNotes || "",
+        documents: documents || [],
+        notes: notes || "",
+        destinationType: destinationType || null,
+        destination: destination || null,
+        temperature: temperature ? parseFloat(temperature) : null,
+        weather_desc: weather_desc || null,
+        weather_main: weather_main || null,
+      };
 
-        const { gateway, contract } = await blockchainService.connectToNetwork();
+      const { gateway, contract } = await blockchainService.connectToNetwork();
 
-        // BLOCKCHAIN: Add distribution record (with retry for MVCC conflicts)
-        const distributionRecord = await retryOnMVCCConflict(async () => {
-            const result = await contract.submitTransaction('addDistributionRecord', batchId, distributorId, JSON.stringify(distributionData));
-            return JSON.parse(result.toString());
-        });
+      // BLOCKCHAIN: Add distribution record (with retry for MVCC conflicts)
+      const distributionRecord = await retryOnMVCCConflict(async () => {
+        const result = await contract.submitTransaction(
+          "addDistributionRecord",
+          batchId,
+          distributorId,
+          JSON.stringify(distributionData)
+        );
+        return JSON.parse(result.toString());
+      });
 
-        // DATABASE: Store distribution record
-        const dbDistribution = await prisma.distributionRecord.create({
-            data: {
-                batchId: batchId,
-                distributorId: distributorId,
-                distributionType: distributionType || null,
-                warehouseLocation: warehouseLocation || null,
-                warehouseLat: warehouseCoordinates?.latitude || null,
-                warehouseLng: warehouseCoordinates?.longitude || null,
-                storageConditions: storageConditions || null,
-                temperatureControl: temperatureControl || null,
-                humidity: humidity ? parseFloat(humidity) : null,
-                vehicleType: vehicleType || null,
-                vehicleId: vehicleId || null,
-                driverName: driverName || null,
-                route: route ? route : null,
-                quantityReceived: quantityReceived ? parseFloat(quantityReceived) : null,
-                quantityDistributed: quantityDistributed ? parseFloat(quantityDistributed) : null,
-                distributionCost: distributionCost ? parseFloat(distributionCost) : null,
-                storageCost: storageCost ? parseFloat(storageCost) : null,
-                handlingCost: handlingCost ? parseFloat(handlingCost) : null,
-                currency: currency || 'MYR',
-                qualityCheckPassed: qualityCheckPassed || null,
-                qualityNotes: qualityNotes || null,
-                documents: documents || [],
-                notes: notes || null,
-                destinationType: destinationType || null,
-                destination: destination || null,
-                blockchainTxId: distributionRecord.txId || null,
-                blockchainHash: null
-            }
-        });
+      // DATABASE: Store distribution record
+      const dbDistribution = await prisma.distributionRecord.create({
+        data: {
+          batchId: batchId,
+          distributorId: distributorId,
+          distributionType: distributionType || null,
+          warehouseLocation: warehouseLocation || null,
+          warehouseLat: warehouseCoordinates?.latitude || null,
+          warehouseLng: warehouseCoordinates?.longitude || null,
+          storageConditions: storageConditions || null,
+          temperatureControl: temperatureControl || null,
+          humidity: humidity ? parseFloat(humidity) : null,
+          vehicleType: vehicleType || null,
+          vehicleId: vehicleId || null,
+          driverName: driverName || null,
+          route: route ? route : null,
+          quantityReceived: quantityReceived
+            ? parseFloat(quantityReceived)
+            : null,
+          quantityDistributed: quantityDistributed
+            ? parseFloat(quantityDistributed)
+            : null,
+          distributionCost: distributionCost
+            ? parseFloat(distributionCost)
+            : null,
+          storageCost: storageCost ? parseFloat(storageCost) : null,
+          handlingCost: handlingCost ? parseFloat(handlingCost) : null,
+          currency: currency || "MYR",
+          qualityCheckPassed: qualityCheckPassed || null,
+          qualityNotes: qualityNotes || null,
+          documents: documents || [],
+          notes: notes || null,
+          destinationType: destinationType || null,
+          destination: destination || null,
+          blockchainTxId: distributionRecord.txId || null,
+          blockchainHash: null,
+          temperature: temperature ? parseFloat(temperature) : null,
+          weather_desc: weather_desc || null,
+          weather_main: weather_main || null,
+        },
+      });
 
-        await gateway.disconnect();
+      await gateway.disconnect();
 
-        // Log activity
-        await prisma.activityLog.create({
-            data: {
-                userId: req.user.id,
-                action: 'ADD_DISTRIBUTION_RECORD',
-                resource: batchId,
-                ipAddress: req.ip,
-                userAgent: req.get('user-agent'),
-                metadata: { distributionId: dbDistribution.id, distributionType: distributionType }
-            }
-        });
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "ADD_DISTRIBUTION_RECORD",
+          resource: batchId,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+          metadata: {
+            distributionId: dbDistribution.id,
+            distributionType: distributionType,
+          },
+        },
+      });
 
-        res.json({
-            success: true,
-            message: 'Distribution record added successfully',
-            data: { blockchainRecord: distributionRecord, databaseRecord: dbDistribution }
-        });
-
+      res.json({
+        success: true,
+        message: "Distribution record added successfully",
+        data: {
+          blockchainRecord: distributionRecord,
+          databaseRecord: dbDistribution,
+        },
+      });
     } catch (error) {
-        console.error('Add distribution record error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to add distribution record',
-            details: error.message
-        });
+      console.error("Add distribution record error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to add distribution record",
+        details: error.message,
+      });
     }
-});
+  }
+);
 
 // Transfer batch to retailer - BLOCKCHAIN + DATABASE
-app.post('/api/distributor/transfer-to-retailer/:batchId', authenticate, authorize(['DISTRIBUTOR', 'ADMIN']), async (req, res) => {
+app.post(
+  "/api/distributor/transfer-to-retailer/:batchId",
+  authenticate,
+  authorize(["DISTRIBUTOR", "ADMIN"]),
+  async (req, res) => {
     try {
-        const { batchId } = req.params;
-        const { toRetailerId, transferLocation, latitude, longitude, notes, conditions, documents, signature } = req.body;
+      const { batchId } = req.params;
+      const {
+        toRetailerId,
+        transferLocation,
+        latitude,
+        longitude,
+        notes,
+        conditions,
+        documents,
+        signature,
+        weatherDataRetailer,
+      } = req.body;
 
-        if (!toRetailerId) {
-            return res.status(400).json({
-                success: false,
-                error: 'toRetailerId is required'
-            });
-        }
-
-        const distributorId = req.user.id;
-
-        const transferData = {
-            transferLocation: transferLocation || null,
-            latitude: latitude || null,
-            longitude: longitude || null,
-            notes: notes || 'Transfer to retailer',
-            conditions: conditions || null,
-            documents: documents || [],
-            signature: signature || null
-        };
-
-        const { gateway, contract } = await blockchainService.connectToNetwork();
-
-        // BLOCKCHAIN: Transfer batch
-        const result = await contract.submitTransaction('transferBatch', batchId, distributorId, 'DISTRIBUTOR', toRetailerId, 'RETAILER', JSON.stringify(transferData));
-        const transferRecord = JSON.parse(result.toString());
-
-        // DATABASE: Store transfer record
-        const dbTransfer = await prisma.batchTransfer.create({
-            data: {
-                batchId: batchId,
-                fromActorId: distributorId,
-                fromActorRole: 'DISTRIBUTOR',
-                toActorId: toRetailerId,
-                toActorRole: 'RETAILER',
-                transferType: 'OWNERSHIP_TRANSFER',
-                transferLocation: transferLocation || null,
-                latitude: latitude || null,
-                longitude: longitude || null,
-                conditions: conditions ? conditions : null,
-                documents: documents || [],
-                signature: signature || null,
-                notes: notes || 'Transfer to retailer',
-                status: 'COMPLETED',
-                statusBefore: 'IN_DISTRIBUTION',
-                statusAfter: 'RETAIL_READY',
-                blockchainTxId: transferRecord.txId || null,
-                blockchainHash: null
-            }
+      if (!toRetailerId) {
+        return res.status(400).json({
+          success: false,
+          error: "toRetailerId is required",
         });
+      }
 
-        // Update batch status in database if exists
-        const dbBatch = await prisma.batch.findUnique({ where: { batchId: batchId } });
-        if (dbBatch) {
-            await prisma.batch.update({
-                where: { batchId: batchId },
-                data: { status: 'RETAIL_READY' }
-            });
-        }
+      const distributorId = req.user.id;
+      const temperature = weatherDataRetailer?.temperature;
+      const weather_desc = weatherDataRetailer?.weather_desc;
+      const weather_main = weatherDataRetailer?.weather_main;
+      const humidity = weatherDataRetailer?.humidity;
 
-        await gateway.disconnect();
+      const transferData = {
+        transferLocation: transferLocation || null,
+        latitude: latitude || null,
+        longitude: longitude || null,
+        notes: notes || "Transfer to retailer",
+        conditions: conditions || null,
+        documents: documents || [],
+        signature: signature || null,
+        temperature: temperature || null,
+        weather_desc: weather_desc || null,
+        weather_main: weather_main || null,
+        humidity: humidity || null,
+      };
 
-        // Log activity
-        await prisma.activityLog.create({
-            data: {
-                userId: req.user.id,
-                action: 'TRANSFER_TO_RETAILER',
-                resource: batchId,
-                ipAddress: req.ip,
-                userAgent: req.get('user-agent'),
-                metadata: { toRetailerId: toRetailerId, transferId: dbTransfer.id }
-            }
+      const { gateway, contract } = await blockchainService.connectToNetwork();
+
+      // BLOCKCHAIN: Transfer batch
+      const result = await contract.submitTransaction(
+        "transferBatch",
+        batchId,
+        distributorId,
+        "DISTRIBUTOR",
+        toRetailerId,
+        "RETAILER",
+        JSON.stringify(transferData)
+      );
+      const transferRecord = JSON.parse(result.toString());
+
+      // DATABASE: Store transfer record
+      const dbTransfer = await prisma.batchTransfer.create({
+        data: {
+          batchId: batchId,
+          fromActorId: distributorId,
+          fromActorRole: "DISTRIBUTOR",
+          toActorId: toRetailerId,
+          toActorRole: "RETAILER",
+          transferType: "OWNERSHIP_TRANSFER",
+          transferLocation: transferLocation || null,
+          latitude: latitude || null,
+          longitude: longitude || null,
+          conditions: conditions ? conditions : null,
+          documents: documents || [],
+          signature: signature || null,
+          notes: notes || "Transfer to retailer",
+          status: "COMPLETED",
+          statusBefore: "IN_DISTRIBUTION",
+          statusAfter: "RETAIL_READY",
+          blockchainTxId: transferRecord.txId || null,
+          blockchainHash: null,
+          temperature: temperature ? parseFloat(temperature) : null,
+          weather_desc: weather_desc || null,
+          weather_main: weather_main || null,
+          humidity: humidity ? parseFloat(humidity) : null,
+        },
+      });
+
+      // Update batch status in database if exists
+      const dbBatch = await prisma.batch.findUnique({
+        where: { batchId: batchId },
+      });
+      if (dbBatch) {
+        await prisma.batch.update({
+          where: { batchId: batchId },
+          data: { status: "RETAIL_READY" },
         });
+      }
 
-        res.json({
-            success: true,
-            message: `Batch ${batchId} successfully transferred to retailer`,
-            data: { blockchainRecord: transferRecord, databaseRecord: dbTransfer }
-        });
+      await gateway.disconnect();
 
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "TRANSFER_TO_RETAILER",
+          resource: batchId,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+          metadata: { toRetailerId: toRetailerId, transferId: dbTransfer.id },
+        },
+      });
+
+      res.json({
+        success: true,
+        message: `Batch ${batchId} successfully transferred to retailer`,
+        data: { blockchainRecord: transferRecord, databaseRecord: dbTransfer },
+      });
     } catch (error) {
-        console.error('Transfer to retailer error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to transfer to retailer',
-            details: error.message
-        });
+      console.error("Transfer to retailer error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to transfer to retailer",
+        details: error.message,
+      });
     }
-});
+  }
+);
 
 // ============================================
 // RETAILER ENDPOINTS
 // ============================================
 
 // Get batches available for retail (RETAIL_READY status)
-app.get('/api/retailer/available-batches', authenticate, authorize(['RETAILER', 'ADMIN']), async (req, res) => {
+app.get(
+  "/api/retailer/available-batches",
+  authenticate,
+  authorize(["RETAILER", "ADMIN"]),
+  async (req, res) => {
     try {
-        // Get batches that have been transferred to retailer (RETAIL_READY status)
-        const batches = await prisma.batch.findMany({
-            where: {
-                status: 'RETAIL_READY'
-            },
+      // Get batches that have been transferred to retailer (RETAIL_READY status)
+      const batches = await prisma.batch.findMany({
+        where: {
+          status: "RETAIL_READY",
+        },
+        include: {
+          farmer: {
             include: {
-                farmer: {
-                    include: {
-                        user: { select: { username: true } }
-                    }
-                },
-                farmLocation: true
+              user: { select: { username: true } },
             },
-            orderBy: {
-                updatedAt: 'desc'
-            }
-        });
+          },
+          farmLocation: true,
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+      });
 
-        res.json({
-            success: true,
-            data: batches,
-            count: batches.length
-        });
+      res.json({
+        success: true,
+        data: batches,
+        count: batches.length,
+      });
     } catch (error) {
-        console.error('Get available batches error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to get available batches',
-            details: error.message
-        });
+      console.error("Get available batches error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to get available batches",
+        details: error.message,
+      });
     }
-});
+  }
+);
 
 // Receive batch from distributor
-app.post('/api/retailer/receive/:batchId', authenticate, authorize(['RETAILER', 'ADMIN']), async (req, res) => {
+app.post(
+  "/api/retailer/receive/:batchId",
+  authenticate,
+  authorize(["RETAILER", "ADMIN"]),
+  async (req, res) => {
     try {
-        const { batchId } = req.params;
-        const { notes, receiveLocation, receiveDate } = req.body;
-        const retailerId = req.user.id;
+      const { batchId } = req.params;
+      const { notes, receiveLocation, receiveDate } = req.body;
+      const retailerId = req.user.id;
 
-        // Find the batch
-        const batch = await prisma.batch.findUnique({
-            where: { batchId: batchId }
+      // Find the batch
+      const batch = await prisma.batch.findUnique({
+        where: { batchId: batchId },
+      });
+
+      if (!batch) {
+        return res.status(404).json({
+          success: false,
+          error: "Batch not found",
         });
+      }
 
-        if (!batch) {
-            return res.status(404).json({
-                success: false,
-                error: 'Batch not found'
-            });
-        }
-
-        if (batch.status !== 'RETAIL_READY') {
-            return res.status(400).json({
-                success: false,
-                error: `Cannot receive batch with status: ${batch.status}. Must be RETAIL_READY`
-            });
-        }
-
-        // Update batch status to IN_RETAIL
-        const updatedBatch = await prisma.batch.update({
-            where: { batchId: batchId },
-            data: {
-                status: 'IN_RETAIL',
-                updatedAt: new Date()
-            }
+      if (batch.status !== "RETAIL_READY") {
+        return res.status(400).json({
+          success: false,
+          error: `Cannot receive batch with status: ${batch.status}. Must be RETAIL_READY`,
         });
+      }
 
-        // Log activity
-        await prisma.activityLog.create({
-            data: {
-                userId: req.user.id,
-                action: 'RECEIVE_BATCH_RETAIL',
-                resource: batchId,
-                ipAddress: req.ip,
-                userAgent: req.get('user-agent'),
-                metadata: { receiveLocation, notes }
-            }
-        });
+      // Update batch status to IN_RETAIL
+      const updatedBatch = await prisma.batch.update({
+        where: { batchId: batchId },
+        data: {
+          status: "IN_RETAIL",
+          updatedAt: new Date(),
+        },
+      });
 
-        // Update blockchain
-        try {
-            const { gateway, contract } = await blockchainService.connectToNetwork();
-            await contract.submitTransaction(
-                'updateBatchStatus',
-                batchId,
-                'IN_RETAIL',
-                req.user.username,
-                new Date().toISOString(),
-                JSON.stringify({
-                    retailerId: retailerId,
-                    receiveLocation: receiveLocation || null,
-                    notes: notes || 'Batch received at retail store'
-                })
-            );
-            await gateway.disconnect();
-            console.log(`✅ Blockchain updated: Batch ${batchId} set to IN_RETAIL`);
-        } catch (blockchainError) {
-            console.error('Blockchain update failed:', blockchainError);
-        }
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "RECEIVE_BATCH_RETAIL",
+          resource: batchId,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+          metadata: { receiveLocation, notes },
+        },
+      });
 
-        res.json({
-            success: true,
-            message: `Batch ${batchId} received successfully`,
-            data: updatedBatch
-        });
+      // Update blockchain
+      try {
+        const { gateway, contract } =
+          await blockchainService.connectToNetwork();
+        await contract.submitTransaction(
+          "updateBatchStatus",
+          batchId,
+          "IN_RETAIL",
+          req.user.username,
+          new Date().toISOString(),
+          JSON.stringify({
+            retailerId: retailerId,
+            receiveLocation: receiveLocation || null,
+            notes: notes || "Batch received at retail store",
+          })
+        );
+        await gateway.disconnect();
+        console.log(`✅ Blockchain updated: Batch ${batchId} set to IN_RETAIL`);
+      } catch (blockchainError) {
+        console.error("Blockchain update failed:", blockchainError);
+      }
 
+      res.json({
+        success: true,
+        message: `Batch ${batchId} received successfully`,
+        data: updatedBatch,
+      });
     } catch (error) {
-        console.error('Receive batch error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to receive batch',
-            details: error.message
-        });
+      console.error("Receive batch error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to receive batch",
+        details: error.message,
+      });
     }
-});
+  }
+);
 
 // Get retailer's current inventory (IN_RETAIL status)
-app.get('/api/retailer/my-batches', authenticate, authorize(['RETAILER', 'ADMIN']), async (req, res) => {
+app.get(
+  "/api/retailer/my-batches",
+  authenticate,
+  authorize(["RETAILER", "ADMIN"]),
+  async (req, res) => {
     try {
-        const batches = await prisma.batch.findMany({
-            where: {
-                status: 'IN_RETAIL'
-            },
+      const batches = await prisma.batch.findMany({
+        where: {
+          status: "IN_RETAIL",
+        },
+        include: {
+          farmer: {
             include: {
-                farmer: {
-                    include: {
-                        user: { select: { username: true } }
-                    }
-                },
-                farmLocation: true
+              user: { select: { username: true } },
             },
-            orderBy: {
-                updatedAt: 'desc'
-            }
-        });
+          },
+          farmLocation: true,
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+      });
 
-        res.json({
-            success: true,
-            data: batches,
-            count: batches.length
-        });
+      res.json({
+        success: true,
+        data: batches,
+        count: batches.length,
+      });
     } catch (error) {
-        console.error('Get my batches error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to get batches',
-            details: error.message
-        });
+      console.error("Get my batches error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to get batches",
+        details: error.message,
+      });
     }
-});
+  }
+);
 
 // Mark batch as SOLD (close lifecycle)
-app.post('/api/retailer/mark-sold/:batchId', authenticate, authorize(['RETAILER', 'ADMIN']), async (req, res) => {
+app.post(
+  "/api/retailer/mark-sold/:batchId",
+  authenticate,
+  authorize(["RETAILER", "ADMIN"]),
+  async (req, res) => {
     try {
-        const { batchId } = req.params;
-        const { saleDate, soldBy, notes, finalCustomer } = req.body;
-        const retailerId = req.user.id;
+      const { batchId } = req.params;
+      const { saleDate, soldBy, notes, finalCustomer } = req.body;
+      const retailerId = req.user.id;
 
-        // Find the batch
-        const batch = await prisma.batch.findUnique({
-            where: { batchId: batchId }
+      // Find the batch
+      const batch = await prisma.batch.findUnique({
+        where: { batchId: batchId },
+      });
+
+      if (!batch) {
+        return res.status(404).json({
+          success: false,
+          error: "Batch not found",
         });
+      }
 
-        if (!batch) {
-            return res.status(404).json({
-                success: false,
-                error: 'Batch not found'
-            });
-        }
-
-        if (batch.status !== 'IN_RETAIL') {
-            return res.status(400).json({
-                success: false,
-                error: `Cannot mark batch as sold with status: ${batch.status}. Must be IN_RETAIL`
-            });
-        }
-
-        // Update batch status to SOLD
-        const updatedBatch = await prisma.batch.update({
-            where: { batchId: batchId },
-            data: {
-                status: 'SOLD',
-                updatedAt: new Date()
-            }
+      if (batch.status !== "IN_RETAIL") {
+        return res.status(400).json({
+          success: false,
+          error: `Cannot mark batch as sold with status: ${batch.status}. Must be IN_RETAIL`,
         });
+      }
 
-        // Log activity
-        await prisma.activityLog.create({
-            data: {
-                userId: req.user.id,
-                action: 'MARK_BATCH_SOLD',
-                resource: batchId,
-                ipAddress: req.ip,
-                userAgent: req.get('user-agent'),
-                metadata: {
-                    saleDate: saleDate || new Date().toISOString(),
-                    soldBy: soldBy || req.user.username,
-                    notes,
-                    finalCustomer
-                }
-            }
-        });
+      // Update batch status to SOLD
+      const updatedBatch = await prisma.batch.update({
+        where: { batchId: batchId },
+        data: {
+          status: "SOLD",
+          updatedAt: new Date(),
+        },
+      });
 
-        // Update blockchain - close lifecycle
-        try {
-            const { gateway, contract } = await blockchainService.connectToNetwork();
-            await contract.submitTransaction(
-                'updateBatchStatus',
-                batchId,
-                'SOLD',
-                req.user.username,
-                new Date().toISOString(),
-                JSON.stringify({
-                    retailerId: retailerId,
-                    saleDate: saleDate || new Date().toISOString(),
-                    soldBy: soldBy || req.user.username,
-                    notes: notes || 'Batch sold to final consumer',
-                    finalCustomer: finalCustomer || null,
-                    lifecycleClosed: true
-                })
-            );
-            await gateway.disconnect();
-            console.log(`✅ Blockchain updated: Batch ${batchId} marked as SOLD - Lifecycle closed`);
-        } catch (blockchainError) {
-            console.error('Blockchain update failed:', blockchainError);
-        }
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "MARK_BATCH_SOLD",
+          resource: batchId,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+          metadata: {
+            saleDate: saleDate || new Date().toISOString(),
+            soldBy: soldBy || req.user.username,
+            notes,
+            finalCustomer,
+          },
+        },
+      });
 
-        res.json({
-            success: true,
-            message: `Batch ${batchId} marked as SOLD successfully. Lifecycle closed.`,
-            data: updatedBatch
-        });
+      // Update blockchain - close lifecycle
+      try {
+        const { gateway, contract } =
+          await blockchainService.connectToNetwork();
+        await contract.submitTransaction(
+          "updateBatchStatus",
+          batchId,
+          "SOLD",
+          req.user.username,
+          new Date().toISOString(),
+          JSON.stringify({
+            retailerId: retailerId,
+            saleDate: saleDate || new Date().toISOString(),
+            soldBy: soldBy || req.user.username,
+            notes: notes || "Batch sold to final consumer",
+            finalCustomer: finalCustomer || null,
+            lifecycleClosed: true,
+          })
+        );
+        await gateway.disconnect();
+        console.log(
+          `✅ Blockchain updated: Batch ${batchId} marked as SOLD - Lifecycle closed`
+        );
+      } catch (blockchainError) {
+        console.error("Blockchain update failed:", blockchainError);
+      }
 
+      res.json({
+        success: true,
+        message: `Batch ${batchId} marked as SOLD successfully. Lifecycle closed.`,
+        data: updatedBatch,
+      });
     } catch (error) {
-        console.error('Mark as sold error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to mark batch as sold',
-            details: error.message
-        });
+      console.error("Mark as sold error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to mark batch as sold",
+        details: error.message,
+      });
     }
-});
+  }
+);
 
 // Get sold batches
-app.get('/api/retailer/sold-batches', authenticate, authorize(['RETAILER', 'ADMIN']), async (req, res) => {
+app.get(
+  "/api/retailer/sold-batches",
+  authenticate,
+  authorize(["RETAILER", "ADMIN"]),
+  async (req, res) => {
     try {
-        const batches = await prisma.batch.findMany({
-            where: {
-                status: 'SOLD'
-            },
+      const batches = await prisma.batch.findMany({
+        where: {
+          status: "SOLD",
+        },
+        include: {
+          farmer: {
             include: {
-                farmer: {
-                    include: {
-                        user: { select: { username: true } }
-                    }
-                },
-                farmLocation: true
+              user: { select: { username: true } },
             },
-            orderBy: {
-                updatedAt: 'desc'
-            }
-        });
+          },
+          farmLocation: true,
+        },
+        orderBy: {
+          updatedAt: "desc",
+        },
+      });
 
-        res.json({
-            success: true,
-            data: batches,
-            count: batches.length
-        });
+      res.json({
+        success: true,
+        data: batches,
+        count: batches.length,
+      });
     } catch (error) {
-        console.error('Get sold batches error:', error);
-        res.status(500).json({
-            success: false,
-            error: 'Failed to get sold batches',
-            details: error.message
-        });
+      console.error("Get sold batches error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to get sold batches",
+        details: error.message,
+      });
     }
-});
+  }
+);
 
 // ===============================
 // GIS & ROUTING ENDPOINT
 // ===============================
 
-app.post('/api/distributor/transport-route', authenticate, authorize(['DISTRIBUTOR']), async (req, res) => {
+app.post(
+  "/api/distributor/transport-route",
+  authenticate,
+  authorize(["DISTRIBUTOR"]),
+  async (req, res) => {
     // 1. Destructure and validate input coordinates
-    const { batchId, originLat, originLng, destinationLat, destinationLng } = req.body;
+    const { batchId, originLat, originLng, destinationLat, destinationLng } =
+      req.body;
     const distributorId = req.user.id;
-    
-    if (!batchId || !originLat || !originLng || !destinationLat || !destinationLng) {
-        return res.status(400).json({ success: false, error: 'Missing coordinates or batchId for routing.' });
+
+    if (
+      !batchId ||
+      !originLat ||
+      !originLng ||
+      !destinationLat ||
+      !destinationLng
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Missing coordinates or batchId for routing.",
+      });
     }
-    
+
     try {
-        const ARC_GIS_API_KEY = process.env.ARC_GIS_API_KEY;
-        const ROUTE_URL = process.env.ARCGIS_ROUTE_URL;
-        
-        // ArcGIS Route API requires coordinates as "lng,lat"
-        const stops = `${originLng},${originLat};${destinationLng},${destinationLat}`;
-        
-        // 2. Call the ArcGIS Route Service
-        const apiResponse = await axios.get(ROUTE_URL, {
-            params: {
-                f: 'json',
-                token: ARC_GIS_API_KEY,
-                stops: stops,
-                travelMode: 'Driving Time', // Optimizes for time
-                returnRoutes: true,
-                returnDirections: false,
-                // Request the geometry in Esri's Encoded Polyline format for compact storage
-                directionsOutputType: 'esriDIRNAEncodedPolyline' 
-            }
-        });
+      const ARC_GIS_API_KEY = process.env.ARC_GIS_API_KEY;
+      const ROUTE_URL = process.env.ARCGIS_ROUTE_URL;
 
-        const routeResult = apiResponse.data.routes?.features?.[0];
-        if (!routeResult) {
-             // ❌ Failures often occur if coordinates are in the ocean or on private roads
-            return res.status(500).json({ success: false, error: 'ArcGIS could not calculate a feasible route.' });
-        }
-        
-        // 3. Extract key data
-        const distanceKm = routeResult.attributes.Total_Kilometers;
-        const totalTimeMinutes = routeResult.attributes.Total_Time;
-        // The Encoded Polyline string is located in the geometry path
-        const encodedPolyline = routeResult.geometry.compressedGeometry.paths[0]; 
-        
-        // 4. Find Distributor Profile ID
-        const distributorProfile = await prisma.distributorProfile.findUnique({
-            where: { userId: distributorId }
-        });
-        
-        // 5. Create new TransportRoute record
-        const newRoute = await prisma.transportRoute.create({
-            data: {
-                batchId: batchId,
-                distributorId: distributorProfile.id,
-                originLat: parseFloat(originLat),
-                originLng: parseFloat(originLng),
-                destinationLat: parseFloat(destinationLat),
-                destinationLng: parseFloat(destinationLng),
-                distance: distanceKm,
-                estimatedTime: totalTimeMinutes,
-                routePolyline: encodedPolyline, // Stored as string for ArcGIS Pro/Online
-                status: 'PLANNED'
-            }
-        });
+      // ArcGIS Route API requires coordinates as "lng,lat"
+      const stops = `${originLng},${originLat};${destinationLng},${destinationLat}`;
 
-        res.status(201).json({ 
-            success: true, 
-            route: newRoute,
-            message: 'Route calculated and stored successfully.' 
-        });
+      // 2. Call the ArcGIS Route Service
+      const apiResponse = await axios.get(ROUTE_URL, {
+        params: {
+          f: "json",
+          token: ARC_GIS_API_KEY,
+          stops: stops,
+          travelMode: "Driving Time", // Optimizes for time
+          returnRoutes: true,
+          returnDirections: false,
+          // Request the geometry in Esri's Encoded Polyline format for compact storage
+          directionsOutputType: "esriDIRNAEncodedPolyline",
+        },
+      });
 
+      const routeResult = apiResponse.data.routes?.features?.[0];
+      if (!routeResult) {
+        // ❌ Failures often occur if coordinates are in the ocean or on private roads
+        return res.status(500).json({
+          success: false,
+          error: "ArcGIS could not calculate a feasible route.",
+        });
+      }
+
+      // 3. Extract key data
+      const distanceKm = routeResult.attributes.Total_Kilometers;
+      const totalTimeMinutes = routeResult.attributes.Total_Time;
+      // The Encoded Polyline string is located in the geometry path
+      const encodedPolyline = routeResult.geometry.compressedGeometry.paths[0];
+
+      // 4. Find Distributor Profile ID
+      const distributorProfile = await prisma.distributorProfile.findUnique({
+        where: { userId: distributorId },
+      });
+
+      // 5. Create new TransportRoute record
+      const newRoute = await prisma.transportRoute.create({
+        data: {
+          batchId: batchId,
+          distributorId: distributorProfile.id,
+          originLat: parseFloat(originLat),
+          originLng: parseFloat(originLng),
+          destinationLat: parseFloat(destinationLat),
+          destinationLng: parseFloat(destinationLng),
+          distance: distanceKm,
+          estimatedTime: totalTimeMinutes,
+          routePolyline: encodedPolyline, // Stored as string for ArcGIS Pro/Online
+          status: "PLANNED",
+        },
+      });
+
+      res.status(201).json({
+        success: true,
+        route: newRoute,
+        message: "Route calculated and stored successfully.",
+      });
     } catch (error) {
-        console.error('Routing API error:', error.response?.data?.error?.message || error.message);
-        res.status(500).json({ success: false, error: 'Failed to calculate route.', details: error.message });
+      console.error(
+        "Routing API error:",
+        error.response?.data?.error?.message || error.message
+      );
+      res.status(500).json({
+        success: false,
+        error: "Failed to calculate route.",
+        details: error.message,
+      });
     }
-});
+  }
+);
 
 const geocodeAddress = async (address, state, country) => {
-    const GEOCODE_URL = process.env.ARCGIS_GEOCODE_URL;
-    const ARC_GIS_API_KEY = process.env.ARC_GIS_API_KEY;
-    
-    if (!address) {
-        return null;
+  const GEOCODE_URL = process.env.ARCGIS_GEOCODE_URL;
+  const ARC_GIS_API_KEY = process.env.ARC_GIS_API_KEY;
+
+  if (!address) {
+    return null;
+  }
+
+  // Concatenate address for best results
+  const fullAddress = `${address}, ${state || ""}, ${country || "Malaysia"}`;
+
+  try {
+    const response = await axios.get(GEOCODE_URL, {
+      params: {
+        f: "json",
+        token: ARC_GIS_API_KEY,
+        singleLine: fullAddress,
+        outFields: "Addr_type", // Optional field to get address type
+        forStorage: false, // Ensure compliance with service terms
+      },
+    });
+
+    const candidates = response.data.candidates;
+
+    if (candidates && candidates.length > 0) {
+      const bestMatch = candidates[0];
+      return {
+        latitude: bestMatch.location.y,
+        longitude: bestMatch.location.x,
+        score: bestMatch.score,
+      };
     }
-    
-    // Concatenate address for best results
-    const fullAddress = `${address}, ${state || ''}, ${country || 'Malaysia'}`;
-
-    try {
-        const response = await axios.get(GEOCODE_URL, {
-            params: {
-                f: 'json',
-                token: ARC_GIS_API_KEY,
-                singleLine: fullAddress,
-                outFields: 'Addr_type', // Optional field to get address type
-                forStorage: false // Ensure compliance with service terms
-            }
-        });
-
-        const candidates = response.data.candidates;
-        
-        if (candidates && candidates.length > 0) {
-            const bestMatch = candidates[0];
-            return {
-                latitude: bestMatch.location.y,
-                longitude: bestMatch.location.x,
-                score: bestMatch.score
-            };
-        }
-        return null;
-
-    } catch (error) {
-        console.error('❌ ArcGIS Geocoding failed:', error.message);
-        return null;
-    }
+    return null;
+  } catch (error) {
+    console.error("❌ ArcGIS Geocoding failed:", error.message);
+    return null;
+  }
 };
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-   console.error('Unhandled error:', err);
-   res.status(500).json({
-       success: false,
-       error: 'Internal server error',
-       details: process.env.NODE_ENV === 'development' ? err.message : undefined
-   });
+  console.error("Unhandled error:", err);
+  res.status(500).json({
+    success: false,
+    error: "Internal server error",
+    details: process.env.NODE_ENV === "development" ? err.message : undefined,
+  });
 });
 
 // 404 handler
-app.use('*', (req, res) => {
-   res.status(404).json({
-       success: false,
-       error: 'Endpoint not found'
-   });
+app.use("*", (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: "Endpoint not found",
+  });
 });
 
 // Graceful shutdown
-process.on('SIGINT', async () => {
-   console.log('\n🔄 Gracefully shutting down...');
-   
-   try {
-       await prisma.$disconnect();
-       console.log('✅ Database disconnected');
-   } catch (error) {
-       console.error('❌ Error disconnecting database:', error);
-   }
-   
-   process.exit(0);
+process.on("SIGINT", async () => {
+  console.log("\n🔄 Gracefully shutting down...");
+
+  try {
+    await prisma.$disconnect();
+    console.log("✅ Database disconnected");
+  } catch (error) {
+    console.error("❌ Error disconnecting database:", error);
+  }
+
+  process.exit(0);
 });
 
 // Start server
 const startServer = async () => {
-   try {
-       // Test database connection
-       await prisma.$connect();
-       console.log('✅ Database connected successfully');
+  try {
+    // Test database connection
+    await prisma.$connect();
+    console.log("✅ Database connected successfully");
 
-       // Test blockchain connection (non-blocking)
-       try {
-           const result = await blockchainService.connectToNetwork();
-           if (result && result.gateway && result.contract) {
-               console.log('✅ Blockchain connected successfully');
-               await result.gateway.disconnect();
-           } else {
-               console.log('⚠️  Blockchain connection failed - server will start in database-only mode');
-           }
-       } catch (blockchainError) {
-           console.log('⚠️  Blockchain network not available - server will start in database-only mode');
-           console.log('   Make sure the Hyperledger Fabric network is running:');
-           console.log('   npm run blockchain:start');
-       }
-       
-       app.listen(PORT, '0.0.0.0', () => {
-           console.log('🚀 Agricultural Supply Chain API Server with Database Integration Started');
-           console.log(`📡 Server running on: http://localhost:${PORT}`);
-           console.log(`🗃️  Database: PostgreSQL with Prisma ORM`);
-           console.log(`🔗 Blockchain network: mychannel`);
-           console.log(`📦 Smart contract: agricultural-contract`);
-           console.log(`🌐 Enhanced API Endpoints:`);
-           console.log(`   Authentication:`);
-           console.log(`     POST /api/auth/register      - Register new user`);
-           console.log(`     POST /api/auth/login         - Login user`);
-           console.log(`     GET  /api/auth/profile       - Get user profile`);
-           console.log(`   Batch Management:`);
-           console.log(`     POST /api/batch/create       - Create new crop batch (Farmers)`);
-           console.log(`     GET  /api/batch/:batchId     - Get batch details (Role-based)`);
-           console.log(`     PUT  /api/batch/:id/status   - Update batch status`);
-           console.log(`     GET  /api/farmer/my-batches  - Get farmer's batches`);
-           console.log(`   Processor Operations:`);
-           console.log(`     GET  /api/processor/available-batches - Get available batches (Processors)`);
-           console.log(`     POST /api/processor/process/:batchId  - Start batch processing`);
-           console.log(`     GET  /api/processor/my-processing     - Get processing history`);
-           console.log(`     PUT  /api/processor/complete/:batchId - Complete batch processing`);
-           console.log(`   Verification & QR:`);
-           console.log(`     GET  /api/verify/:batchId    - Verify batch (QR scan)`);
-           console.log(`     GET  /api/qr/:batchId        - Get QR code for batch`);
-           console.log(`   Admin & Analytics:`);
-           console.log(`     GET  /api/batches            - Get all batches (Admin/Regulator)`);
-           console.log(`     GET  /api/dashboard          - Role-based dashboard`);
-           console.log(`     GET  /api/batch/:id/integrity - Data integrity check`);
-           console.log(`   System:`);
-           console.log(`     GET  /                       - API health check`);
-           console.log(`     GET  /api/batch/check/:id    - Check batch existence`);
-           console.log('');
-           console.log('🔐 Authentication: Bearer JWT token required for protected endpoints');
-           console.log('📊 Database & Blockchain: Hybrid storage with cross-verification');
-           console.log('🛡️  Security: Role-based access control + data integrity checks');
-           console.log('');
-           console.log('💡 Test with: curl http://localhost:3000');
-       });
-       
-   } catch (error) {
-       console.error('❌ Server startup failed:', error);
-       process.exit(1);
-   }
+    // Test blockchain connection (non-blocking)
+    try {
+      const result = await blockchainService.connectToNetwork();
+      if (result && result.gateway && result.contract) {
+        console.log("✅ Blockchain connected successfully");
+        await result.gateway.disconnect();
+      } else {
+        console.log(
+          "⚠️  Blockchain connection failed - server will start in database-only mode"
+        );
+      }
+    } catch (blockchainError) {
+      console.log(
+        "⚠️  Blockchain network not available - server will start in database-only mode"
+      );
+      console.log("   Make sure the Hyperledger Fabric network is running:");
+      console.log("   npm run blockchain:start");
+    }
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(
+        "🚀 Agricultural Supply Chain API Server with Database Integration Started"
+      );
+      console.log(`📡 Server running on: http://localhost:${PORT}`);
+      console.log(`🗃️  Database: PostgreSQL with Prisma ORM`);
+      console.log(`🔗 Blockchain network: mychannel`);
+      console.log(`📦 Smart contract: agricultural-contract`);
+      console.log(`🌐 Enhanced API Endpoints:`);
+      console.log(`   Authentication:`);
+      console.log(`     POST /api/auth/register      - Register new user`);
+      console.log(`     POST /api/auth/login         - Login user`);
+      console.log(`     GET  /api/auth/profile       - Get user profile`);
+      console.log(`   Batch Management:`);
+      console.log(
+        `     POST /api/batch/create       - Create new crop batch (Farmers)`
+      );
+      console.log(
+        `     GET  /api/batch/:batchId     - Get batch details (Role-based)`
+      );
+      console.log(`     PUT  /api/batch/:id/status   - Update batch status`);
+      console.log(`     GET  /api/farmer/my-batches  - Get farmer's batches`);
+      console.log(`   Processor Operations:`);
+      console.log(
+        `     GET  /api/processor/available-batches - Get available batches (Processors)`
+      );
+      console.log(
+        `     POST /api/processor/process/:batchId  - Start batch processing`
+      );
+      console.log(
+        `     GET  /api/processor/my-processing     - Get processing history`
+      );
+      console.log(
+        `     PUT  /api/processor/complete/:batchId - Complete batch processing`
+      );
+      console.log(`   Verification & QR:`);
+      console.log(`     GET  /api/verify/:batchId    - Verify batch (QR scan)`);
+      console.log(`     GET  /api/qr/:batchId        - Get QR code for batch`);
+      console.log(`   Admin & Analytics:`);
+      console.log(
+        `     GET  /api/batches            - Get all batches (Admin/Regulator)`
+      );
+      console.log(`     GET  /api/dashboard          - Role-based dashboard`);
+      console.log(`     GET  /api/batch/:id/integrity - Data integrity check`);
+      console.log(`   System:`);
+      console.log(`     GET  /                       - API health check`);
+      console.log(`     GET  /api/batch/check/:id    - Check batch existence`);
+      console.log("");
+      console.log(
+        "🔐 Authentication: Bearer JWT token required for protected endpoints"
+      );
+      console.log(
+        "📊 Database & Blockchain: Hybrid storage with cross-verification"
+      );
+      console.log(
+        "🛡️  Security: Role-based access control + data integrity checks"
+      );
+      console.log("");
+      console.log("💡 Test with: curl http://localhost:3000");
+    });
+  } catch (error) {
+    console.error("❌ Server startup failed:", error);
+    process.exit(1);
+  }
 };
 
 startServer();

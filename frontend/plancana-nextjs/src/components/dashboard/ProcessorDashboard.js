@@ -1,34 +1,48 @@
 // src/components/dashboard/ProcessorDashboard.js
-'use client';
+"use client";
 
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../../context/AuthContext';
-import { processorService, dashboardService, pricingService } from '../../services/api';
-import { toast } from 'react-hot-toast';
-import PricingModal from './PricingModal';
-import ProcessingStartModal from './ProcessingStartModal';
+import React, { useState, useEffect } from "react";
+import { useAuth } from "../../context/AuthContext";
 import {
-  Package, Clock, CheckCircle, TrendingUp, BarChart3,
-  Filter, RefreshCw, Play, Eye, Pause, Square,
-  Settings as SettingsIcon
-} from 'lucide-react';
+  processorService,
+  dashboardService,
+  pricingService,
+} from "../../services/api";
+import { toast } from "react-hot-toast";
+import PricingModal from "./PricingModal";
+import ProcessingStartModal from "./ProcessingStartModal";
+import {
+  Package,
+  Clock,
+  CheckCircle,
+  TrendingUp,
+  BarChart3,
+  Filter,
+  RefreshCw,
+  Play,
+  Eye,
+  Pause,
+  Square,
+  Settings as SettingsIcon,
+} from "lucide-react";
 
 const ProcessorDashboard = () => {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState('available');
+  const [activeTab, setActiveTab] = useState("available");
   const [availableBatches, setAvailableBatches] = useState([]);
   const [processingHistory, setProcessingHistory] = useState([]);
   const [dashboardStats, setDashboardStats] = useState({
     availableBatches: 0,
     processingBatches: 0,
     completedToday: 0,
-    totalProcessed: 0
+    totalProcessed: 0,
   });
   const [loading, setLoading] = useState(true);
 
   // Modal state
   const [showPricingModal, setShowPricingModal] = useState(false);
-  const [showProcessingStartModal, setShowProcessingStartModal] = useState(false);
+  const [showProcessingStartModal, setShowProcessingStartModal] =
+    useState(false);
   const [selectedBatch, setSelectedBatch] = useState(null);
 
   useEffect(() => {
@@ -38,12 +52,12 @@ const ProcessorDashboard = () => {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      
+
       // Fetch all processor data in parallel
       const [availableRes, historyRes, dashboardRes] = await Promise.all([
         processorService.getAvailableBatches(),
         processorService.getProcessingHistory(),
-        dashboardService.getDashboard()
+        dashboardService.getDashboard(),
       ]);
 
       if (availableRes.data.success) {
@@ -55,29 +69,30 @@ const ProcessorDashboard = () => {
       }
 
       if (dashboardRes.data.success) {
-        setDashboardStats(prev => ({
+        setDashboardStats((prev) => ({
           ...prev,
-          ...dashboardRes.data.stats
+          ...dashboardRes.data.stats,
         }));
       }
 
       // Calculate local stats from fetched data
       const available = availableRes.data.batches || [];
       const history = historyRes.data.history || [];
-      
-      setDashboardStats(prev => ({
+
+      setDashboardStats((prev) => ({
         availableBatches: available.length,
-        processingBatches: available.filter(batch => batch.status === 'PROCESSING').length,
-        completedToday: history.filter(item => {
+        processingBatches: available.filter(
+          (batch) => batch.status === "PROCESSING"
+        ).length,
+        completedToday: history.filter((item) => {
           const today = new Date().toDateString();
           return new Date(item.createdAt).toDateString() === today;
         }).length,
-        totalProcessed: history.length
+        totalProcessed: history.length,
       }));
-
     } catch (error) {
-      console.error('Dashboard fetch error:', error);
-      toast.error('Failed to load dashboard data');
+      console.error("Dashboard fetch error:", error);
+      toast.error("Failed to load dashboard data");
     } finally {
       setLoading(false);
     }
@@ -91,19 +106,22 @@ const ProcessorDashboard = () => {
 
   const handleProcessingStartSubmit = async (processingData) => {
     try {
-      const response = await processorService.processBatch(selectedBatch.batchId, processingData);
+      const response = await processorService.processBatch(
+        selectedBatch.batchId,
+        processingData
+      );
 
       if (response.data.success) {
-        toast.success('Batch processing started successfully!');
+        toast.success("Batch processing started successfully!");
         setShowProcessingStartModal(false);
         setSelectedBatch(null);
         fetchDashboardData(); // Refresh data
       } else {
-        toast.error(response.data.error || 'Failed to start processing');
+        toast.error(response.data.error || "Failed to start processing");
       }
     } catch (error) {
-      console.error('Processing error:', error);
-      toast.error('Failed to start batch processing');
+      console.error("Processing error:", error);
+      toast.error("Failed to start batch processing");
     }
   };
 
@@ -122,48 +140,64 @@ const ProcessorDashboard = () => {
         qualityGrade: pricingData.qualityGrade,
         completionNotes: `Processing completed by ${user?.username} - Quality Grade: ${pricingData.qualityGrade}`,
         outputQuantity: pricingData.outputQuantity,
-        wasteQuantity: pricingData.wasteQuantity
+        wasteQuantity: pricingData.wasteQuantity,
       };
 
-      const completionResponse = await processorService.completeBatchProcessing(batch.batchId, completionData);
+      const completionResponse = await processorService.completeBatchProcessing(
+        batch.batchId,
+        completionData
+      );
 
       if (!completionResponse.data.success) {
-        toast.error(completionResponse.data.error || 'Failed to complete processing');
+        toast.error(
+          completionResponse.data.error || "Failed to complete processing"
+        );
         return;
       }
 
       // Step 2: Add pricing record to blockchain
       try {
-        const pricingResponse = await pricingService.addPricing(batch.batchId, pricingData);
+        const pricingResponse = await pricingService.addPricing(
+          batch.batchId,
+          pricingData
+        );
 
         if (pricingResponse.data.success) {
-          toast.success('Batch processing and pricing completed successfully!');
+          toast.success("Batch processing and pricing completed successfully!");
         } else {
-          toast.success('Batch processing completed, but pricing failed to save');
-          console.error('Pricing error:', pricingResponse.data.error);
+          toast.success(
+            "Batch processing completed, but pricing failed to save"
+          );
+          console.error("Pricing error:", pricingResponse.data.error);
         }
       } catch (pricingError) {
-        console.error('Pricing submission error:', pricingError);
-        toast.success('Batch processing completed, but pricing failed to save');
+        console.error("Pricing submission error:", pricingError);
+        toast.success("Batch processing completed, but pricing failed to save");
       }
 
       // Close modal and refresh data
       setShowPricingModal(false);
       setSelectedBatch(null);
       fetchDashboardData();
-
     } catch (error) {
-      console.error('Completion error:', error);
-      toast.error('Failed to complete batch processing');
+      console.error("Completion error:", error);
+      toast.error("Failed to complete batch processing");
     }
   };
 
-  const StatCard = ({ title, value, icon: Icon, color = 'blue', description, trend }) => {
+  const StatCard = ({
+    title,
+    value,
+    icon: Icon,
+    color = "blue",
+    description,
+    trend,
+  }) => {
     const colorClasses = {
-      green: 'bg-green-100 text-green-600',
-      blue: 'bg-blue-100 text-blue-600',
-      orange: 'bg-orange-100 text-orange-600',
-      purple: 'bg-purple-100 text-purple-600'
+      green: "bg-green-100 text-green-600",
+      blue: "bg-blue-100 text-blue-600",
+      orange: "bg-orange-100 text-orange-600",
+      purple: "bg-purple-100 text-purple-600",
     };
 
     return (
@@ -199,11 +233,15 @@ const ProcessorDashboard = () => {
             {batch.productType} {batch.variety && `• ${batch.variety}`}
           </p>
         </div>
-        <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-          batch.status === 'REGISTERED' ? 'bg-green-100 text-green-800' :
-          batch.status === 'PROCESSING' ? 'bg-yellow-100 text-yellow-800' :
-          'bg-gray-100 text-gray-800'
-        }`}>
+        <span
+          className={`px-2 py-1 rounded-full text-xs font-medium ${
+            batch.status === "REGISTERED"
+              ? "bg-green-100 text-green-800"
+              : batch.status === "PROCESSING"
+              ? "bg-yellow-100 text-yellow-800"
+              : "bg-gray-100 text-gray-800"
+          }`}
+        >
           {batch.status}
         </span>
       </div>
@@ -211,27 +249,35 @@ const ProcessorDashboard = () => {
       <div className="grid grid-cols-2 gap-4 text-sm mb-4">
         <div>
           <span className="text-gray-500">Quantity:</span>
-          <span className="ml-2 font-medium">{batch.quantity} {batch.unit}</span>
+          <span className="ml-2 font-medium">
+            {batch.quantity} {batch.unit}
+          </span>
         </div>
         <div>
           <span className="text-gray-500">Harvest Date:</span>
           <span className="ml-2 font-medium">
-            {batch.harvestDate ? new Date(batch.harvestDate).toLocaleDateString() : 'N/A'}
+            {batch.harvestDate
+              ? new Date(batch.harvestDate).toLocaleDateString()
+              : "N/A"}
           </span>
         </div>
         <div>
           <span className="text-gray-500">Location:</span>
-          <span className="ml-2 font-medium">{batch.location || 'N/A'}</span>
+          <span className="ml-2 font-medium">
+            {batch.farmLocation?.location || "N/A"}
+          </span>
         </div>
         <div>
           <span className="text-gray-500">Quality Grade:</span>
-          <span className="ml-2 font-medium">{batch.qualityGrade || 'N/A'}</span>
+          <span className="ml-2 font-medium">
+            {batch.qualityGrade || "N/A"}
+          </span>
         </div>
       </div>
 
       {showActions && (
         <div className="flex space-x-3">
-          {batch.status === 'REGISTERED' && (
+          {batch.status === "REGISTERED" && (
             <button
               onClick={() => handleStartProcessing(batch)}
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center"
@@ -240,7 +286,7 @@ const ProcessorDashboard = () => {
               Start Processing
             </button>
           )}
-          {batch.status === 'PROCESSING' && (
+          {batch.status === "PROCESSING" && (
             <button
               onClick={() => handleCompleteProcessing(batch)}
               className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center"
@@ -274,7 +320,8 @@ const ProcessorDashboard = () => {
           Welcome back, {user?.username}! ⚙️
         </h1>
         <p className="text-blue-50 text-lg">
-          Manage your batch processing operations and maintain quality standards.
+          Manage your batch processing operations and maintain quality
+          standards.
         </p>
       </div>
 
@@ -318,8 +365,12 @@ const ProcessorDashboard = () => {
       <div className="bg-white rounded-xl shadow-sm p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h3 className="text-lg font-semibold text-gray-900">Processing Queue</h3>
-            <p className="text-sm text-gray-500 mt-1">Manage batches ready for processing</p>
+            <h3 className="text-lg font-semibold text-gray-900">
+              Processing Queue
+            </h3>
+            <p className="text-sm text-gray-500 mt-1">
+              Manage batches ready for processing
+            </p>
           </div>
           <div className="flex items-center space-x-3">
             <button className="flex items-center px-4 py-2 text-gray-600 hover:text-gray-900 border border-gray-300 rounded-lg transition-colors">
@@ -340,22 +391,34 @@ const ProcessorDashboard = () => {
         <div className="border-b border-gray-200 mb-6">
           <nav className="-mb-px flex space-x-8">
             {[
-              { id: 'available', name: 'Available Batches', count: availableBatches.length },
-              { id: 'history', name: 'Processing History', count: processingHistory.length }
+              {
+                id: "available",
+                name: "Available Batches",
+                count: availableBatches.length,
+              },
+              {
+                id: "history",
+                name: "Processing History",
+                count: processingHistory.length,
+              },
             ].map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
                   activeTab === tab.id
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    ? "border-blue-500 text-blue-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                 }`}
               >
                 {tab.name}
-                <span className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
-                  activeTab === tab.id ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
-                }`}>
+                <span
+                  className={`ml-2 px-2 py-0.5 rounded-full text-xs ${
+                    activeTab === tab.id
+                      ? "bg-blue-100 text-blue-700"
+                      : "bg-gray-100 text-gray-600"
+                  }`}
+                >
                   {tab.count}
                 </span>
               </button>
@@ -365,13 +428,17 @@ const ProcessorDashboard = () => {
 
         {/* Tab Content */}
         <div>
-          {activeTab === 'available' && (
+          {activeTab === "available" && (
             <div>
               {availableBatches.length === 0 ? (
                 <div className="text-center py-12">
                   <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No Available Batches</h3>
-                  <p className="text-gray-500">Check back later for new batches to process.</p>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    No Available Batches
+                  </h3>
+                  <p className="text-gray-500">
+                    Check back later for new batches to process.
+                  </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -383,13 +450,17 @@ const ProcessorDashboard = () => {
             </div>
           )}
 
-          {activeTab === 'history' && (
+          {activeTab === "history" && (
             <div>
               {processingHistory.length === 0 ? (
                 <div className="text-center py-12">
                   <Clock className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">No Processing History</h3>
-                  <p className="text-gray-500">Start processing batches to see your history here.</p>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    No Processing History
+                  </h3>
+                  <p className="text-gray-500">
+                    Start processing batches to see your history here.
+                  </p>
                 </div>
               ) : (
                 <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -421,10 +492,10 @@ const ProcessorDashboard = () => {
                               {item.batchId}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {item.productType || 'N/A'}
+                              {item.productType || "N/A"}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                              {item.processType || 'Processing'}
+                              {item.processType || "Processing"}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                               {new Date(item.createdAt).toLocaleDateString()}
