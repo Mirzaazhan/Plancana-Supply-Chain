@@ -1,47 +1,47 @@
 // prisma/schema.prisma
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
   previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
-  
+
   extensions = [postgis]
 }
 
 // ===== USER AUTHENTICATION & AUTHORIZATION =====
 
 model User {
-  id                String       @id @default(cuid())
-  email             String       @unique
-  username          String       @unique
-  password          String       // Hashed password
-  role              UserRole
-  status            UserStatus   @default(ACTIVE)
-  isEmailVerified   Boolean      @default(false)
-  emailVerifyToken  String?
-  resetPasswordToken String?
+  id                   String     @id @default(cuid())
+  email                String     @unique
+  username             String     @unique
+  password             String // Hashed password
+  role                 UserRole
+  status               UserStatus @default(ACTIVE)
+  isEmailVerified      Boolean    @default(false)
+  emailVerifyToken     String?
+  resetPasswordToken   String?
   resetPasswordExpires DateTime?
-  lastLogin         DateTime?
-  loginAttempts     Int          @default(0)
-  lockUntil         DateTime?
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
-  
+  lastLogin            DateTime?
+  loginAttempts        Int        @default(0)
+  lockUntil            DateTime?
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
+
   // Profile relationships based on role
-  farmerProfile     FarmerProfile?
-  processorProfile  ProcessorProfile?
+  farmerProfile      FarmerProfile?
+  processorProfile   ProcessorProfile?
   distributorProfile DistributorProfile?
-  retailerProfile   RetailerProfile?
-  adminProfile      AdminProfile?
-  regulatorProfile  RegulatorProfile?
-  
+  retailerProfile    RetailerProfile?
+  adminProfile       AdminProfile?
+  regulatorProfile   RegulatorProfile?
+
   // Activity tracking
-  sessions          UserSession[]
-  activityLogs      ActivityLog[]
-  
+  sessions     UserSession[]
+  activityLogs ActivityLog[]
+
   @@map("users")
 }
 
@@ -53,9 +53,9 @@ model UserSession {
   userAgent    String?
   expiresAt    DateTime
   createdAt    DateTime @default(now())
-  
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@map("user_sessions")
 }
 
@@ -79,146 +79,146 @@ enum UserStatus {
 // ===== ROLE-SPECIFIC PROFILES =====
 
 model FarmerProfile {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  firstName         String
-  lastName          String
-  phone             String?
-  farmName          String
-  farmSize          Float?   // in hectares
-  farmingType       String[] // organic, conventional, hydroponic
-  primaryCrops      String[] // rice, corn, vegetables
-  certifications    String[] // organic, halal, etc.
-  licenseNumber     String?
-  address           String?
-  state             String?
-  country           String   @default("Malaysia")
-  profileImage      String?
-  isVerified        Boolean  @default(false)
-  verifiedAt        DateTime?
-  verifiedBy        String?  // Admin ID who verified
-  
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  firstName      String
+  lastName       String
+  phone          String?
+  farmName       String
+  farmSize       Float? // in hectares
+  farmingType    String[] // organic, conventional, hydroponic
+  primaryCrops   String[] // rice, corn, vegetables
+  certifications String[] // organic, halal, etc.
+  licenseNumber  String?
+  address        String?
+  state          String?
+  country        String    @default("Malaysia")
+  profileImage   String?
+  isVerified     Boolean   @default(false)
+  verifiedAt     DateTime?
+  verifiedBy     String? // Admin ID who verified
+
   // Farm locations
-  farmLocations     FarmLocation[]
-  
+  farmLocations FarmLocation[]
+
   // Batches created by this farmer
-  batches           Batch[]
-  
+  batches Batch[]
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@map("farmer_profiles")
 }
 
 model ProcessorProfile {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  companyName       String
-  contactPerson     String
-  phone             String?
-  email             String?
-  facilityType      String[] // mill, warehouse, packaging
-  processingCapacity Float?  // tons per day
-  certifications    String[] // HACCP, ISO, etc.
-  licenseNumber     String?
-  address           String?
-  state             String?
-  country           String   @default("Malaysia")
-  isVerified        Boolean  @default(false)
-  verifiedAt        DateTime?
-  
+  id                 String    @id @default(cuid())
+  userId             String    @unique
+  companyName        String
+  contactPerson      String
+  phone              String?
+  email              String?
+  facilityType       String[] // mill, warehouse, packaging
+  processingCapacity Float? // tons per day
+  certifications     String[] // HACCP, ISO, etc.
+  licenseNumber      String?
+  address            String?
+  state              String?
+  country            String    @default("Malaysia")
+  isVerified         Boolean   @default(false)
+  verifiedAt         DateTime?
+
   // Processing facilities
-  facilities        ProcessingFacility[]
-  
+  facilities ProcessingFacility[]
+
   // Processing records
   processingRecords ProcessingRecord[]
-  
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@map("processor_profiles")
 }
 
 model DistributorProfile {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  companyName       String
-  contactPerson     String
-  phone             String?
-  email             String?
-  distributionType  String[] // local, regional, national, international
-  vehicleTypes      String[] // truck, ship, train
-  storageCapacity   Float?   // cubic meters
-  licenseNumber     String?
-  address           String?
-  state             String?
-  country           String   @default("Malaysia")
-  isVerified        Boolean  @default(false)
-  latitude          Float?
-  longitude         Float?
-  geocodedAt        DateTime? // To track when coordinates were generated
-  geom_point Unsupported("geography(Point, 4326)")?
-  
+  id               String                                 @id @default(cuid())
+  userId           String                                 @unique
+  companyName      String
+  contactPerson    String
+  phone            String?
+  email            String?
+  distributionType String[] // local, regional, national, international
+  vehicleTypes     String[] // truck, ship, train
+  storageCapacity  Float? // cubic meters
+  licenseNumber    String?
+  address          String?
+  state            String?
+  country          String                                 @default("Malaysia")
+  isVerified       Boolean                                @default(false)
+  latitude         Float?
+  longitude        Float?
+  geocodedAt       DateTime? // To track when coordinates were generated
+  geom_point       Unsupported("geography(Point, 4326)")?
+
   // Transport routes
-  transportRoutes   TransportRoute[]
-  
+  transportRoutes TransportRoute[]
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@map("distributor_profiles")
 }
 
 model RetailerProfile {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  businessName      String
-  contactPerson     String
-  phone             String?
-  email             String?
-  businessType      String[] // supermarket, restaurant, export
-  storageCapacity   Float?
-  licenseNumber     String?
-  address           String?
-  state             String?
-  country           String   @default("Malaysia")
-  isVerified        Boolean  @default(false)
-  latitude          Float?
-  longitude         Float?
-  geocodedAt        DateTime? // To track when coordinates were generated
-  geom_point Unsupported("geography(Point, 4326)")?
-  
+  id              String                                 @id @default(cuid())
+  userId          String                                 @unique
+  businessName    String
+  contactPerson   String
+  phone           String?
+  email           String?
+  businessType    String[] // supermarket, restaurant, export
+  storageCapacity Float?
+  licenseNumber   String?
+  address         String?
+  state           String?
+  country         String                                 @default("Malaysia")
+  isVerified      Boolean                                @default(false)
+  latitude        Float?
+  longitude       Float?
+  geocodedAt      DateTime? // To track when coordinates were generated
+  geom_point      Unsupported("geography(Point, 4326)")?
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@map("retailer_profiles")
 }
 
 model RegulatorProfile {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  firstName         String
-  lastName          String
-  agency            String   // MARDI, DOA, etc.
-  position          String
-  phone             String?
-  email             String?
-  jurisdiction      String[] // states or regions
-  authorities       String[] // inspection, certification, enforcement
-  employeeId        String?
-  
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  firstName    String
+  lastName     String
+  agency       String // MARDI, DOA, etc.
+  position     String
+  phone        String?
+  email        String?
+  jurisdiction String[] // states or regions
+  authorities  String[] // inspection, certification, enforcement
+  employeeId   String?
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@map("regulator_profiles")
 }
 
 model AdminProfile {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  firstName         String
-  lastName          String
-  phone             String?
-  email             String?
-  adminLevel        AdminLevel @default(MODERATOR)
-  permissions       String[] // user_management, system_config, etc.
-  
+  id          String     @id @default(cuid())
+  userId      String     @unique
+  firstName   String
+  lastName    String
+  phone       String?
+  email       String?
+  adminLevel  AdminLevel @default(MODERATOR)
+  permissions String[] // user_management, system_config, etc.
+
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   @@map("admin_profiles")
 }
 
@@ -231,41 +231,42 @@ enum AdminLevel {
 // ===== SUPPLY CHAIN DATA MODELS =====
 
 model FarmLocation {
-  id                String   @id @default(cuid())
-  farmerId          String
-  farmName          String
-  latitude          Float
-  longitude         Float
-  location          String?
-  elevation         Float?
-  farmBoundary      Json?    // GeoJSON polygon
-  soilType          String?
-  soilPh            Float?
-  isActive          Boolean  @default(true)
-  geom_point Unsupported("geography(Point, 4326)")?
-  
-  farmer            FarmerProfile @relation(fields: [farmerId], references: [id])
-  batches           Batch[]
-  weatherData       WeatherData[]
+  id           String                                 @id @default(cuid())
+  farmerId     String
+  farmName     String
+  latitude     Float
+  longitude    Float
+  location     String?
+  elevation    Float?
+  farmBoundary Json? // GeoJSON polygon
+  soilType     String?
+  soilPh       Float?
+  isActive     Boolean                                @default(true)
+  geom_point   Unsupported("geography(Point, 4326)")?
+
+  farmer      FarmerProfile @relation(fields: [farmerId], references: [id])
+  batches     Batch[]
+  weatherData WeatherData[]
+
   @@index([geom_point], type: Gist)
   @@map("farm_locations")
 }
 
 model Batch {
-  id                String       @id @default(cuid())
-  batchId           String       @unique // BATCH_2024_001
-  farmerId          String
-  farmLocationId    String?
-  productType       String
-  variety           String?
-  quantity          Float
-  unit              String       @default("kg")
-  harvestDate       DateTime
-  status            BatchStatus  @default(REGISTERED)
-  blockchainHash    String?      // Reference to blockchain
-  qrCodeHash        String?
-  dataHash          String?      // For integrity verification
-  
+  id             String      @id @default(cuid())
+  batchId        String      @unique // BATCH_2024_001
+  farmerId       String
+  farmLocationId String?
+  productType    String
+  variety        String?
+  quantity       Float
+  unit           String      @default("kg")
+  harvestDate    DateTime
+  status         BatchStatus @default(REGISTERED)
+  blockchainHash String? // Reference to blockchain
+  qrCodeHash     String?
+  dataHash       String? // For integrity verification
+
   // Detailed information
   cultivationMethod String?
   seedsSource       String?
@@ -275,34 +276,35 @@ model Batch {
   qualityGrade      String?
   moistureContent   Float?
   proteinContent    Float?
-  images            String[]     // Image URLs
+  images            String[] // Image URLs
   notes             String?
 
   // Pricing Information (Farm-gate level)
-  pricePerUnit      Float?       // Farm-gate price per unit
-  currency          String?      @default("MYR")
-  totalBatchValue   Float?       // Quantity × Price per Unit
-  paymentMethod     String?      // cash, bank-transfer, cheque, etc.
-  buyerName         String?      // Buyer or processor name
+  pricePerUnit    Float? // Farm-gate price per unit
+  currency        String? @default("MYR")
+  totalBatchValue Float? // Quantity × Price per Unit
+  paymentMethod   String? // cash, bank-transfer, cheque, etc.
+  buyerName       String? // Buyer or processor name
 
   // Certifications & Compliance
-  certifications    String[]     // Organic, Halal, MyGAP, GLOBALG.A.P, etc.
-  customCertification String?    // Custom certification if not in dropdown
+  certifications      String[] // Organic, Halal, MyGAP, GLOBALG.A.P, etc.
+  customCertification String? // Custom certification if not in dropdown
 
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
-  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   // Relationships
-  farmer            FarmerProfile @relation(fields: [farmerId], references: [id])
-  farmLocation      FarmLocation? @relation(fields: [farmLocationId], references: [id])
-  
+  farmer       FarmerProfile @relation(fields: [farmerId], references: [id])
+  farmLocation FarmLocation? @relation(fields: [farmLocationId], references: [id])
+
   // Supply chain records
-  processingRecords ProcessingRecord[]
-  transportRoutes   TransportRoute[]
-  qualityTests      QualityTest[]
-  transactions      Transaction[]
-  weatherData       WeatherData[]
+  processingRecords    ProcessingRecord[]
+  transportRoutes      TransportRoute[]
+  qualityTests         QualityTest[]
+  transactions         Transaction[]
+  weatherData          WeatherData[]
   // batchTransfers and distributionRecords use batchId as string reference (hybrid storage)
+  BatchLocationHistory BatchLocationHistory[]
 
   @@map("batches")
 }
@@ -319,93 +321,83 @@ enum BatchStatus {
 }
 
 model ProcessingFacility {
-  id                String   @id @default(cuid())
-  processorId       String
-  facilityName      String
-  facilityType      String   // mill, warehouse, packaging
-  latitude          Float
-  longitude         Float
-  address           String?
-  capacity          Float?   // tons per day
-  certifications    String[]
-  equipmentList     String[]
-  isActive          Boolean  @default(true)
-  geom_point Unsupported("geography(Point, 4326)")?
-  
-  processor         ProcessorProfile @relation(fields: [processorId], references: [id])
+  id             String                                 @id @default(cuid())
+  processorId    String
+  facilityName   String
+  facilityType   String // mill, warehouse, packaging
+  latitude       Float
+  longitude      Float
+  address        String?
+  capacity       Float? // tons per day
+  certifications String[]
+  equipmentList  String[]
+  isActive       Boolean                                @default(true)
+  geom_point     Unsupported("geography(Point, 4326)")?
+
+  processor         ProcessorProfile   @relation(fields: [processorId], references: [id])
   processingRecords ProcessingRecord[]
-  
+
   @@map("processing_facilities")
 }
 
 model ProcessingRecord {
-  id                String   @id @default(cuid())
-  batchId           String
-  processorId       String
-  facilityId        String
-  processingDate    DateTime
-  processingType    String   // cleaning, milling, packaging
-  inputQuantity     Float
-  outputQuantity    Float
-  wasteQuantity     Float?
-  processingTime    Int?     // minutes
-  qualityTests      Json?    // Test results
-  operatorName      String?
-  energyUsage       Float?   // kWh
-  waterUsage        Float?   // liters
-  blockchainHash    String?
-<<<<<<< Updated upstream
-  
-=======
+  id             String   @id @default(cuid())
+  batchId        String
+  processorId    String
+  facilityId     String
+  processingDate DateTime
+  processingType String // cleaning, milling, packaging
+  inputQuantity  Float
+  outputQuantity Float
+  wasteQuantity  Float?
+  processingTime Int? // minutes
+  qualityTests   Json? // Test results
+  operatorName   String?
+  energyUsage    Float? // kWh
+  waterUsage     Float? // liters
+  blockchainHash String?
 
   // Location tracking at processing level
   processingLocation String? // Address or location name
-  latitude          Float?   // Processing location coordinates
-  longitude         Float?
+  latitude           Float? // Processing location coordinates
+  longitude          Float?
 
   //weather data
-  temperature       Float?
-  humidity          Float?
-  weather_main      String?
-  weather_desc      String?
+  temperature  Float?
+  humidity     Float?
+  weather_main String?
+  weather_desc String?
 
-  //weather data
-  temperature       Float?
-  humidity          Float?
-  weather_main      String?
-  weather_desc      String?
+  batch     Batch              @relation(fields: [batchId], references: [id])
+  processor ProcessorProfile   @relation(fields: [processorId], references: [id])
+  facility  ProcessingFacility @relation(fields: [facilityId], references: [id])
 
->>>>>>> Stashed changes
-  batch             Batch @relation(fields: [batchId], references: [id])
-  processor         ProcessorProfile @relation(fields: [processorId], references: [id])
-  facility          ProcessingFacility @relation(fields: [facilityId], references: [id])
-  
   @@map("processing_records")
 }
 
 model TransportRoute {
-  id                String   @id @default(cuid())
-  batchId           String
-  distributorId     String
-  vehicleId         String?
-  originLat         Float
-  originLng         Float
-  destinationLat    Float
-  destinationLng    Float
-  departureTime     DateTime?
-  arrivalTime       DateTime?
-  estimatedTime     Int
-  distance          Float?   // km
-  fuelConsumption   Float?   // liters
-  transportCost     Float?
-  routePolyline     String?  // Encoded polyline
-  status            TransportStatus @default(PLANNED)
-  blockchainHash    String?
-  geom_route Unsupported("geography(LineString, 4326)")?
-  
-  batch             Batch @relation(fields: [batchId], references: [id])
-  distributor       DistributorProfile @relation(fields: [distributorId], references: [id])
-  
+  id              String                                      @id @default(cuid())
+  batchId         String
+  distributorId   String
+  vehicleId       String?
+  originLat       Float
+  originLng       Float
+  destinationLat  Float
+  destinationLng  Float
+  departureTime   DateTime?
+  arrivalTime     DateTime?
+  estimatedTime   Int
+  distance        Float? // km
+  fuelConsumption Float? // liters
+  transportCost   Float?
+  routePolyline   String? // Encoded polyline
+  status          TransportStatus                             @default(PLANNED)
+  blockchainHash  String?
+  geom_route      Unsupported("geography(LineString, 4326)")?
+
+  batch       Batch              @relation(fields: [batchId], references: [id])
+  distributor DistributorProfile @relation(fields: [distributorId], references: [id])
+
   @@map("transport_routes")
 }
 
@@ -418,87 +410,85 @@ enum TransportStatus {
 }
 
 model QualityTest {
-  id                String   @id @default(cuid())
-  batchId           String
-  testType          String   // pesticide_residue, heavy_metals, microbial
-  testDate          DateTime
-  testingLab        String
-  testResults       Json     // Detailed results
-  passFailStatus    String
-  certificateUrl    String?
-  blockchainHash    String?
-  
-  batch             Batch @relation(fields: [batchId], references: [id])
-  
+  id             String   @id @default(cuid())
+  batchId        String
+  testType       String // pesticide_residue, heavy_metals, microbial
+  testDate       DateTime
+  testingLab     String
+  testResults    Json // Detailed results
+  passFailStatus String
+  certificateUrl String?
+  blockchainHash String?
+
+  batch Batch @relation(fields: [batchId], references: [id])
+
   @@map("quality_tests")
 }
 
 model Transaction {
-  id                String   @id @default(cuid())
-  batchId           String
-  transactionType   String   // sale, transport_fee, processing_fee
-  fromPartyId       String
-  toPartyId         String
-  baseAmount        Float
-  transportFee      Float?
-  processingFee     Float?
-  taxAmount         Float?
-  totalAmount       Float
-  currency          String   @default("MYR")
-  paymentMethod     String?
-  paymentStatus     String   @default("PENDING")
-  invoiceNumber     String?
-  blockchainHash    String?
-  
-  batch             Batch @relation(fields: [batchId], references: [id])
-  
+  id              String  @id @default(cuid())
+  batchId         String
+  transactionType String // sale, transport_fee, processing_fee
+  fromPartyId     String
+  toPartyId       String
+  baseAmount      Float
+  transportFee    Float?
+  processingFee   Float?
+  taxAmount       Float?
+  totalAmount     Float
+  currency        String  @default("MYR")
+  paymentMethod   String?
+  paymentStatus   String  @default("PENDING")
+  invoiceNumber   String?
+  blockchainHash  String?
+
+  batch Batch @relation(fields: [batchId], references: [id])
+
   @@map("transactions")
 }
 
-<<<<<<< Updated upstream
-=======
 model BatchTransfer {
-  id                String   @id @default(cuid())
-  batchId           String
+  id      String @id @default(cuid())
+  batchId String
 
   // Transfer parties
-  fromActorId       String
-  fromActorRole     UserRole
-  toActorId         String
-  toActorRole       UserRole
+  fromActorId   String
+  fromActorRole UserRole
+  toActorId     String
+  toActorRole   UserRole
 
   // Transfer details
-  transferType      String   @default("OWNERSHIP_TRANSFER")
-  transferDate      DateTime @default(now())
+  transferType String   @default("OWNERSHIP_TRANSFER")
+  transferDate DateTime @default(now())
 
   // Location & conditions
-  transferLocation  String?
-  latitude          Float?
-  longitude         Float?
-  conditions        Json?    // Storage/transport conditions
+  transferLocation String?
+  latitude         Float?
+  longitude        Float?
+  conditions       Json? // Storage/transport conditions
 
   //weather data
-  temperature       Float?
-  humidity          Float?
-  weather_main      String?
-  weather_desc      String?
+  temperature  Float?
+  humidity     Float?
+  weather_main String?
+  weather_desc String?
 
   // Documentation
-  documents         String[] // URLs to transfer documents
-  signature         String?  // Digital signature
-  notes             String?
+  documents String[] // URLs to transfer documents
+  signature String? // Digital signature
+  notes     String?
 
   // Status tracking
-  status            TransferStatus @default(PENDING)
-  statusBefore      BatchStatus
-  statusAfter       BatchStatus
+  status       TransferStatus @default(PENDING)
+  statusBefore BatchStatus
+  statusAfter  BatchStatus
 
   // Blockchain reference
-  blockchainTxId    String?
-  blockchainHash    String?
+  blockchainTxId String?
+  blockchainHash String?
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // No relation - batch might only exist on blockchain (hybrid storage)
   // Use batchId as a string reference only
@@ -515,60 +505,60 @@ enum TransferStatus {
 }
 
 model DistributionRecord {
-  id                  String   @id @default(cuid())
-  batchId             String
-  distributorId       String
+  id            String @id @default(cuid())
+  batchId       String
+  distributorId String
 
   // Distribution details
-  distributionType    String?  // local, regional, national, export
-  warehouseLocation   String?
-  warehouseLat        Float?
-  warehouseLng        Float?
+  distributionType  String? // local, regional, national, export
+  warehouseLocation String?
+  warehouseLat      Float?
+  warehouseLng      Float?
 
   // Storage conditions
-  storageConditions   String?
-  temperatureControl  String?
-  humidity            Float?
-  temperature       Float?
-  weather_main      String?
-  weather_desc      String?
+  storageConditions  String?
+  temperatureControl String?
+  humidity           Float?
+  temperature        Float?
+  weather_main       String?
+  weather_desc       String?
 
   // Logistics
-  vehicleType         String?
-  vehicleId           String?
-  driverName          String?
-  route               Json?    // Array of route points
+  vehicleType String?
+  vehicleId   String?
+  driverName  String?
+  route       Json? // Array of route points
 
   // Quantities
   quantityReceived    Float?
   quantityDistributed Float?
-  unit                String   @default("kg")
+  unit                String @default("kg")
 
   // Costs
-  distributionCost    Float?
-  storageCost         Float?
-  handlingCost        Float?
-  currency            String   @default("MYR")
+  distributionCost Float?
+  storageCost      Float?
+  handlingCost     Float?
+  currency         String @default("MYR")
 
   // Quality check
-  qualityCheckPassed  Boolean?
-  qualityNotes        String?
+  qualityCheckPassed Boolean?
+  qualityNotes       String?
 
   // Documentation
-  documents           String[] // URLs to documents
-  notes               String?
+  documents String[] // URLs to documents
+  notes     String?
 
   // Destination
-  destinationType     String?  // retailer, export, industrial
-  destination         String?
+  destinationType String? // retailer, export, industrial
+  destination     String?
 
   // Blockchain reference
-  blockchainTxId      String?
-  blockchainHash      String?
+  blockchainTxId String?
+  blockchainHash String?
 
-  distributionDate    DateTime @default(now())
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  distributionDate DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   // No relation - batch might only exist on blockchain (hybrid storage)
   // Use batchId as a string reference only
@@ -576,7 +566,6 @@ model DistributionRecord {
   @@map("distribution_records")
 }
 
->>>>>>> Stashed changes
 model WeatherData {
   id                String   @id @default(cuid())
   batchId           String?
@@ -588,24 +577,23 @@ model WeatherData {
   rainfallMm        Float?
   windSpeedKmh      Float?
   weatherConditions String?
-  
-  batch             Batch? @relation(fields: [batchId], references: [id])
-  farmLocation      FarmLocation @relation(fields: [locationId], references: [id])
-  
+
+  batch        Batch?       @relation(fields: [batchId], references: [id])
+  farmLocation FarmLocation @relation(fields: [locationId], references: [id])
+
   @@map("weather_data")
 }
 
-model BatchLocationHistory{
-  id                String   @id @default(cuid())
-  batchId           String
-  eventType         String
-  latitude          Float
-  longitude         Float
-  timestamp         DateTime @default(now())
-  metadata          Json? //for weatherData
+model BatchLocationHistory {
+  id        String   @id @default(cuid())
+  batchId   String
+  eventType String
+  latitude  Float
+  longitude Float
+  timestamp DateTime @default(now())
+  metadata  Json? //for weatherData
 
-
-  batch             Batch @relation(fields: [batchId], references: [id])
+  batch Batch @relation(fields: [batchId], references: [id])
 
   geom_point Unsupported("geography(Point, 4326)")?
 
@@ -615,29 +603,29 @@ model BatchLocationHistory{
 }
 
 model ActivityLog {
-  id                String   @id @default(cuid())
-  userId            String
-  action            String   // login, create_batch, scan_qr, view_report
-  resource          String?  // batch_id, user_id, etc.
-  ipAddress         String?
-  userAgent         String?
-  metadata          Json?    // Additional context
-  timestamp         DateTime @default(now())
-  
-  user              User @relation(fields: [userId], references: [id])
-  
+  id        String   @id @default(cuid())
+  userId    String
+  action    String // login, create_batch, scan_qr, view_report
+  resource  String? // batch_id, user_id, etc.
+  ipAddress String?
+  userAgent String?
+  metadata  Json? // Additional context
+  timestamp DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
   @@map("activity_logs")
 }
 
 // ===== SYSTEM CONFIGURATION =====
 
 model SystemConfig {
-  id                String   @id @default(cuid())
-  configKey         String   @unique
-  configValue       Json
-  description       String?
-  updatedBy         String?
-  updatedAt         DateTime @updatedAt
-  
+  id          String   @id @default(cuid())
+  configKey   String   @unique
+  configValue Json
+  description String?
+  updatedBy   String?
+  updatedAt   DateTime @updatedAt
+
   @@map("system_config")
 }
