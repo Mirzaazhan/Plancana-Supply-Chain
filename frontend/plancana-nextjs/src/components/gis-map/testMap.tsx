@@ -1,11 +1,17 @@
-// src/components/gis-map/testMap.js (Using Lucide Icons with Proper Legend)
-
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
 import { loadModules } from "esri-loader";
-import config from "@arcgis/core/config";
-import { MapPin, Factory, Truck, Store, CheckCircle } from "lucide-react";
+import {
+  MapPin,
+  Factory,
+  Truck,
+  Store,
+  CheckCircle,
+  Filter,
+  X,
+  AlertCircle,
+} from "lucide-react";
 
 interface MapProps {
   webMapId: any;
@@ -17,13 +23,16 @@ interface MapProps {
 const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<any>(null);
-  const [token, setToken] = useState(null);
-
-  async function fetchToken() {
-    const res = await fetch("/api/refresh-token");
-    const data = await res.json();
-    return data.access_token;
-  }
+  const locationsLayerRef = useRef<any>(null);
+  const routesLayerRef = useRef<any>(null);
+  const [batchIds, setBatchIds] = useState<string[]>([]);
+  const [selectedBatchId, setSelectedBatchId] = useState<string>("");
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+  const [showFilter, setShowFilter] = useState(false);
+  const [token, setToken] = useState<string | null>(null);
+  const [mapError, setMapError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Helper function to map eventType to role
   function getRole(eventType: string): string {
@@ -36,20 +45,20 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
         return "PROCESSOR";
       case "WAREHOUSE_ARRIVAL":
       case "DISTRIBUTION_ARRIVAL":
-        return "WAREHOUSE";
+        return "DISTRIBUTOR";
       case "RETAIL_READY":
         return "RETAILER";
       default:
         return "OTHER";
     }
   }
+
   function iconToSvgString(
     IconComponent: any,
     color: string,
     size: number = 24,
     opacity: number = 1.0
   ) {
-    // FIX: Replace the incorrect React function call with the established getIconPath helper.
     const svg = `
       <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" style="opacity: ${opacity};" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         ${getIconPath(IconComponent)}
@@ -58,7 +67,6 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
     return `data:image/svg+xml;base64,${btoa(svg)}`;
   }
 
-  // Helper to get SVG path for each icon
   function getIconPath(IconComponent: any) {
     switch (IconComponent) {
       case MapPin:
@@ -76,97 +84,128 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
     }
   }
 
-  // function getSymbolForEventType(eventType: string, batchStatus: string) {
-  //   const isCompleted = batchStatus === "SOLD";
-  //   let color = "#000000";
-  //   let icon = MapPin;
-  //   let size = 24;
+  const applyFilters = () => {
+    if (!locationsLayerRef.current) return;
+    let expressions: string[] = [];
 
-  //   const opacity = isCompleted ? 0.5 : 1.0;
+    if (selectedBatchId) {
+      expressions.push(`batchId = '${selectedBatchId}'`);
+    }
+    if (startDate) {
+      const startTimestamp = new Date(startDate).getTime();
+      expressions.push(`timestampNum >= ${startTimestamp}`);
+    }
+    if (endDate) {
+      const endTimestamp = new Date(endDate).getTime() + 86400000;
+      expressions.push(`timestampNum <= ${endTimestamp}`);
+    }
+    const definitionExpression =
+      expressions.length > 0 ? expressions.join(" AND ") : "1=1";
 
-  //   switch (eventType) {
-  //     case "FARM_REGISTRATION":
-  //     case "REGISTERED":
-  //       color = isCompleted ? "#228B2280" : "#228B22"; // Forest Green
-  //       icon = MapPin;
-  //       break;
-  //     case "PROCESSED":
-  //     case "PROCESSING":
-  //       color = isCompleted ? "#C8640080" : "#C86400"; // Orange
-  //       icon = Factory;
-  //       break;
-  //     case "DISTRIBUTION_ARRIVAL":
-  //     case "WAREHOUSE_ARRIVAL":
-  //       color = isCompleted ? "#0032C880" : "#0032C8"; // Dark Blue
-  //       icon = Store;
-  //       break;
-  //     case "RETAIL_READY":
-  //       color = isCompleted ? "#B4000080" : "#B40000"; // Red
-  //       icon = CheckCircle;
-  //       break;
-  //     default:
-  //       color = "#646464"; // Grey
-  //       icon = MapPin;
-  //   }
+    locationsLayerRef.current.definitionExpression = definitionExpression;
 
-  //   return {
-  //     type: "picture-marker",
-  //     url: iconToSvgString(icon, color, size, opacity),
-  //     width: `${size}px`,
-  //     height: `${size}px`,
-  //   };
-  // }
+    if (routesLayerRef.current && selectedBatchId) {
+      routesLayerRef.current.definitionExpression = `batchId = '${selectedBatchId}'`;
+    } else if (routesLayerRef.current) {
+      routesLayerRef.current.definitionExpression = "1=1";
+    }
+  };
 
-  // function getRouteSymbol(routeStatus: string) {
-  //   let color = "#000000";
-  //   let size = 30;
+  const clearFilters = () => {
+    setSelectedBatchId("");
+    setStartDate("");
+    setEndDate("");
+  };
 
-  //   switch (routeStatus) {
-  //     case "PLANNED":
-  //       color = "#FFC800"; // Yellow
-  //       break;
-  //     case "IN_TRANSIT":
-  //       color = "#0064FF"; // Bright Blue
-  //       break;
-  //     case "DELIVERED":
-  //       color = "#009600"; // Dark Green
-  //       break;
-  //     case "DELAYED":
-  //       color = "#FF0000"; // Red
-  //       break;
-  //     default:
-  //       color = "#646464"; // Grey
-  //   }
-
-  //   return {
-  //     type: "picture-marker",
-  //     url: iconToSvgString(Truck, color, size),
-  //     width: `${size}px`,
-  //     height: `${size}px`,
-  //   };
-  // }
-
-  // Auto-refresh token every 55 minutes
   useEffect(() => {
+    applyFilters();
+  }, [selectedBatchId, startDate, endDate]);
+
+  // Fetch token with retry and error handling
+  async function fetchToken(retryCount = 0): Promise<string | null> {
+    const MAX_RETRIES = 3;
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      const res = await fetch("/api/refresh-token", {
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        throw new Error(`Token fetch failed: ${res.status}`);
+      }
+
+      const data = await res.json();
+
+      if (!data.access_token) {
+        throw new Error("No access token in response");
+      }
+
+      return data.access_token;
+    } catch (error) {
+      console.error(`Token fetch attempt ${retryCount + 1} failed:`, error);
+
+      if (retryCount < MAX_RETRIES) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, 2000 * (retryCount + 1))
+        );
+        return fetchToken(retryCount + 1);
+      }
+
+      setMapError(
+        "Failed to authenticate with ArcGIS. Please refresh the page."
+      );
+      return null;
+    }
+  }
+
+  // Initialize token with proper error handling
+  useEffect(() => {
+    let isMounted = true;
+    let refreshInterval: NodeJS.Timeout;
+
     async function initTokenCycle() {
       const newToken = await fetchToken();
-      setToken(newToken);
 
-      const interval = setInterval(async () => {
-        const refreshed = await fetchToken();
-        setToken(refreshed);
-      }, 55 * 60 * 1000);
+      if (!isMounted) return;
 
-      return () => clearInterval(interval);
+      if (newToken) {
+        setToken(newToken);
+        setMapError(null);
+
+        // Refresh token every 55 minutes
+        refreshInterval = setInterval(async () => {
+          const refreshed = await fetchToken();
+          if (isMounted && refreshed) {
+            setToken(refreshed);
+          }
+        }, 55 * 60 * 1000);
+      }
     }
 
     initTokenCycle();
+
+    return () => {
+      isMounted = false;
+      if (refreshInterval) {
+        clearInterval(refreshInterval);
+      }
+    };
   }, []);
 
+  // Initialize map only when token is available
   useEffect(() => {
-    if (!token) return;
+    if (!token || !mapRef.current) return;
 
     let view: any;
+    let isMounted = true;
+
+    setIsLoading(true);
+    setMapError(null);
 
     loadModules(
       [
@@ -179,6 +218,7 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
         "esri/widgets/Legend",
         "esri/identity/IdentityManager",
         "esri/renderers/UniqueValueRenderer",
+        "esri/config",
       ],
       { css: true }
     )
@@ -193,17 +233,35 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
           LegendModule,
           IdentityManager,
           UniqueValueRendererModule,
+          esriConfig,
         ]: any[]) => {
+          if (!isMounted) return;
+
+          // Configure ArcGIS with token
+          try {
+            IdentityManager.registerToken({
+              server: "https://www.arcgis.com/sharing/rest",
+              token: token,
+            });
+
+            // Also set the API key if available
+            if (process.env.NEXT_PUBLIC_ARCGIS_API_KEY) {
+              esriConfig.apiKey = process.env.NEXT_PUBLIC_ARCGIS_API_KEY;
+            }
+          } catch (error) {
+            console.error("Token registration error:", error);
+            setMapError(
+              "Authentication failed. Please check your credentials."
+            );
+            setIsLoading(false);
+            return;
+          }
+
           const WebMap = WebMapModule;
           const Graphic = GraphicModule;
           const GraphicsLayer = GraphicsLayerModule;
           const FeatureLayer = FeatureLayerModule;
           const UniqueValueRenderer = UniqueValueRendererModule;
-
-          IdentityManager.registerToken({
-            server: "https://www.arcgis.com",
-            token: token,
-          });
 
           const size = 20;
 
@@ -212,7 +270,7 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
             field: "role",
             defaultLabel: "Other",
             legendOptions: {
-              title: " ", // Empty title to hide field name
+              title: " ",
             },
             uniqueValueInfos: [
               {
@@ -236,14 +294,14 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
                 label: "Processor",
               },
               {
-                value: "WAREHOUSE",
+                value: "DISTRIBUTOR",
                 symbol: {
                   type: "picture-marker",
                   url: iconToSvgString(Store, "#0032C8", size, 1.0),
                   width: `${size}px`,
                   height: `${size}px`,
                 },
-                label: "Warehouse",
+                label: "Distributor",
               },
               {
                 value: "RETAILER",
@@ -263,7 +321,7 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
             field: "routeStatus",
             defaultLabel: "Other",
             legendOptions: {
-              title: " ", // Empty title to hide field name
+              title: " ",
             },
             uniqueValueInfos: [
               {
@@ -309,7 +367,7 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
             ],
           });
 
-          // Create feature layers with renderers
+          // Create feature layers
           const locationsLayer = new FeatureLayer({
             title: "Batch Locations",
             source: [],
@@ -329,6 +387,7 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
               { name: "weather_main", type: "string" },
               { name: "weather_desc", type: "string" },
               { name: "timestamp", type: "string" },
+              { name: "timestampNum", type: "double" },
             ],
             renderer: locationRenderer,
             geometryType: "point",
@@ -363,11 +422,35 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
             popupEnabled: true,
           });
 
+          locationsLayerRef.current = locationsLayer;
+          routesLayerRef.current = routesLayer;
+
+          // Create WebMap with error handling
           const map = new WebMapModule({
             portalItem: {
               id: webMapId,
             },
             layers: [locationsLayer, routesLayer],
+          });
+
+          // Handle map load errors
+          map.load().catch((error: any) => {
+            console.error("WebMap load error:", error);
+            if (!isMounted) return;
+
+            if (
+              error.message?.includes("403") ||
+              error.message?.includes("401")
+            ) {
+              setMapError(
+                "Access denied. Please check your ArcGIS credentials."
+              );
+            } else if (error.message?.includes("404")) {
+              setMapError("Map not found. Please check the Web Map ID.");
+            } else {
+              setMapError("Failed to load map. Please refresh and try again.");
+            }
+            setIsLoading(false);
           });
 
           const view = new MapViewModule({
@@ -378,150 +461,288 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
           });
 
           viewRef.current = view;
-          view.when(function () {
-            // Wait for layers to load before adding legend
-            Promise.all([locationsLayer.when(), routesLayer.when()]).then(
-              () => {
-                // Add legend after layers are ready
-                const legend = new LegendModule({
-                  view: view,
-                  layerInfos: [
-                    {
-                      layer: locationsLayer,
-                      title: "Batch Locations",
-                      hideLayers: false,
-                    },
-                    // {
-                    //   layer: routesLayer,
-                    //   title: "Active Routes",
-                    //   hideLayers: false,
-                    // },
-                  ],
-                  style: "card", // Use card style for better appearance
-                  respectLayerVisibility: true,
-                });
-                view.ui.add(legend, "top-right");
-              }
-            );
 
-            // Fetch data
-            Promise.all([locationsLayer.when(), routesLayer.when()]).then(
-              () => {
-                fetch("/api/batches/active-locations")
-                  .then((res) => res.json())
-                  .then((data) => {
-                    const batchesData = data.batchesData || [];
+          view
+            .when()
+            .then(() => {
+              if (!isMounted) return;
 
-                    const locationFeatures: any[] = [];
-                    const routeFeatures: any[] = [];
-                    let objectId = 1;
+              setIsLoading(false);
 
-                    batchesData.forEach((batch: any) => {
-                      const batchId = batch.batchId;
+              // Add legend
+              Promise.all([locationsLayer.when(), routesLayer.when()]).then(
+                () => {
+                  if (!isMounted) return;
 
-                      // Create location features
-                      batch.historyPoints.forEach((pointData: any) => {
-                        const point = new PointModule({
-                          longitude: pointData.longitude,
-                          latitude: pointData.latitude,
+                  const legend = new LegendModule({
+                    view: view,
+                    layerInfos: [
+                      {
+                        layer: locationsLayer,
+                        title: "Batch Locations",
+                        hideLayers: false,
+                      },
+                    ],
+                    style: "card",
+                    respectLayerVisibility: true,
+                  });
+                  view.ui.add(legend, "top-right");
+                }
+              );
+
+              // Fetch and display data
+              Promise.all([locationsLayer.when(), routesLayer.when()]).then(
+                () => {
+                  if (!isMounted) return;
+
+                  fetch("/api/batches/active-locations")
+                    .then((res) => {
+                      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                      return res.json();
+                    })
+                    .then((data) => {
+                      if (!isMounted) return;
+
+                      const batchesData = data.batchesData || [];
+
+                      const uniqueBatchIds = Array.from(
+                        new Set(batchesData.map((batch: any) => batch.batchId))
+                      ) as string[];
+                      setBatchIds(uniqueBatchIds);
+
+                      const locationFeatures: any[] = [];
+                      const routeFeatures: any[] = [];
+                      let objectId = 1;
+
+                      batchesData.forEach((batch: any) => {
+                        const batchId = batch.batchId;
+
+                        batch.historyPoints.forEach((pointData: any) => {
+                          const point = new PointModule({
+                            longitude: pointData.longitude,
+                            latitude: pointData.latitude,
+                          });
+
+                          const role = getRole(pointData.eventType);
+                          const timestamp = new Date(pointData.timestamp);
+
+                          locationFeatures.push({
+                            geometry: point,
+                            attributes: {
+                              ObjectID: objectId++,
+                              role: role,
+                              eventType: pointData.eventType,
+                              batchId: batchId,
+                              status: batch.status,
+                              cropType: batch.cropType,
+                              productType: batch.productType,
+                              quantity: batch.quantity,
+                              location: pointData.metadata.location || "N/A",
+                              temperature:
+                                pointData.metadata.temperature || "N/A",
+                              humidity: pointData.metadata.humidity || "N/A",
+                              weather_main:
+                                pointData.metadata.weather_main || "N/A",
+                              weather_desc:
+                                pointData.metadata.weather_desc || "N/A",
+                              timestamp: timestamp.toLocaleString(),
+                              timestampNum: timestamp.getTime(),
+                            },
+                          });
                         });
 
-                        const role = getRole(pointData.eventType);
+                        batch.activeRoutes.forEach((route: any) => {
+                          const endPoint = new PointModule({
+                            longitude: route.destinationLng,
+                            latitude: route.destinationLat,
+                          });
 
-                        locationFeatures.push({
-                          geometry: point,
-                          attributes: {
-                            ObjectID: objectId++,
-                            role: role,
-                            eventType: pointData.eventType,
-                            batchId: batchId,
-                            status: batch.status,
-                            cropType: batch.cropType,
-                            productType: batch.productType,
-                            quantity: batch.quantity,
-                            location: pointData.metadata.location || "N/A",
-                            temperature:
-                              pointData.metadata.temperature || "N/A",
-                            humidity: pointData.metadata.humidity || "N/A",
-                            weather_main:
-                              pointData.metadata.weather_main || "N/A",
-                            weather_desc:
-                              pointData.metadata.weather_desc || "N/A",
-                            timestamp: new Date(
-                              pointData.timestamp
-                            ).toLocaleString(),
-                          },
+                          routeFeatures.push({
+                            geometry: endPoint,
+                            attributes: {
+                              ObjectID: objectId++,
+                              routeStatus: route.status,
+                              batchId: batchId,
+                            },
+                          });
                         });
                       });
 
-                      // Create route features
-                      batch.activeRoutes.forEach((route: any) => {
-                        const endPoint = new PointModule({
-                          longitude: route.destinationLng,
-                          latitude: route.destinationLat,
+                      if (locationFeatures.length > 0) {
+                        locationsLayer.applyEdits({
+                          addFeatures: locationFeatures,
                         });
+                      }
 
-                        routeFeatures.push({
-                          geometry: endPoint,
-                          attributes: {
-                            ObjectID: objectId++,
-                            routeStatus: route.status,
-                            batchId: batchId,
-                          },
+                      if (routeFeatures.length > 0) {
+                        routesLayer.applyEdits({
+                          addFeatures: routeFeatures,
                         });
-                      });
+                      }
+                    })
+                    .catch((err) => {
+                      console.error("Error fetching batch data:", err);
+                      if (isMounted) {
+                        setMapError("Failed to load batch data.");
+                      }
                     });
+                }
+              );
 
-                    // Apply features to layers
-                    locationsLayer
-                      .applyEdits({
-                        addFeatures: locationFeatures,
-                      })
-                      .catch((err: any) =>
-                        console.error("Error adding locations:", err)
-                      );
-
-                    routesLayer
-                      .applyEdits({
-                        addFeatures: routeFeatures,
-                      })
-                      .catch((err: any) =>
-                        console.error("Error adding routes:", err)
-                      );
-                  })
-                  .catch((err) =>
-                    console.error("Error fetching all batch data:", err)
-                  );
+              view.ui.components = [];
+              if (dragable) {
+                view.navigation.mouseWheelZoomEnabled = false;
+                view.navigation.browserTouchPanEnabled = false;
+                view.navigation.keyboardNavigationEnabled = false;
+                view.on("drag", function (event: any) {
+                  event.stopPropagation();
+                });
               }
-            ); // End of Promise.all
-
-            view.ui.components = [];
-            if (dragable) {
-              view.navigation.mouseWheelZoomEnabled = false;
-              view.navigation.browserTouchPanEnabled = false;
-              view.navigation.keyboardNavigationEnabled = false;
-              view.on("drag", function (event: any) {
-                event.stopPropagation();
-              });
-            }
-          });
-          console.log("Map View Initialized, authenticating via API Key.");
+            })
+            .catch((error: any) => {
+              console.error("View initialization error:", error);
+              if (isMounted) {
+                setMapError("Failed to initialize map view.");
+                setIsLoading(false);
+              }
+            });
         }
       )
       .catch((error) => {
-        console.error("Map Initialization Error:", error);
+        console.error("Map Module Load Error:", error);
+        if (isMounted) {
+          setMapError("Failed to load map modules. Please refresh.");
+          setIsLoading(false);
+        }
       });
 
     return () => {
+      isMounted = false;
       if (viewRef.current) {
         viewRef.current.destroy();
         viewRef.current = null;
       }
     };
-  }, [webMapId, token]);
+  }, [webMapId, token, dragable, zoom]);
 
   return (
     <>
+      {/* Error Display */}
+      {mapError && (
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-20 bg-red-50 border border-red-200 rounded-lg p-4 shadow-lg max-w-md">
+          <div className="flex items-start gap-3">
+            <AlertCircle
+              className="text-red-600 flex-shrink-0 mt-0.5"
+              size={20}
+            />
+            <div>
+              <h4 className="font-semibold text-red-900 mb-1">Map Error</h4>
+              <p className="text-sm text-red-700">{mapError}</p>
+              <button
+                onClick={() => window.location.reload()}
+                className="mt-2 text-sm text-red-600 hover:text-red-800 font-medium underline"
+              >
+                Refresh Page
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Loading Indicator */}
+      {isLoading && !mapError && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-gray-600 font-medium">Loading map...</p>
+          </div>
+        </div>
+      )}
+
+      {/* Filter Panel */}
+      <div className="relative">
+        <button
+          onClick={() => setShowFilter(!showFilter)}
+          className="absolute top-4 left-4 z-10 bg-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 hover:bg-gray-50 transition-colors"
+        >
+          <Filter size={18} />
+          <span className="font-medium">Filters</span>
+          {(selectedBatchId || startDate || endDate) && (
+            <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full">
+              Active
+            </span>
+          )}
+        </button>
+
+        {showFilter && (
+          <div className="absolute top-16 left-4 z-10 bg-white p-4 rounded-lg shadow-xl w-80">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-lg">Filter Options</h3>
+              <button
+                onClick={() => setShowFilter(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Batch ID
+                </label>
+                <select
+                  value={selectedBatchId}
+                  onChange={(e) => setSelectedBatchId(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">All Batches</option>
+                  {batchIds.map((id) => (
+                    <option key={id} value={id}>
+                      {id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Start Date
+                </label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {(selectedBatchId || startDate || endDate) && (
+                <button
+                  onClick={clearFilters}
+                  className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors font-medium"
+                >
+                  Clear All Filters
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Map Container */}
       <div
         ref={mapRef}
         className="map-view-container"
