@@ -4840,12 +4840,13 @@ app.get(
       const validSplitBatches = splitBatches;
 
       // Merge blockchain and database results, avoiding duplicates
-      const blockchainBatchIds = new Set(blockchainBatches.map(b => b.batchId));
+      const addedBatchIds = new Set(blockchainBatches.map(b => b.batchId));
       const combinedBatches = [...blockchainBatches];
 
-      // Add database batches that aren't already in blockchain results
+      // Add database batches that aren't already added
       for (const dbBatch of [...dbBatches, ...validSplitBatches]) {
-        if (!blockchainBatchIds.has(dbBatch.batchId)) {
+        if (!addedBatchIds.has(dbBatch.batchId)) {
+          addedBatchIds.add(dbBatch.batchId); // Track this batch as added
           combinedBatches.push({
             batchId: dbBatch.batchId,
             crop: dbBatch.productType,
