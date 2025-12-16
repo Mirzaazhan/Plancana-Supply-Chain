@@ -11,6 +11,7 @@ import {
 import { toast } from "react-hot-toast";
 import PricingModal from "./PricingModal";
 import ProcessingStartModal from "./ProcessingStartModal";
+import BatchSplitModal from "./BatchSplitModal";
 import {
   Package,
   Clock,
@@ -24,6 +25,7 @@ import {
   Pause,
   Square,
   Settings as SettingsIcon,
+  Scissors,
 } from "lucide-react";
 
 const ProcessorDashboard = () => {
@@ -43,6 +45,7 @@ const ProcessorDashboard = () => {
   const [showPricingModal, setShowPricingModal] = useState(false);
   const [showProcessingStartModal, setShowProcessingStartModal] =
     useState(false);
+  const [showSplitModal, setShowSplitModal] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState(null);
 
   useEffect(() => {
@@ -185,6 +188,17 @@ const ProcessorDashboard = () => {
     }
   };
 
+  // Handle batch splitting
+  const handleSplitBatch = (batch) => {
+    setSelectedBatch(batch);
+    setShowSplitModal(true);
+  };
+
+  const handleSplitSuccess = (result) => {
+    toast.success(`Batch split successfully! New batch: ${result.childBatch.batchId}`);
+    fetchDashboardData(); // Refresh data to show updated batches
+  };
+
   const StatCard = ({
     title,
     value,
@@ -293,6 +307,15 @@ const ProcessorDashboard = () => {
             >
               <CheckCircle className="h-4 w-4 mr-2" />
               Complete Processing
+            </button>
+          )}
+          {(batch.status === "PROCESSED" || batch.status === "PROCESSING") && (
+            <button
+              onClick={() => handleSplitBatch(batch)}
+              className="px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center"
+            >
+              <Scissors className="h-4 w-4 mr-2" />
+              Split
             </button>
           )}
           <button className="px-4 py-2 text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 rounded-lg font-medium transition-colors flex items-center justify-center">
@@ -538,6 +561,17 @@ const ProcessorDashboard = () => {
         batch={selectedBatch}
         onSubmit={handlePricingSubmit}
         level="PROCESSOR"
+      />
+
+      {/* Batch Split Modal */}
+      <BatchSplitModal
+        isOpen={showSplitModal}
+        batch={selectedBatch}
+        onClose={() => {
+          setShowSplitModal(false);
+          setSelectedBatch(null);
+        }}
+        onSuccess={handleSplitSuccess}
       />
     </div>
   );

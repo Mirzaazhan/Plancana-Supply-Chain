@@ -10,6 +10,7 @@ import {
 } from "../../services/api";
 import { toast } from "react-hot-toast";
 import PricingModal from "./PricingModal";
+import BatchSplitModal from "./BatchSplitModal";
 import LocationInput from "../ui/LocationInput";
 import {
   Package,
@@ -24,6 +25,7 @@ import {
   Eye,
   MapPin,
   Clock,
+  Scissors,
 } from "lucide-react";
 
 const DistributorDashboard = () => {
@@ -45,6 +47,7 @@ const DistributorDashboard = () => {
   const [showPricingModal, setShowPricingModal] = useState(false);
   const [showDistributionModal, setShowDistributionModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
+  const [showSplitModal, setShowSplitModal] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState(null);
 
   // Distribution form state
@@ -345,6 +348,17 @@ const DistributorDashboard = () => {
     setShowTransferModal(true);
   };
 
+  // Handle batch splitting
+  const handleSplitBatch = (batch) => {
+    setSelectedBatch(batch);
+    setShowSplitModal(true);
+  };
+
+  const handleSplitSuccess = (result) => {
+    toast.success(`Batch split successfully! New batch: ${result.childBatch.batchId}`);
+    fetchDashboardData(); // Refresh data to show updated batches
+  };
+
   const submitTransferToRetailer = async () => {
     try {
       if (!transferData.toRetailerId) {
@@ -471,28 +485,39 @@ const DistributorDashboard = () => {
           Receive Batch
         </button>
       ) : (
-        <div className="flex gap-2">
-          <button
-            onClick={() => handleAddDistribution(batch)}
-            className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm flex items-center justify-center"
-          >
-            <Truck className="h-4 w-4 mr-1" />
-            Distribute
-          </button>
-          <button
-            onClick={() => handleAddPricing(batch)}
-            className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors text-sm flex items-center justify-center"
-          >
-            <BarChart3 className="h-4 w-4 mr-1" />
-            Pricing
-          </button>
-          <button
-            onClick={() => handleTransferToRetailer(batch)}
-            className="flex-1 bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 transition-colors text-sm flex items-center justify-center"
-          >
-            <ArrowRight className="h-4 w-4 mr-1" />
-            Transfer
-          </button>
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleAddDistribution(batch)}
+              className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm flex items-center justify-center"
+            >
+              <Truck className="h-4 w-4 mr-1" />
+              Distribute
+            </button>
+            <button
+              onClick={() => handleAddPricing(batch)}
+              className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors text-sm flex items-center justify-center"
+            >
+              <BarChart3 className="h-4 w-4 mr-1" />
+              Pricing
+            </button>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleSplitBatch(batch)}
+              className="flex-1 bg-pink-600 text-white px-4 py-2 rounded-lg hover:bg-pink-700 transition-colors text-sm flex items-center justify-center"
+            >
+              <Scissors className="h-4 w-4 mr-1" />
+              Split
+            </button>
+            <button
+              onClick={() => handleTransferToRetailer(batch)}
+              className="flex-1 bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 transition-colors text-sm flex items-center justify-center"
+            >
+              <ArrowRight className="h-4 w-4 mr-1" />
+              Transfer
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -697,6 +722,17 @@ const DistributorDashboard = () => {
           setSelectedBatch(null);
         }}
         onSubmit={handlePricingSubmit}
+      />
+
+      {/* Batch Split Modal */}
+      <BatchSplitModal
+        isOpen={showSplitModal}
+        batch={selectedBatch}
+        onClose={() => {
+          setShowSplitModal(false);
+          setSelectedBatch(null);
+        }}
+        onSuccess={handleSplitSuccess}
       />
 
       {/* Distribution Record Modal */}

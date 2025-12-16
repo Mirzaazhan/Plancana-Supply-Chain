@@ -2136,6 +2136,51 @@ app.get("/api/verify/:batchId", async (req, res) => {
       };
     }
 
+    // Get batch lineage (parent/child relationships)
+    let lineageInfo = null;
+    if (dbBatch) {
+      // Get parent batch if exists
+      let parentBatch = null;
+      if (dbBatch.parentBatchId) {
+        parentBatch = await prisma.batch.findUnique({
+          where: { id: dbBatch.parentBatchId },
+          select: {
+            batchId: true,
+            quantity: true,
+            unit: true,
+            status: true,
+            productType: true,
+          },
+        });
+      }
+
+      // Get child batches
+      const childBatches = await prisma.batch.findMany({
+        where: { parentBatchId: dbBatch.id },
+        select: {
+          batchId: true,
+          quantity: true,
+          unit: true,
+          status: true,
+          splitReason: true,
+          splitDate: true,
+        },
+        orderBy: { createdAt: "asc" },
+      });
+
+      if (parentBatch || childBatches.length > 0) {
+        lineageInfo = {
+          isChild: !!dbBatch.parentBatchId,
+          isParent: childBatches.length > 0,
+          splitReason: dbBatch.splitReason || null,
+          splitDate: dbBatch.splitDate || null,
+          parent: parentBatch,
+          children: childBatches,
+          totalChildren: childBatches.length,
+        };
+      }
+    }
+
     // Create comprehensive verification response
     const verificationResponse = {
       success: true,
@@ -2194,6 +2239,9 @@ app.get("/api/verify/:batchId", async (req, res) => {
             },
           }
         : null,
+
+      // Batch lineage (parent/child relationships from splitting)
+      lineage: lineageInfo,
 
       message: "Batch verified successfully",
     };
@@ -2914,6 +2962,327 @@ app.get("/api/batch/:batchId/integrity", authenticate, async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Integrity check failed",
+    });
+  }
+});
+
+// ===============================
+// BATCH SPLITTING ENDPOINTS
+// ===============================
+
+// Split a batch into smaller portions
+app.post(
+  "/api/batch/:batchId/split",
+  authenticate,
+  authorize(["FARMER", "PROCESSOR", "DISTRIBUTOR"]),
+  async (req, res) => {
+    let gateway = null;
+    try {
+      const { batchId } = req.params;
+      const { splitQuantity, reason, buyerName, pricePerUnit } = req.body;
+
+      // Connect to blockchain
+      let contract = null;
+      try {
+        const connection = await blockchainService.connectToNetwork();
+        gateway = connection.gateway;
+        contract = connection.contract;
+      } catch (bcConnError) {
+        console.warn("Blockchain connection failed, continuing with database only:", bcConnError.message);
+      }
+
+      // Find the original batch
+      const dbBatch = await prisma.batch.findFirst({
+        where: { batchId: batchId },
+        include: {
+          farmer: true,
+          farmLocation: true,
+        },
+      });
+
+      if (!dbBatch) {
+        return res.status(404).json({
+          success: false,
+          error: "Batch not found",
+        });
+      }
+
+      // Validate split quantity
+      const splitQty = parseFloat(splitQuantity);
+      if (isNaN(splitQty) || splitQty <= 0) {
+        return res.status(400).json({
+          success: false,
+          error: "Split quantity must be a positive number",
+        });
+      }
+
+      if (splitQty >= dbBatch.quantity) {
+        return res.status(400).json({
+          success: false,
+          error: `Split quantity (${splitQty}) must be less than batch quantity (${dbBatch.quantity})`,
+        });
+      }
+
+      // Generate new batch ID
+      const childCount = await prisma.batch.count({
+        where: { parentBatchId: dbBatch.id },
+      });
+      const suffix = String.fromCharCode(65 + childCount); // A, B, C, etc.
+      const newBatchId = `${batchId}-${suffix}`;
+
+      // Calculate quantities
+      const remainingQuantity = dbBatch.quantity - splitQty;
+      const newPricePerUnit = pricePerUnit || dbBatch.pricePerUnit;
+      const newTotalValue = splitQty * (newPricePerUnit || 0);
+
+      // Record on blockchain first
+      let blockchainResult = null;
+      if (contract) {
+        try {
+          const splitData = JSON.stringify({
+            reason: reason || "Batch split for distribution",
+            splitBy: req.user.id,
+            splitByRole: req.user.role,
+            buyerName: buyerName || null,
+            pricePerUnit: newPricePerUnit,
+            totalBatchValue: newTotalValue,
+          });
+
+          const result = await contract.submitTransaction(
+            "splitBatch",
+            batchId,
+            newBatchId,
+            splitQty.toString(),
+            splitData
+          );
+          blockchainResult = JSON.parse(result.toString());
+          console.log(`Batch split recorded on blockchain: ${batchId} → ${newBatchId}`);
+        } catch (blockchainError) {
+          console.error("Blockchain split error:", blockchainError);
+          // Continue with database-only if blockchain fails
+        }
+      }
+
+      // Create child batch in database
+      const childBatch = await prisma.batch.create({
+        data: {
+          batchId: newBatchId,
+          farmerId: dbBatch.farmerId,
+          farmLocationId: dbBatch.farmLocationId,
+          productType: dbBatch.productType,
+          variety: dbBatch.variety,
+          quantity: splitQty,
+          unit: dbBatch.unit,
+          harvestDate: dbBatch.harvestDate,
+          status: dbBatch.status,
+          cultivationMethod: dbBatch.cultivationMethod,
+          seedsSource: dbBatch.seedsSource,
+          irrigationMethod: dbBatch.irrigationMethod,
+          fertilizers: dbBatch.fertilizers,
+          pesticides: dbBatch.pesticides,
+          qualityGrade: dbBatch.qualityGrade,
+          moistureContent: dbBatch.moistureContent,
+          proteinContent: dbBatch.proteinContent,
+          certifications: dbBatch.certifications,
+          customCertification: dbBatch.customCertification,
+          pricePerUnit: newPricePerUnit,
+          currency: dbBatch.currency,
+          totalBatchValue: newTotalValue,
+          paymentMethod: dbBatch.paymentMethod,
+          buyerName: buyerName || dbBatch.buyerName,
+          parentBatchId: dbBatch.id,
+          splitReason: reason || "Batch split for distribution",
+          splitDate: new Date(),
+          blockchainHash: blockchainResult?.txId || null,
+        },
+      });
+
+      // Update parent batch quantity
+      const updatedParentBatch = await prisma.batch.update({
+        where: { id: dbBatch.id },
+        data: {
+          quantity: remainingQuantity,
+          totalBatchValue: remainingQuantity * (dbBatch.pricePerUnit || 0),
+        },
+      });
+
+      // Generate QR codes for the new batch
+      let qrCodes = null;
+      if (contract) {
+        try {
+          qrCodes = {
+            verification: await blockchainService.generateQRCode(newBatchId),
+            processing: await blockchainService.generateProcessingQRCode(newBatchId),
+          };
+        } catch (qrError) {
+          console.error("QR generation error:", qrError);
+        }
+      }
+
+      // Create BatchTransfer record for the child batch to track ownership
+      await prisma.batchTransfer.create({
+        data: {
+          batchId: newBatchId,
+          fromActorId: req.user.id,
+          fromActorRole: req.user.role,
+          toActorId: req.user.id,
+          toActorRole: req.user.role,
+          transferType: "BATCH_SPLIT",
+          transferDate: new Date(),
+          notes: `Split from parent batch ${batchId}: ${splitQty} ${dbBatch.unit}`,
+          status: "COMPLETED",
+          statusBefore: dbBatch.status,
+          statusAfter: dbBatch.status,
+          blockchainTxId: blockchainResult?.txId || null,
+        },
+      });
+
+      // Log the activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "BATCH_SPLIT",
+          resource: batchId,
+          metadata: {
+            parentBatchId: batchId,
+            childBatchId: newBatchId,
+            splitQuantity: splitQty,
+            remainingQuantity: remainingQuantity,
+            reason: reason,
+          },
+        },
+      });
+
+      res.status(201).json({
+        success: true,
+        message: `Batch split successfully: ${batchId} → ${newBatchId}`,
+        parentBatch: {
+          batchId: batchId,
+          remainingQuantity: remainingQuantity,
+          unit: dbBatch.unit,
+        },
+        childBatch: {
+          batchId: newBatchId,
+          quantity: splitQty,
+          unit: childBatch.unit,
+          parentBatchId: batchId,
+          qrCodes: qrCodes,
+        },
+        blockchainRecorded: !!blockchainResult,
+        blockchainTxId: blockchainResult?.txId || null,
+      });
+
+      // Disconnect gateway
+      if (gateway) {
+        await gateway.disconnect();
+      }
+    } catch (error) {
+      console.error("Batch split error:", error);
+      // Disconnect gateway on error
+      if (gateway) {
+        try { await gateway.disconnect(); } catch (e) {}
+      }
+      res.status(500).json({
+        success: false,
+        error: "Failed to split batch",
+        details: error.message,
+      });
+    }
+  }
+);
+
+// Get batch lineage (parent and children)
+app.get("/api/batch/:batchId/lineage", authenticate, async (req, res) => {
+  try {
+    const { batchId } = req.params;
+
+    // Find the batch
+    const batch = await prisma.batch.findFirst({
+      where: { batchId: batchId },
+      include: {
+        farmer: {
+          select: {
+            firstName: true,
+            lastName: true,
+            farmName: true,
+          },
+        },
+      },
+    });
+
+    if (!batch) {
+      return res.status(404).json({
+        success: false,
+        error: "Batch not found",
+      });
+    }
+
+    // Get parent batch if exists
+    let parentBatch = null;
+    if (batch.parentBatchId) {
+      parentBatch = await prisma.batch.findUnique({
+        where: { id: batch.parentBatchId },
+        select: {
+          batchId: true,
+          quantity: true,
+          unit: true,
+          status: true,
+          productType: true,
+        },
+      });
+    }
+
+    // Get child batches
+    const childBatches = await prisma.batch.findMany({
+      where: { parentBatchId: batch.id },
+      select: {
+        batchId: true,
+        quantity: true,
+        unit: true,
+        status: true,
+        splitReason: true,
+        splitDate: true,
+        buyerName: true,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    // Get blockchain lineage if connected
+    let blockchainLineage = null;
+    if (contract) {
+      try {
+        const result = await contract.evaluateTransaction("getBatchLineage", batchId);
+        blockchainLineage = JSON.parse(result.toString());
+      } catch (bcError) {
+        console.error("Blockchain lineage fetch error:", bcError);
+      }
+    }
+
+    res.json({
+      success: true,
+      batch: {
+        batchId: batch.batchId,
+        quantity: batch.quantity,
+        unit: batch.unit,
+        status: batch.status,
+        productType: batch.productType,
+        isChild: !!batch.parentBatchId,
+        isParent: childBatches.length > 0,
+        splitReason: batch.splitReason,
+        splitDate: batch.splitDate,
+      },
+      lineage: {
+        parent: parentBatch,
+        children: childBatches,
+        totalChildren: childBatches.length,
+      },
+      blockchainLineage: blockchainLineage,
+    });
+  } catch (error) {
+    console.error("Get lineage error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch batch lineage",
     });
   }
 });
@@ -4392,25 +4761,137 @@ app.get(
   authenticate,
   authorize(["DISTRIBUTOR", "ADMIN"]),
   async (req, res) => {
+    let gateway = null;
     try {
       const distributorId = req.user.id;
-      const { gateway, contract } = await blockchainService.connectToNetwork();
+      let blockchainBatches = [];
 
-      const result = await contract.evaluateTransaction(
-        "getBatchesByDistributor",
-        distributorId
-      );
-      const distributorBatches = JSON.parse(result.toString());
+      // Try blockchain first
+      try {
+        const connection = await blockchainService.connectToNetwork();
+        gateway = connection.gateway;
+        const contract = connection.contract;
 
-      await gateway.disconnect();
+        const result = await contract.evaluateTransaction(
+          "getBatchesByDistributor",
+          distributorId
+        );
+        blockchainBatches = JSON.parse(result.toString());
+      } catch (bcError) {
+        console.warn("Blockchain query failed, using database fallback:", bcError.message);
+      }
+
+      // Also get batches from database where distributor has received them
+      // This catches split batches and ensures consistency
+      const dbTransfers = await prisma.batchTransfer.findMany({
+        where: {
+          toActorId: distributorId,
+          toActorRole: 'DISTRIBUTOR',
+          status: 'COMPLETED'
+        },
+        select: { batchId: true }
+      });
+
+      // Get unique batch IDs from transfers
+      const transferredBatchIds = [...new Set(dbTransfers.map(t => t.batchId))];
+
+      // Get batches from database that were transferred to this distributor
+      const dbBatches = await prisma.batch.findMany({
+        where: {
+          batchId: { in: transferredBatchIds },
+          status: { notIn: ['SOLD', 'RECALLED'] }
+        },
+        include: {
+          farmer: {
+            select: { firstName: true, lastName: true, farmName: true }
+          },
+          farmLocation: {
+            select: { latitude: true, longitude: true, location: true }
+          },
+          childBatches: {
+            select: { batchId: true, quantity: true, splitReason: true, status: true }
+          }
+        }
+      });
+
+      // Get the internal IDs of transferred batches
+      const dbBatchInternalIds = dbBatches.map(b => b.id);
+
+      // Also get split batches - children of batches this distributor owns
+      const splitBatches = await prisma.batch.findMany({
+        where: {
+          parentBatchId: { in: dbBatchInternalIds },
+          status: { notIn: ['SOLD', 'RECALLED'] }
+        },
+        include: {
+          farmer: {
+            select: { firstName: true, lastName: true, farmName: true }
+          },
+          farmLocation: {
+            select: { latitude: true, longitude: true, location: true }
+          },
+          parentBatch: {
+            select: { batchId: true }
+          }
+        }
+      });
+
+      // All split batches from owned parents are valid
+      const validSplitBatches = splitBatches;
+
+      // Merge blockchain and database results, avoiding duplicates
+      const blockchainBatchIds = new Set(blockchainBatches.map(b => b.batchId));
+      const combinedBatches = [...blockchainBatches];
+
+      // Add database batches that aren't already in blockchain results
+      for (const dbBatch of [...dbBatches, ...validSplitBatches]) {
+        if (!blockchainBatchIds.has(dbBatch.batchId)) {
+          combinedBatches.push({
+            batchId: dbBatch.batchId,
+            crop: dbBatch.productType,
+            productType: dbBatch.productType,
+            variety: dbBatch.variety,
+            quantity: dbBatch.quantity,
+            unit: dbBatch.unit,
+            status: dbBatch.status,
+            harvestDate: dbBatch.harvestDate,
+            qualityGrade: dbBatch.qualityGrade,
+            pricePerUnit: dbBatch.pricePerUnit,
+            currency: dbBatch.currency,
+            totalBatchValue: dbBatch.totalBatchValue,
+            certifications: dbBatch.certifications,
+            parentBatchId: dbBatch.parentBatchId ? (dbBatch.parentBatch?.batchId || dbBatch.parentBatchId) : null,
+            splitReason: dbBatch.splitReason,
+            childBatches: dbBatch.childBatches || [],
+            farmer: dbBatch.farmer ? `${dbBatch.farmer.firstName} ${dbBatch.farmer.lastName}` : null,
+            farmName: dbBatch.farmer?.farmName,
+            location: dbBatch.farmLocation?.location,
+            coordinates: dbBatch.farmLocation ? {
+              latitude: dbBatch.farmLocation.latitude,
+              longitude: dbBatch.farmLocation.longitude
+            } : null,
+            source: 'database'
+          });
+        }
+      }
+
+      // Disconnect gateway if connected
+      if (gateway) {
+        await gateway.disconnect();
+      }
 
       res.json({
         success: true,
-        data: distributorBatches,
-        count: distributorBatches.length,
+        data: combinedBatches,
+        count: combinedBatches.length,
+        blockchainCount: blockchainBatches.length,
+        databaseCount: combinedBatches.length - blockchainBatches.length
       });
     } catch (error) {
       console.error("Get distributor batches error:", error);
+      if (gateway) {
+        try { await gateway.disconnect(); } catch (e) {}
+      }
       res.status(500).json({
         success: false,
         error: "Failed to get distributor batches",

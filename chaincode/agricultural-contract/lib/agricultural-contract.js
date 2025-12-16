@@ -1327,6 +1327,269 @@ class AgriculturalContract extends Contract {
         console.info(`============= END : Get Batches By Distributor ${distributorId} ===========`);
         return JSON.stringify(allResults);
     }
+
+    // ===== BATCH SPLITTING FUNCTIONS =====
+
+    // Split a batch into a smaller portion (custody-based - only current owner can split)
+    async splitBatch(ctx, batchId, newBatchId, splitQuantity, splitData) {
+        console.info(`============= START : Split Batch ${batchId} ===========`);
+
+        // Check if original batch exists
+        const exists = await this.batchExists(ctx, batchId);
+        if (!exists) {
+            throw new Error(`The batch ${batchId} does not exist`);
+        }
+
+        // Check if new batch ID already exists
+        const newBatchExists = await this.batchExists(ctx, newBatchId);
+        if (newBatchExists) {
+            throw new Error(`Batch ${newBatchId} already exists. Please use a unique batch ID.`);
+        }
+
+        const batch = await this.getBatch(ctx, batchId);
+        const parentBatch = JSON.parse(batch);
+        const timestamp = ctx.stub.getTxTimestamp();
+        const txId = ctx.stub.getTxID();
+        const mspId = ctx.clientIdentity.getMSPID();
+
+        // Parse split data
+        let split = {};
+        try {
+            split = typeof splitData === 'string' ? JSON.parse(splitData) : splitData;
+        } catch (error) {
+            console.warn('Invalid split data provided');
+        }
+
+        // Validate split quantity
+        const splitQty = parseFloat(splitQuantity);
+        if (isNaN(splitQty) || splitQty <= 0) {
+            throw new Error('Split quantity must be a positive number');
+        }
+
+        if (splitQty >= parentBatch.quantity) {
+            throw new Error(`Split quantity (${splitQty}) must be less than batch quantity (${parentBatch.quantity})`);
+        }
+
+        // Calculate remaining quantity in parent batch
+        const remainingQuantity = parentBatch.quantity - splitQty;
+
+        // Initialize child batches array if not exists
+        if (!parentBatch.childBatches) {
+            parentBatch.childBatches = [];
+        }
+
+        // Create the child batch (inherits most properties from parent)
+        const childBatch = {
+            batchId: newBatchId,
+            parentBatchId: batchId,
+            farmer: parentBatch.farmer,
+            cropType: parentBatch.cropType,
+            crop: parentBatch.crop,
+            variety: parentBatch.variety,
+            quantity: splitQty,
+            unit: parentBatch.unit,
+            location: parentBatch.location,
+            coordinates: parentBatch.coordinates,
+            harvestDate: parentBatch.harvestDate,
+            cultivationMethod: parentBatch.cultivationMethod,
+            qualityGrade: parentBatch.qualityGrade,
+            certifications: parentBatch.certifications || [],
+            customCertification: parentBatch.customCertification,
+
+            // Pricing - calculate proportionally or use provided values
+            pricePerUnit: split.pricePerUnit || parentBatch.pricePerUnit,
+            currency: parentBatch.currency,
+            totalBatchValue: split.totalBatchValue || (splitQty * (parentBatch.pricePerUnit || 0)),
+            paymentMethod: parentBatch.paymentMethod,
+            buyerName: split.buyerName || parentBatch.buyerName,
+
+            // Inherit current status from parent
+            status: parentBatch.status,
+            docType: 'batch',
+
+            // Blockchain metadata
+            txId: txId,
+            mspId: mspId,
+            createdDate: timestamp.seconds.low + "." + timestamp.nanos,
+            lastUpdated: timestamp.seconds.low + "." + timestamp.nanos,
+
+            // Split metadata
+            splitReason: split.reason || 'Batch split for distribution',
+            splitDate: timestamp.seconds.low + "." + timestamp.nanos,
+            splitFromBatch: batchId,
+            splitBy: split.splitBy || parentBatch.currentOwner?.actorId || parentBatch.farmer,
+            splitByRole: split.splitByRole || parentBatch.currentOwner?.actorRole || 'FARMER',
+
+            // Set current owner to whoever is splitting (they have custody)
+            // This ensures the split batch is owned by the person who split it
+            currentOwner: {
+                actorId: split.splitBy || parentBatch.currentOwner?.actorId || parentBatch.farmer,
+                actorRole: split.splitByRole || parentBatch.currentOwner?.actorRole || 'FARMER',
+                since: timestamp.seconds.low + "." + timestamp.nanos
+            },
+
+            // Database integration
+            dataHash: '',
+            databaseId: split.databaseId || null,
+
+            // Initialize empty arrays for new batch
+            statusHistory: [
+                {
+                    status: parentBatch.status,
+                    updatedBy: split.splitBy || parentBatch.currentOwner?.actorId || parentBatch.farmer,
+                    timestamp: timestamp.seconds.low + "." + timestamp.nanos,
+                    previousStatus: null,
+                    txId: txId,
+                    notes: `Split from parent batch ${batchId} (${splitQty} ${parentBatch.unit})`
+                }
+            ],
+            processingRecords: [],
+            transportRecords: [],
+            qualityTests: [],
+            financialTransactions: [],
+            pricingHistory: parentBatch.pricingHistory ? [...parentBatch.pricingHistory] : [],
+            ownershipHistory: [],
+            distributionRecords: [],
+            childBatches: [],
+
+            // Environmental data
+            environmentalData: parentBatch.environmentalData || null
+        };
+
+        // Update parent batch
+        parentBatch.quantity = remainingQuantity;
+        parentBatch.totalBatchValue = remainingQuantity * (parentBatch.pricePerUnit || 0);
+        parentBatch.childBatches.push({
+            batchId: newBatchId,
+            quantity: splitQty,
+            splitDate: timestamp.seconds.low + "." + timestamp.nanos,
+            reason: split.reason || 'Batch split for distribution',
+            txId: txId
+        });
+        parentBatch.lastUpdated = timestamp.seconds.low + "." + timestamp.nanos;
+
+        // Add split event to parent's status history
+        if (!parentBatch.statusHistory) parentBatch.statusHistory = [];
+        parentBatch.statusHistory.push({
+            status: parentBatch.status,
+            updatedBy: split.splitBy || parentBatch.currentOwner?.actorId || parentBatch.farmer,
+            timestamp: timestamp.seconds.low + "." + timestamp.nanos,
+            previousStatus: parentBatch.status,
+            txId: txId,
+            notes: `Batch split: ${splitQty} ${parentBatch.unit} transferred to ${newBatchId}. Remaining: ${remainingQuantity} ${parentBatch.unit}`
+        });
+
+        // Store both batches on blockchain
+        await ctx.stub.putState(batchId, Buffer.from(JSON.stringify(parentBatch)));
+        await ctx.stub.putState(newBatchId, Buffer.from(JSON.stringify(childBatch)));
+
+        // Emit event for database synchronization
+        ctx.stub.setEvent('BatchSplit', Buffer.from(JSON.stringify({
+            parentBatchId: batchId,
+            childBatchId: newBatchId,
+            splitQuantity: splitQty,
+            remainingQuantity: remainingQuantity,
+            unit: parentBatch.unit,
+            splitBy: split.splitBy || parentBatch.currentOwner?.actorId || parentBatch.farmer,
+            splitByRole: split.splitByRole || parentBatch.currentOwner?.actorRole || 'FARMER',
+            reason: split.reason || 'Batch split for distribution',
+            timestamp: timestamp.seconds.low + "." + timestamp.nanos,
+            txId: txId
+        })));
+
+        console.info(`============= END : Split Batch ${batchId} → ${newBatchId} ===========`);
+        return JSON.stringify({
+            success: true,
+            parentBatch: {
+                batchId: batchId,
+                remainingQuantity: remainingQuantity,
+                unit: parentBatch.unit
+            },
+            childBatch: {
+                batchId: newBatchId,
+                quantity: splitQty,
+                unit: childBatch.unit,
+                parentBatchId: batchId
+            },
+            txId: txId
+        });
+    }
+
+    // Get batch lineage (parent and all children)
+    async getBatchLineage(ctx, batchId) {
+        console.info(`============= START : Get Batch Lineage ${batchId} ===========`);
+
+        const batchAsBytes = await ctx.stub.getState(batchId);
+        if (!batchAsBytes || batchAsBytes.length === 0) {
+            throw new Error(`Batch ${batchId} does not exist`);
+        }
+
+        const batch = JSON.parse(batchAsBytes.toString());
+
+        // Build lineage object
+        const lineage = {
+            batchId: batchId,
+            quantity: batch.quantity,
+            unit: batch.unit,
+            status: batch.status,
+            isChild: !!batch.parentBatchId,
+            isParent: batch.childBatches && batch.childBatches.length > 0,
+            parentBatchId: batch.parentBatchId || null,
+            childBatches: batch.childBatches || [],
+            splitDate: batch.splitDate || null,
+            splitReason: batch.splitReason || null,
+            splitBy: batch.splitBy || null,
+            splitByRole: batch.splitByRole || null
+        };
+
+        // If this is a child, get parent info
+        if (batch.parentBatchId) {
+            try {
+                const parentBytes = await ctx.stub.getState(batch.parentBatchId);
+                if (parentBytes && parentBytes.length > 0) {
+                    const parent = JSON.parse(parentBytes.toString());
+                    lineage.parentInfo = {
+                        batchId: parent.batchId,
+                        originalQuantity: parent.quantity + batch.quantity, // Approximate original
+                        currentQuantity: parent.quantity,
+                        farmer: parent.farmer,
+                        crop: parent.crop,
+                        status: parent.status,
+                        totalChildren: parent.childBatches ? parent.childBatches.length : 0
+                    };
+                }
+            } catch (error) {
+                console.warn(`Could not fetch parent batch ${batch.parentBatchId}`);
+            }
+        }
+
+        // If this is a parent, get children info
+        if (batch.childBatches && batch.childBatches.length > 0) {
+            lineage.childrenInfo = [];
+            for (const child of batch.childBatches) {
+                try {
+                    const childBytes = await ctx.stub.getState(child.batchId);
+                    if (childBytes && childBytes.length > 0) {
+                        const childBatch = JSON.parse(childBytes.toString());
+                        lineage.childrenInfo.push({
+                            batchId: childBatch.batchId,
+                            quantity: childBatch.quantity,
+                            unit: childBatch.unit,
+                            status: childBatch.status,
+                            splitDate: child.splitDate,
+                            reason: child.reason,
+                            currentOwner: childBatch.currentOwner || null
+                        });
+                    }
+                } catch (error) {
+                    console.warn(`Could not fetch child batch ${child.batchId}`);
+                }
+            }
+        }
+
+        console.info(`============= END : Get Batch Lineage ${batchId} ===========`);
+        return JSON.stringify(lineage);
+    }
 }
 
 module.exports = AgriculturalContract;

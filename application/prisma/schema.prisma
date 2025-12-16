@@ -244,6 +244,12 @@ model FarmLocation {
   isActive     Boolean                                @default(true)
   geom_point   Unsupported("geography(Point, 4326)")?
 
+  // Weather data at location
+  temperature  Float?
+  humidity     Float?
+  weather_main String?
+  weather_desc String?
+
   farmer      FarmerProfile @relation(fields: [farmerId], references: [id])
   batches     Batch[]
   weatherData WeatherData[]
@@ -257,6 +263,7 @@ model Batch {
   batchId        String      @unique // BATCH_2024_001
   farmerId       String
   farmLocationId String?
+  cropType       String? // Fruit, Vegetable, Cash Crop, Herb/Spice, Industrial Crop
   productType    String
   variety        String?
   quantity       Float
@@ -266,6 +273,11 @@ model Batch {
   blockchainHash String? // Reference to blockchain
   qrCodeHash     String?
   dataHash       String? // For integrity verification
+
+  // Batch Splitting - Parent/Child relationships
+  parentBatchId String? // Reference to parent batch if this is a split
+  splitReason   String? // Reason for splitting (e.g., "Quality grading", "Multiple buyers")
+  splitDate     DateTime? // When the split occurred
 
   // Detailed information
   cultivationMethod String?
@@ -289,6 +301,7 @@ model Batch {
   // Certifications & Compliance
   certifications      String[] // Organic, Halal, MyGAP, GLOBALG.A.P, etc.
   customCertification String? // Custom certification if not in dropdown
+  myGapCertNumber     String? // myGAP Certificate Number (database only, not on blockchain)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -296,6 +309,10 @@ model Batch {
   // Relationships
   farmer       FarmerProfile @relation(fields: [farmerId], references: [id])
   farmLocation FarmLocation? @relation(fields: [farmLocationId], references: [id])
+
+  // Batch splitting relationships
+  parentBatch  Batch?  @relation("BatchSplit", fields: [parentBatchId], references: [id])
+  childBatches Batch[] @relation("BatchSplit")
 
   // Supply chain records
   processingRecords    ProcessingRecord[]
@@ -314,8 +331,10 @@ enum BatchStatus {
   PROCESSING
   PROCESSED
   IN_TRANSIT
+  IN_DISTRIBUTION
   DELIVERED
   RETAIL_READY
+  IN_RETAIL
   SOLD
   RECALLED
 }

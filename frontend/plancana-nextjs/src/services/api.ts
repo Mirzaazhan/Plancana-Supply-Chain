@@ -110,9 +110,16 @@ export const batchService = {
   
   // Verification (public endpoint - used when scanning QR codes)
   verifyBatch: (batchId: string) => api.get(`/verify/${batchId}`),
-  
+
   // Data integrity check
-  checkIntegrity: (batchId: string) => api.get(`/batch/${batchId}/integrity`)
+  checkIntegrity: (batchId: string) => api.get(`/batch/${batchId}/integrity`),
+
+  // Batch splitting
+  splitBatch: (batchId: string, splitData: { splitQuantity: number; reason: string; buyerName?: string; pricePerUnit?: number }) =>
+    api.post(`/batch/${batchId}/split`, splitData),
+
+  // Get batch lineage (parent/child relationships)
+  getBatchLineage: (batchId: string) => api.get(`/batch/${batchId}/lineage`)
 };
 
 // Dashboard service
