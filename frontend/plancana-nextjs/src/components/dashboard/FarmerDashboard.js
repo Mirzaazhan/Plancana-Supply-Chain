@@ -4,6 +4,7 @@ import { useAuth } from "../../context/AuthContext";
 import { batchService, dashboardService } from "../../services/api";
 import { toast } from "react-hot-toast";
 import BatchCard from "../batch/BatchCard";
+import RecallBatchModal from "./RecallBatchModal";
 import { useRouter } from "next/navigation";
 import BatchManagement from "../batch/BatchManagement";
 import BatchDetails from "../batch/BatchDetails";
@@ -57,6 +58,8 @@ const FarmerDashboard = () => {
   const [currentView, setCurrentView] = useState("dashboard");
   const [selectedBatchId, setSelectedBatchId] = useState(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showRecallModal, setShowRecallModal] = useState(false);
+  const [selectedBatchForRecall, setSelectedBatchForRecall] = useState(null);
 
   // Weather state with loading indicator
   const [weatherData, setWeatherData] = useState({
@@ -339,6 +342,19 @@ const FarmerDashboard = () => {
   const handleCreateBatch = useCallback(() => {
     router.push("/farmer/batch-registration");
   }, [router]);
+
+  // Recall handlers
+  const handleRecallBatch = useCallback((batch) => {
+    setSelectedBatchForRecall(batch);
+    setShowRecallModal(true);
+  }, []);
+
+  const handleRecallSuccess = useCallback((result) => {
+    toast.success(`Batch recalled: ${result.totalAffectedBatches} batch(es) affected`);
+    loadBatches(); // Refresh batches
+    setShowRecallModal(false);
+    setSelectedBatchForRecall(null);
+  }, [loadBatches]);
 
   // Loading state
   if (loading && !dashboardData) {
@@ -903,6 +919,7 @@ const FarmerDashboard = () => {
                     key={batch.id}
                     batch={batch}
                     onViewDetails={handleViewBatch}
+                    onRecall={handleRecallBatch}
                     showActions={true}
                   />
                 ))}
@@ -934,6 +951,17 @@ const FarmerDashboard = () => {
           </button>
         </div>
       )}
+
+      {/* Recall Batch Modal */}
+      <RecallBatchModal
+        isOpen={showRecallModal}
+        batch={selectedBatchForRecall}
+        onClose={() => {
+          setShowRecallModal(false);
+          setSelectedBatchForRecall(null);
+        }}
+        onSuccess={handleRecallSuccess}
+      />
     </div>
   );
 };

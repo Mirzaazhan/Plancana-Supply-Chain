@@ -6,9 +6,10 @@ import { useAuth } from '../../context/AuthContext';
 import { retailerService, dashboardService, pricingService } from '../../services/api';
 import { toast } from 'react-hot-toast';
 import PricingModal from './PricingModal';
+import RecallBatchModal from './RecallBatchModal';
 import {
   Package, ShoppingCart, CheckCircle, Store, TrendingUp, BarChart3,
-  Filter, RefreshCw, ArrowRight, Eye, DollarSign, XCircle
+  Filter, RefreshCw, ArrowRight, Eye, DollarSign, XCircle, ShieldAlert
 } from 'lucide-react';
 
 const RetailerDashboard = () => {
@@ -27,7 +28,9 @@ const RetailerDashboard = () => {
 
   // Modal states
   const [showPricingModal, setShowPricingModal] = useState(false);
+  const [showRecallModal, setShowRecallModal] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState(null);
+  const [selectedBatchForRecall, setSelectedBatchForRecall] = useState(null);
 
   useEffect(() => {
     fetchDashboardData();
@@ -150,6 +153,19 @@ const RetailerDashboard = () => {
     }
   };
 
+  // Recall handlers
+  const handleRecallBatch = (batch) => {
+    setSelectedBatchForRecall(batch);
+    setShowRecallModal(true);
+  };
+
+  const handleRecallSuccess = (result) => {
+    toast.success(`Batch recalled: ${result.totalAffectedBatches} batch(es) affected`);
+    fetchDashboardData(); // Refresh data
+    setShowRecallModal(false);
+    setSelectedBatchForRecall(null);
+  };
+
   const StatCard = ({ title, value, icon: Icon, color = 'blue', description, trend }) => {
     const colorClasses = {
       green: 'bg-green-100 text-green-600',
@@ -223,38 +239,50 @@ const RetailerDashboard = () => {
       </div>
 
       {showActions && (
-        <div className="flex space-x-3">
-          {batchType === 'available' && batch.status === 'RETAIL_READY' && (
+        <div className="space-y-3">
+          <div className="flex space-x-3">
+            {batchType === 'available' && batch.status === 'RETAIL_READY' && (
+              <button
+                onClick={() => handleReceiveBatch(batch.batchId)}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center"
+              >
+                <ShoppingCart className="h-4 w-4 mr-2" />
+                Receive Batch
+              </button>
+            )}
+            {batchType === 'inStock' && batch.status === 'IN_RETAIL' && (
+              <>
+                <button
+                  onClick={() => handleAddPricing(batch)}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center"
+                >
+                  <DollarSign className="h-4 w-4 mr-2" />
+                  Set Retail Price
+                </button>
+                <button
+                  onClick={() => handleMarkAsSold(batch)}
+                  className="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center"
+                >
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  Mark as SOLD
+                </button>
+              </>
+            )}
+            <button className="px-4 py-2 text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 rounded-lg font-medium transition-colors flex items-center justify-center">
+              <Eye className="h-4 w-4 mr-2" />
+              View Details
+            </button>
+          </div>
+          {/* Recall button - only for in-stock batches */}
+          {batchType === 'inStock' && batch.status === 'IN_RETAIL' && batch.status !== 'RECALLED' && (
             <button
-              onClick={() => handleReceiveBatch(batch.batchId)}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center"
+              onClick={() => handleRecallBatch(batch)}
+              className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center"
             >
-              <ShoppingCart className="h-4 w-4 mr-2" />
-              Receive Batch
+              <ShieldAlert className="h-4 w-4 mr-2" />
+              Recall Batch
             </button>
           )}
-          {batchType === 'inStock' && batch.status === 'IN_RETAIL' && (
-            <>
-              <button
-                onClick={() => handleAddPricing(batch)}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center"
-              >
-                <DollarSign className="h-4 w-4 mr-2" />
-                Set Retail Price
-              </button>
-              <button
-                onClick={() => handleMarkAsSold(batch)}
-                className="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center"
-              >
-                <CheckCircle className="h-4 w-4 mr-2" />
-                Mark as SOLD
-              </button>
-            </>
-          )}
-          <button className="px-4 py-2 text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 rounded-lg font-medium transition-colors flex items-center justify-center">
-            <Eye className="h-4 w-4 mr-2" />
-            View Details
-          </button>
         </div>
       )}
     </div>
@@ -473,6 +501,17 @@ const RetailerDashboard = () => {
           setSelectedBatch(null);
         }}
         onSubmit={handlePricingSubmit}
+      />
+
+      {/* Recall Batch Modal */}
+      <RecallBatchModal
+        isOpen={showRecallModal}
+        batch={selectedBatchForRecall}
+        onClose={() => {
+          setShowRecallModal(false);
+          setSelectedBatchForRecall(null);
+        }}
+        onSuccess={handleRecallSuccess}
       />
     </div>
   );

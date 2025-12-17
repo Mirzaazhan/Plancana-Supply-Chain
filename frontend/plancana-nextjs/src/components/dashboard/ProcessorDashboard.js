@@ -12,6 +12,7 @@ import { toast } from "react-hot-toast";
 import PricingModal from "./PricingModal";
 import ProcessingStartModal from "./ProcessingStartModal";
 import BatchSplitModal from "./BatchSplitModal";
+import RecallBatchModal from "./RecallBatchModal";
 import {
   Package,
   Clock,
@@ -26,6 +27,7 @@ import {
   Square,
   Settings as SettingsIcon,
   Scissors,
+  ShieldAlert,
 } from "lucide-react";
 
 const ProcessorDashboard = () => {
@@ -46,7 +48,9 @@ const ProcessorDashboard = () => {
   const [showProcessingStartModal, setShowProcessingStartModal] =
     useState(false);
   const [showSplitModal, setShowSplitModal] = useState(false);
+  const [showRecallModal, setShowRecallModal] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState(null);
+  const [selectedBatchForRecall, setSelectedBatchForRecall] = useState(null);
 
   useEffect(() => {
     fetchDashboardData();
@@ -199,6 +203,19 @@ const ProcessorDashboard = () => {
     fetchDashboardData(); // Refresh data to show updated batches
   };
 
+  // Recall handlers
+  const handleRecallBatch = (batch) => {
+    setSelectedBatchForRecall(batch);
+    setShowRecallModal(true);
+  };
+
+  const handleRecallSuccess = (result) => {
+    toast.success(`Batch recalled: ${result.totalAffectedBatches} batch(es) affected`);
+    fetchDashboardData(); // Refresh data
+    setShowRecallModal(false);
+    setSelectedBatchForRecall(null);
+  };
+
   const StatCard = ({
     title,
     value,
@@ -290,38 +307,50 @@ const ProcessorDashboard = () => {
       </div>
 
       {showActions && (
-        <div className="flex space-x-3">
-          {batch.status === "REGISTERED" && (
+        <div className="space-y-3">
+          <div className="flex space-x-3">
+            {batch.status === "REGISTERED" && (
+              <button
+                onClick={() => handleStartProcessing(batch)}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center"
+              >
+                <Play className="h-4 w-4 mr-2" />
+                Start Processing
+              </button>
+            )}
+            {batch.status === "PROCESSING" && (
+              <button
+                onClick={() => handleCompleteProcessing(batch)}
+                className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center"
+              >
+                <CheckCircle className="h-4 w-4 mr-2" />
+                Complete Processing
+              </button>
+            )}
+            {(batch.status === "PROCESSED" || batch.status === "PROCESSING") && (
+              <button
+                onClick={() => handleSplitBatch(batch)}
+                className="px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center"
+              >
+                <Scissors className="h-4 w-4 mr-2" />
+                Split
+              </button>
+            )}
+            <button className="px-4 py-2 text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 rounded-lg font-medium transition-colors flex items-center justify-center">
+              <Eye className="h-4 w-4 mr-2" />
+              View Details
+            </button>
+          </div>
+          {/* Recall button - only for batches processor is working on */}
+          {batch.status === "PROCESSING" && batch.status !== "RECALLED" && (
             <button
-              onClick={() => handleStartProcessing(batch)}
-              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center"
+              onClick={() => handleRecallBatch(batch)}
+              className="w-full bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center"
             >
-              <Play className="h-4 w-4 mr-2" />
-              Start Processing
+              <ShieldAlert className="h-4 w-4 mr-2" />
+              Recall Batch
             </button>
           )}
-          {batch.status === "PROCESSING" && (
-            <button
-              onClick={() => handleCompleteProcessing(batch)}
-              className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center"
-            >
-              <CheckCircle className="h-4 w-4 mr-2" />
-              Complete Processing
-            </button>
-          )}
-          {(batch.status === "PROCESSED" || batch.status === "PROCESSING") && (
-            <button
-              onClick={() => handleSplitBatch(batch)}
-              className="px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center"
-            >
-              <Scissors className="h-4 w-4 mr-2" />
-              Split
-            </button>
-          )}
-          <button className="px-4 py-2 text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 rounded-lg font-medium transition-colors flex items-center justify-center">
-            <Eye className="h-4 w-4 mr-2" />
-            View Details
-          </button>
         </div>
       )}
     </div>
@@ -572,6 +601,17 @@ const ProcessorDashboard = () => {
           setSelectedBatch(null);
         }}
         onSuccess={handleSplitSuccess}
+      />
+
+      {/* Recall Batch Modal */}
+      <RecallBatchModal
+        isOpen={showRecallModal}
+        batch={selectedBatchForRecall}
+        onClose={() => {
+          setShowRecallModal(false);
+          setSelectedBatchForRecall(null);
+        }}
+        onSuccess={handleRecallSuccess}
       />
     </div>
   );

@@ -11,6 +11,7 @@ import {
 import { toast } from "react-hot-toast";
 import PricingModal from "./PricingModal";
 import BatchSplitModal from "./BatchSplitModal";
+import RecallBatchModal from "./RecallBatchModal";
 import LocationInput from "../ui/LocationInput";
 import {
   Package,
@@ -26,6 +27,7 @@ import {
   MapPin,
   Clock,
   Scissors,
+  ShieldAlert,
 } from "lucide-react";
 
 const DistributorDashboard = () => {
@@ -48,6 +50,7 @@ const DistributorDashboard = () => {
   const [showDistributionModal, setShowDistributionModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [showSplitModal, setShowSplitModal] = useState(false);
+  const [showRecallModal, setShowRecallModal] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState(null);
 
   // Distribution form state
@@ -359,6 +362,17 @@ const DistributorDashboard = () => {
     fetchDashboardData(); // Refresh data to show updated batches
   };
 
+  // Recall handlers
+  const handleRecallBatch = (batch) => {
+    setSelectedBatch(batch);
+    setShowRecallModal(true);
+  };
+
+  const handleRecallSuccess = (result) => {
+    toast.success(`Batch recalled: ${result.totalAffectedBatches} batch(es) affected`);
+    fetchDashboardData(); // Refresh data to show updated batches
+  };
+
   const submitTransferToRetailer = async () => {
     try {
       if (!transferData.toRetailerId) {
@@ -518,6 +532,13 @@ const DistributorDashboard = () => {
               Transfer
             </button>
           </div>
+          <button
+            onClick={() => handleRecallBatch(batch)}
+            className="w-full mt-2 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm flex items-center justify-center"
+          >
+            <ShieldAlert className="h-4 w-4 mr-1" />
+            Recall Batch
+          </button>
         </div>
       )}
     </div>
@@ -735,9 +756,20 @@ const DistributorDashboard = () => {
         onSuccess={handleSplitSuccess}
       />
 
+      {/* Recall Batch Modal */}
+      <RecallBatchModal
+        isOpen={showRecallModal}
+        batch={selectedBatch}
+        onClose={() => {
+          setShowRecallModal(false);
+          setSelectedBatch(null);
+        }}
+        onSuccess={handleRecallSuccess}
+      />
+
       {/* Distribution Record Modal */}
       {showDistributionModal && selectedBatch && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-bold mb-4">Add Distribution Record</h2>
             <p className="text-gray-600 mb-6">Batch: {selectedBatch.batchId}</p>
@@ -989,7 +1021,7 @@ const DistributorDashboard = () => {
 
       {/* Transfer to Retailer Modal */}
       {showTransferModal && selectedBatch && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
             <h2 className="text-2xl font-bold mb-4">Transfer to Retailer</h2>
             <p className="text-gray-600 mb-6">Batch: {selectedBatch.batchId}</p>

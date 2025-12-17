@@ -303,6 +303,14 @@ model Batch {
   customCertification String? // Custom certification if not in dropdown
   myGapCertNumber     String? // myGAP Certificate Number (database only, not on blockchain)
 
+  // Recall Information
+  recallReason   String?   // Reason for recall (contamination, quality issue, etc.)
+  recallSeverity String?   // LOW, MEDIUM, HIGH, CRITICAL
+  recallNotes    String?   // Additional notes about the recall
+  recalledAt     DateTime? // When the batch was recalled
+  recalledBy     String?   // User ID who initiated the recall
+  recalledByRole String?   // Role of user who recalled (ADMIN, REGULATOR, etc.)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

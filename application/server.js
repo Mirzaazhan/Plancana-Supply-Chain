@@ -3287,6 +3287,258 @@ app.get("/api/batch/:batchId/lineage", authenticate, async (req, res) => {
   }
 });
 
+// Recall a batch - marks batch as RECALLED for safety/quality issues
+app.post(
+  "/api/batch/:batchId/recall",
+  authenticate,
+  authorize(["ADMIN", "REGULATOR", "FARMER", "PROCESSOR", "DISTRIBUTOR", "RETAILER"]),
+  async (req, res) => {
+    let gateway = null;
+    try {
+      const { batchId } = req.params;
+      const { reason, severity, notes, recallChildren } = req.body;
+
+      // Validate required fields
+      if (!reason || !reason.trim()) {
+        return res.status(400).json({
+          success: false,
+          error: "Recall reason is required",
+        });
+      }
+
+      // Find the batch in database with farmer info
+      const dbBatch = await prisma.batch.findFirst({
+        where: { batchId: batchId },
+        include: {
+          farmer: {
+            select: { userId: true }
+          },
+          childBatches: {
+            select: { id: true, batchId: true, quantity: true, unit: true, status: true }
+          }
+        }
+      });
+
+      if (!dbBatch) {
+        return res.status(404).json({
+          success: false,
+          error: "Batch not found",
+        });
+      }
+
+      // Authorization check: Only farmer (creator) or current owner can recall
+      // ADMIN and REGULATOR can always recall
+      const isAdmin = req.user.role === 'ADMIN';
+      const isRegulator = req.user.role === 'REGULATOR';
+      const isFarmer = dbBatch.farmer?.userId === req.user.id;
+
+      // Check if user is current owner via BatchTransfer
+      let isCurrentOwner = false;
+      if (!isAdmin && !isRegulator && !isFarmer) {
+        const latestTransfer = await prisma.batchTransfer.findFirst({
+          where: {
+            batchId: batchId,
+            status: 'COMPLETED'
+          },
+          orderBy: { transferDate: 'desc' }
+        });
+
+        if (latestTransfer && latestTransfer.toActorId === req.user.id) {
+          isCurrentOwner = true;
+        }
+      }
+
+      if (!isAdmin && !isRegulator && !isFarmer && !isCurrentOwner) {
+        return res.status(403).json({
+          success: false,
+          error: "Only the batch creator (farmer) or current owner can recall this batch",
+        });
+      }
+
+      // Check if already recalled
+      if (dbBatch.status === 'RECALLED') {
+        return res.status(400).json({
+          success: false,
+          error: "Batch is already recalled",
+        });
+      }
+
+      // Connect to blockchain
+      let contract = null;
+      try {
+        const connection = await blockchainService.connectToNetwork();
+        gateway = connection.gateway;
+        contract = connection.contract;
+      } catch (bcConnError) {
+        console.warn("Blockchain connection failed, continuing with database only:", bcConnError.message);
+      }
+
+      // Record on blockchain first
+      let blockchainResult = null;
+      if (contract) {
+        try {
+          const recallData = JSON.stringify({
+            reason: reason,
+            severity: severity || 'HIGH',
+            recalledBy: req.user.id,
+            recalledByRole: req.user.role,
+            notes: notes || null,
+            recallChildren: recallChildren || false
+          });
+
+          const result = await contract.submitTransaction(
+            "recallBatch",
+            batchId,
+            recallData
+          );
+          blockchainResult = JSON.parse(result.toString());
+          console.log(`Batch recall recorded on blockchain: ${batchId}`);
+        } catch (blockchainError) {
+          console.error("Blockchain recall error:", blockchainError);
+          // Continue with database-only if blockchain fails
+        }
+      }
+
+      // Update batch status and recall details in database
+      const previousStatus = dbBatch.status;
+      const recallDate = new Date();
+      const updatedBatch = await prisma.batch.update({
+        where: { id: dbBatch.id },
+        data: {
+          status: 'RECALLED',
+          recallReason: reason,
+          recallSeverity: severity || 'HIGH',
+          recallNotes: notes || null,
+          recalledAt: recallDate,
+          recalledBy: req.user.id,
+          recalledByRole: req.user.role,
+        },
+      });
+
+      // Track affected batches
+      const affectedBatches = [{
+        batchId: batchId,
+        quantity: dbBatch.quantity,
+        unit: dbBatch.unit,
+        previousStatus: previousStatus
+      }];
+
+      // Recall child batches if requested
+      if (recallChildren && dbBatch.childBatches && dbBatch.childBatches.length > 0) {
+        for (const child of dbBatch.childBatches) {
+          if (child.status !== 'RECALLED') {
+            await prisma.batch.update({
+              where: { id: child.id },
+              data: {
+                status: 'RECALLED',
+                recallReason: `Cascade recall from parent batch ${batchId}: ${reason}`,
+                recallSeverity: severity || 'HIGH',
+                recallNotes: `Parent batch recalled. Original reason: ${reason}`,
+                recalledAt: recallDate,
+                recalledBy: req.user.id,
+                recalledByRole: req.user.role,
+              },
+            });
+
+            affectedBatches.push({
+              batchId: child.batchId,
+              quantity: child.quantity,
+              unit: child.unit,
+              previousStatus: child.status,
+              cascadeRecall: true
+            });
+          }
+        }
+      }
+
+      // Log the recall activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "BATCH_RECALL",
+          resource: batchId,
+          metadata: {
+            reason: reason,
+            severity: severity || 'HIGH',
+            affectedBatches: affectedBatches.length,
+            recallChildren: recallChildren || false,
+            notes: notes
+          },
+        },
+      });
+
+      // Disconnect gateway
+      if (gateway) {
+        await gateway.disconnect();
+      }
+
+      res.status(200).json({
+        success: true,
+        message: `Batch ${batchId} has been recalled`,
+        recallInfo: {
+          reason: reason,
+          severity: severity || 'HIGH',
+          recalledBy: req.user.id,
+          recalledByRole: req.user.role,
+          recallDate: new Date().toISOString(),
+        },
+        affectedBatches: affectedBatches,
+        totalAffectedBatches: affectedBatches.length,
+        blockchainRecorded: !!blockchainResult,
+        blockchainTxId: blockchainResult?.txId || null,
+      });
+    } catch (error) {
+      console.error("Batch recall error:", error);
+      if (gateway) {
+        try { await gateway.disconnect(); } catch (e) {}
+      }
+      res.status(500).json({
+        success: false,
+        error: "Failed to recall batch",
+        details: error.message,
+      });
+    }
+  }
+);
+
+// Check if a batch is recalled
+app.get(
+  "/api/batch/:batchId/recall-status",
+  authenticate,
+  async (req, res) => {
+    try {
+      const { batchId } = req.params;
+
+      const batch = await prisma.batch.findFirst({
+        where: { batchId: batchId },
+        select: {
+          batchId: true,
+          status: true,
+        },
+      });
+
+      if (!batch) {
+        return res.status(404).json({
+          success: false,
+          error: "Batch not found",
+        });
+      }
+
+      res.json({
+        success: true,
+        batchId: batchId,
+        isRecalled: batch.status === 'RECALLED',
+      });
+    } catch (error) {
+      console.error("Check recall status error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to check recall status",
+      });
+    }
+  }
+);
+
 // ===============================
 // PROCESSOR ENDPOINTS
 // ===============================

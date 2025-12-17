@@ -1590,6 +1590,171 @@ class AgriculturalContract extends Contract {
         console.info(`============= END : Get Batch Lineage ${batchId} ===========`);
         return JSON.stringify(lineage);
     }
+
+    // Recall a batch - marks batch and optionally its children as RECALLED
+    async recallBatch(ctx, batchId, recallData) {
+        console.info(`============= START : Recall Batch ${batchId} ===========`);
+
+        // Check if batch exists
+        const exists = await this.batchExists(ctx, batchId);
+        if (!exists) {
+            throw new Error(`The batch ${batchId} does not exist`);
+        }
+
+        const batchAsBytes = await ctx.stub.getState(batchId);
+        const batch = JSON.parse(batchAsBytes.toString());
+        const timestamp = ctx.stub.getTxTimestamp();
+        const txId = ctx.stub.getTxID();
+
+        // Parse recall data
+        let recall = {};
+        try {
+            recall = typeof recallData === 'string' ? JSON.parse(recallData) : recallData;
+        } catch (error) {
+            throw new Error('Invalid recall data provided');
+        }
+
+        // Validate required fields
+        if (!recall.reason) {
+            throw new Error('Recall reason is required');
+        }
+
+        // Check if batch is already recalled
+        if (batch.status === 'RECALLED') {
+            throw new Error(`Batch ${batchId} is already recalled`);
+        }
+
+        // Store previous status
+        const previousStatus = batch.status;
+
+        // Update batch status to RECALLED
+        batch.status = 'RECALLED';
+        batch.recallInfo = {
+            reason: recall.reason,
+            severity: recall.severity || 'HIGH',
+            recalledBy: recall.recalledBy,
+            recalledByRole: recall.recalledByRole,
+            recallDate: timestamp.seconds.low + "." + timestamp.nanos,
+            affectedQuantity: batch.quantity,
+            notes: recall.notes || null,
+            txId: txId
+        };
+        batch.lastUpdated = timestamp.seconds.low + "." + timestamp.nanos;
+
+        // Add to status history
+        if (!batch.statusHistory) batch.statusHistory = [];
+        batch.statusHistory.push({
+            status: 'RECALLED',
+            previousStatus: previousStatus,
+            updatedBy: recall.recalledBy,
+            timestamp: timestamp.seconds.low + "." + timestamp.nanos,
+            txId: txId,
+            notes: `RECALL: ${recall.reason}. Severity: ${recall.severity || 'HIGH'}`
+        });
+
+        // Save the recalled batch
+        await ctx.stub.putState(batchId, Buffer.from(JSON.stringify(batch)));
+
+        // Track recalled batches (including children if requested)
+        const recalledBatches = [{
+            batchId: batchId,
+            quantity: batch.quantity,
+            unit: batch.unit,
+            previousStatus: previousStatus
+        }];
+
+        // Optionally recall child batches
+        if (recall.recallChildren && batch.childBatches && batch.childBatches.length > 0) {
+            for (const child of batch.childBatches) {
+                try {
+                    const childBytes = await ctx.stub.getState(child.batchId);
+                    if (childBytes && childBytes.length > 0) {
+                        const childBatch = JSON.parse(childBytes.toString());
+
+                        if (childBatch.status !== 'RECALLED') {
+                            const childPreviousStatus = childBatch.status;
+                            childBatch.status = 'RECALLED';
+                            childBatch.recallInfo = {
+                                reason: `Parent batch ${batchId} recalled: ${recall.reason}`,
+                                severity: recall.severity || 'HIGH',
+                                recalledBy: recall.recalledBy,
+                                recalledByRole: recall.recalledByRole,
+                                recallDate: timestamp.seconds.low + "." + timestamp.nanos,
+                                affectedQuantity: childBatch.quantity,
+                                parentRecallId: batchId,
+                                notes: `Cascade recall from parent batch`,
+                                txId: txId
+                            };
+                            childBatch.lastUpdated = timestamp.seconds.low + "." + timestamp.nanos;
+
+                            if (!childBatch.statusHistory) childBatch.statusHistory = [];
+                            childBatch.statusHistory.push({
+                                status: 'RECALLED',
+                                previousStatus: childPreviousStatus,
+                                updatedBy: recall.recalledBy,
+                                timestamp: timestamp.seconds.low + "." + timestamp.nanos,
+                                txId: txId,
+                                notes: `CASCADE RECALL from parent ${batchId}`
+                            });
+
+                            await ctx.stub.putState(child.batchId, Buffer.from(JSON.stringify(childBatch)));
+
+                            recalledBatches.push({
+                                batchId: child.batchId,
+                                quantity: childBatch.quantity,
+                                unit: childBatch.unit,
+                                previousStatus: childPreviousStatus,
+                                cascadeRecall: true
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`Could not recall child batch ${child.batchId}: ${error.message}`);
+                }
+            }
+        }
+
+        // Emit recall event
+        ctx.stub.setEvent('BatchRecalled', Buffer.from(JSON.stringify({
+            batchId: batchId,
+            reason: recall.reason,
+            severity: recall.severity || 'HIGH',
+            recalledBy: recall.recalledBy,
+            recalledByRole: recall.recalledByRole,
+            recallDate: timestamp.seconds.low + "." + timestamp.nanos,
+            affectedBatches: recalledBatches,
+            totalAffectedBatches: recalledBatches.length,
+            txId: txId
+        })));
+
+        console.info(`============= END : Recall Batch ${batchId} - ${recalledBatches.length} batches affected ===========`);
+
+        return JSON.stringify({
+            success: true,
+            message: `Batch ${batchId} has been recalled`,
+            recallInfo: batch.recallInfo,
+            affectedBatches: recalledBatches,
+            totalAffectedBatches: recalledBatches.length,
+            txId: txId
+        });
+    }
+
+    // Check if a batch is recalled
+    async isRecalled(ctx, batchId) {
+        const exists = await this.batchExists(ctx, batchId);
+        if (!exists) {
+            throw new Error(`The batch ${batchId} does not exist`);
+        }
+
+        const batchAsBytes = await ctx.stub.getState(batchId);
+        const batch = JSON.parse(batchAsBytes.toString());
+
+        return JSON.stringify({
+            batchId: batchId,
+            isRecalled: batch.status === 'RECALLED',
+            recallInfo: batch.recallInfo || null
+        });
+    }
 }
 
 module.exports = AgriculturalContract;

@@ -1,8 +1,9 @@
 // components/batch/BatchCard.js
 import React, { useState } from 'react';
 import QRCodeModal from './QRCodeModal';
+import { ShieldAlert } from 'lucide-react';
 
-const BatchCard = ({ batch, onViewDetails, showActions = true }) => {
+const BatchCard = ({ batch, onViewDetails, onRecall, showActions = true }) => {
   const [showQRModal, setShowQRModal] = useState(false);
 
   const getStatusColor = (status) => {
@@ -47,6 +48,16 @@ const BatchCard = ({ batch, onViewDetails, showActions = true }) => {
       onViewDetails(batch.batchId);
     }
   };
+
+  const handleRecall = (e) => {
+    e.stopPropagation();
+    if (onRecall) {
+      onRecall(batch);
+    }
+  };
+
+  // Don't show recall for already recalled batches
+  const canRecall = onRecall && batch.status !== 'RECALLED';
 
   return (
     <>
@@ -152,27 +163,40 @@ const BatchCard = ({ batch, onViewDetails, showActions = true }) => {
 
           {/* Action Buttons */}
           {showActions && (
-            <div className="flex space-x-2">
-              <button
-                onClick={handleViewDetails}
-                className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium py-2 px-3 rounded-md transition-colors duration-200 flex items-center justify-center space-x-1"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-                <span>View</span>
-              </button>
-              
-              <button
-                onClick={handleGenerateQR}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-3 rounded-md transition-colors duration-200 flex items-center justify-center space-x-1"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
-                </svg>
-                <span>QR Code</span>
-              </button>
+            <div className="space-y-2">
+              <div className="flex space-x-2">
+                <button
+                  onClick={handleViewDetails}
+                  className="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium py-2 px-3 rounded-md transition-colors duration-200 flex items-center justify-center space-x-1"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                  <span>View</span>
+                </button>
+
+                <button
+                  onClick={handleGenerateQR}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white text-sm font-medium py-2 px-3 rounded-md transition-colors duration-200 flex items-center justify-center space-x-1"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                  </svg>
+                  <span>QR Code</span>
+                </button>
+              </div>
+
+              {/* Recall Button - only shown if onRecall handler is provided and batch not already recalled */}
+              {canRecall && (
+                <button
+                  onClick={handleRecall}
+                  className="w-full bg-red-600 hover:bg-red-700 text-white text-sm font-medium py-2 px-3 rounded-md transition-colors duration-200 flex items-center justify-center space-x-1"
+                >
+                  <ShieldAlert className="h-4 w-4" />
+                  <span>Recall Batch</span>
+                </button>
+              )}
             </div>
           )}
         </div>

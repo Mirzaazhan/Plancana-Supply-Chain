@@ -119,7 +119,14 @@ export const batchService = {
     api.post(`/batch/${batchId}/split`, splitData),
 
   // Get batch lineage (parent/child relationships)
-  getBatchLineage: (batchId: string) => api.get(`/batch/${batchId}/lineage`)
+  getBatchLineage: (batchId: string) => api.get(`/batch/${batchId}/lineage`),
+
+  // Batch recall
+  recallBatch: (batchId: string, recallData: { reason: string; severity?: string; notes?: string; recallChildren?: boolean }) =>
+    api.post(`/batch/${batchId}/recall`, recallData),
+
+  // Check if batch is recalled
+  getRecallStatus: (batchId: string) => api.get(`/batch/${batchId}/recall-status`)
 };
 
 // Dashboard service
