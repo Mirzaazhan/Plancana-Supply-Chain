@@ -241,7 +241,7 @@ const ProfileManagement = () => {
                                 imagePreview
                                   ? imagePreview.startsWith('http') 
                                     ? imagePreview 
-                                    : `http://localhost:3001${imagePreview}`
+                                    : `${process.env.NEXT_PUBLIC_API_URL?.replace('/api', '')}${imagePreview}`
                                   : '/default-avatar.png'
                               }
                             alt="Profile"

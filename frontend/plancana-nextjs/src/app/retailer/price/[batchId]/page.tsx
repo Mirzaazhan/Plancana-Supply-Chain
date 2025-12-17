@@ -47,7 +47,7 @@ export default function RetailerPricePage() {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:3000/api/batch/${batchId}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/batch/${batchId}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -129,7 +129,7 @@ export default function RetailerPricePage() {
         breakdown.markup = parseFloat(formData.costBreakdown.markup);
       }
 
-      const response = await fetch(`http://localhost:3000/api/pricing/add`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/pricing/add`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

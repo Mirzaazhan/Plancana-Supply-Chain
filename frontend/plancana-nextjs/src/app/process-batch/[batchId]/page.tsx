@@ -41,7 +41,7 @@ export default function ProcessBatchPage() {
       setError(null);
 
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:3000/api/batch/validate-access/${batchId}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/batch/validate-access/${batchId}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'

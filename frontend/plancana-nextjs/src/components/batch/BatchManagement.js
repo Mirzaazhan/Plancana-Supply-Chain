@@ -53,17 +53,17 @@ const BatchManagement = ({
       
       // Different endpoints based on user role
       if (currentUser?.role === 'FARMER') {
-        endpoint = 'http://localhost:3000/api/farmer/my-batches';
+        endpoint = `${process.env.NEXT_PUBLIC_API_URL}/farmer/my-batches`;
       } else if (['ADMIN', 'REGULATOR'].includes(currentUser?.role)) {
         const params = new URLSearchParams({
           page: currentPage,
           limit: itemsPerPage,
           ...(statusFilter !== 'all' && { status: statusFilter })
         });
-        endpoint = `http://localhost:3000/api/batches?${params}`;
+        endpoint = `${process.env.NEXT_PUBLIC_API_URL}/batches?${params}`;
       } else {
         // For other roles, get their relevant batches
-        endpoint = 'http://localhost:3000/api/farmer/my-batches';
+        endpoint = `${process.env.NEXT_PUBLIC_API_URL}/farmer/my-batches`;
       }
 
       const response = await fetch(endpoint, {

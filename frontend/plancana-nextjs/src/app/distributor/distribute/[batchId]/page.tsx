@@ -55,7 +55,7 @@ export default function DistributorDistributePage() {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:3000/api/batch/${batchId}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/batch/${batchId}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -100,7 +100,7 @@ export default function DistributorDistributePage() {
       setSubmitting(true);
       const token = localStorage.getItem('token');
 
-      const response = await fetch(`http://localhost:3000/api/distributor/add-distribution/${batchId}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/distributor/add-distribution/${batchId}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

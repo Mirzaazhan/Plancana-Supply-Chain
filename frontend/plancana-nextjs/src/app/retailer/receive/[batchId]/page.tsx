@@ -38,7 +38,7 @@ export default function RetailerReceivePage() {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:3000/api/batch/${batchId}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/batch/${batchId}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -76,7 +76,7 @@ export default function RetailerReceivePage() {
       setSubmitting(true);
       const token = localStorage.getItem('token');
 
-      const response = await fetch(`http://localhost:3000/api/retailer/receive/${batchId}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/retailer/receive/${batchId}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,

@@ -39,7 +39,7 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:3000/api/batch/${batchId}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/batch/${batchId}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
@@ -62,7 +62,7 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
   const fetchQRCode = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:3000/api/qr/${batchId}`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/qr/${batchId}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -122,7 +122,7 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
     try {
       setUpdating(true);
       const token = localStorage.getItem('token');
-      const response = await fetch(`http://localhost:3000/api/batch/${batch.id}/status`, {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/batch/${batch.id}/status`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,

@@ -138,7 +138,7 @@ const Layout = ({ children }) => {
     return imagePath
       ? imagePath.startsWith("http")
         ? imagePath
-        : `http://localhost:3000${imagePath}` // Replace with your backend URL
+        : `${process.env.NEXT_PUBLIC_API_URL?.replace('/api', '')}${imagePath}`
       : null;
   };
 

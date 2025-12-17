@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-const EXPRESS_API_URL = "http://localhost:3000";
+const EXPRESS_API_URL = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || "http://localhost:3000";
 
 export async function GET(request: NextRequest) {
   try {
