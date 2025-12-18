@@ -23,17 +23,26 @@ const PricingDisplay = ({ pricingHistory, markup }) => {
     );
   }
 
-  const levels = ['PROCESSOR', 'DISTRIBUTOR', 'RETAILER'];
+  const levels = ['FARMER', 'PROCESSOR', 'DISTRIBUTOR', 'RETAILER'];
   const levelColors = {
+    FARMER: 'bg-green-50 border-green-200 text-green-700',
     PROCESSOR: 'bg-blue-50 border-blue-200 text-blue-700',
     DISTRIBUTOR: 'bg-purple-50 border-purple-200 text-purple-700',
-    RETAILER: 'bg-green-50 border-green-200 text-green-700'
+    RETAILER: 'bg-orange-50 border-orange-200 text-orange-700'
   };
 
   const levelIcons = {
+    FARMER: '🌾',
     PROCESSOR: '🏭',
     DISTRIBUTOR: '🚚',
     RETAILER: '🏪'
+  };
+
+  const levelLabels = {
+    FARMER: 'Farm-Gate Price',
+    PROCESSOR: 'Processor Price',
+    DISTRIBUTOR: 'Distributor Price',
+    RETAILER: 'Retail Price'
   };
 
   return (
@@ -85,7 +94,7 @@ const PricingDisplay = ({ pricingHistory, markup }) => {
                   <div className="flex items-center">
                     <span className="text-2xl mr-2">{levelIcons[record.level] || '📦'}</span>
                     <div>
-                      <h5 className="font-semibold text-gray-900">{record.level}</h5>
+                      <h5 className="font-semibold text-gray-900">{levelLabels[record.level] || record.level}</h5>
                       <p className="text-xs text-gray-600">
                         {new Date(parseFloat(record.timestamp) * 1000).toLocaleDateString('en-MY', {
                           year: 'numeric',

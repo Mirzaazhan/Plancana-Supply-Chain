@@ -1,7 +1,7 @@
 // src/components/dashboard/ProcessorDashboard.js
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../context/AuthContext";
 import {
   processorService,
@@ -13,6 +13,7 @@ import PricingModal from "./PricingModal";
 import ProcessingStartModal from "./ProcessingStartModal";
 import BatchSplitModal from "./BatchSplitModal";
 import RecallBatchModal from "./RecallBatchModal";
+import BatchDetails from "../batch/BatchDetails";
 import {
   Package,
   Clock,
@@ -28,6 +29,7 @@ import {
   Settings as SettingsIcon,
   Scissors,
   ShieldAlert,
+  ArrowLeft,
 } from "lucide-react";
 
 const ProcessorDashboard = () => {
@@ -42,6 +44,10 @@ const ProcessorDashboard = () => {
     totalProcessed: 0,
   });
   const [loading, setLoading] = useState(true);
+
+  // View state for BatchDetails
+  const [currentView, setCurrentView] = useState("dashboard");
+  const [selectedBatchId, setSelectedBatchId] = useState(null);
 
   // Modal state
   const [showPricingModal, setShowPricingModal] = useState(false);
@@ -216,6 +222,18 @@ const ProcessorDashboard = () => {
     setSelectedBatchForRecall(null);
   };
 
+  // View Details handlers
+  const handleViewBatch = useCallback((batchId) => {
+    setSelectedBatchId(batchId);
+    setCurrentView("batchDetails");
+  }, []);
+
+  const handleBackToDashboard = useCallback(() => {
+    setCurrentView("dashboard");
+    setSelectedBatchId(null);
+    fetchDashboardData(); // Refresh data when coming back
+  }, []);
+
   const StatCard = ({
     title,
     value,
@@ -336,7 +354,10 @@ const ProcessorDashboard = () => {
                 Split
               </button>
             )}
-            <button className="px-4 py-2 text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 rounded-lg font-medium transition-colors flex items-center justify-center">
+            <button
+              onClick={() => handleViewBatch(batch.batchId)}
+              className="px-4 py-2 text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 rounded-lg font-medium transition-colors flex items-center justify-center"
+            >
               <Eye className="h-4 w-4 mr-2" />
               View Details
             </button>
@@ -355,6 +376,17 @@ const ProcessorDashboard = () => {
       )}
     </div>
   );
+
+  // Render Batch Details View
+  if (currentView === "batchDetails" && selectedBatchId) {
+    return (
+      <BatchDetails
+        batchId={selectedBatchId}
+        onBack={handleBackToDashboard}
+        currentUser={user}
+      />
+    );
+  }
 
   if (loading) {
     return (

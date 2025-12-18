@@ -1862,14 +1862,125 @@ app.get("/api/batch/:batchId", authenticate, async (req, res) => {
         },
         qualityTests: true,
         transactions: true,
+        parentBatch: {
+          select: { batchId: true, id: true }
+        },
       },
     });
 
     // Get distribution records (they use batchId as string, not relation)
-    const distributionRecords = await prisma.distributionRecord.findMany({
+    // For split batches: only include parent's records from BEFORE the split
+    const splitDate = dbBatch?.splitDate;
+
+    let distributionRecords = await prisma.distributionRecord.findMany({
       where: { batchId: batchId },
       orderBy: { distributionDate: "desc" },
     });
+
+    // For split batches: get parent's distribution records from BEFORE the split
+    if (dbBatch?.parentBatch?.batchId && splitDate) {
+      const parentDistributionRecords = await prisma.distributionRecord.findMany({
+        where: {
+          batchId: dbBatch.parentBatch.batchId,
+          distributionDate: { lt: splitDate }
+        },
+        orderBy: { distributionDate: "desc" },
+      });
+      distributionRecords = [...parentDistributionRecords, ...distributionRecords];
+    }
+
+    // For split batches, also fetch parent batch's processing records and transport routes
+    // Only records created BEFORE the split date
+    let parentProcessingRecords = [];
+    let parentTransportRoutes = [];
+    if (dbBatch?.parentBatch?.id && splitDate) {
+      parentProcessingRecords = await prisma.processingRecord.findMany({
+        where: {
+          batchId: dbBatch.parentBatch.id,
+          processingDate: { lt: splitDate }
+        },
+        include: {
+          processor: {
+            include: {
+              user: { select: { username: true } },
+            },
+          },
+          facility: true,
+        },
+        orderBy: { processingDate: "asc" },
+      });
+
+      parentTransportRoutes = await prisma.transportRoute.findMany({
+        where: {
+          batchId: dbBatch.parentBatch.id,
+          departureTime: { lt: splitDate }
+        },
+        include: {
+          distributor: {
+            include: {
+              user: { select: { username: true } },
+            },
+          },
+        },
+        orderBy: { departureTime: "asc" },
+      });
+    }
+
+    // Merge parent records with current batch records (parent records first, chronologically)
+    if (dbBatch && parentProcessingRecords.length > 0) {
+      dbBatch.processingRecords = [...parentProcessingRecords, ...dbBatch.processingRecords];
+    }
+    if (dbBatch && parentTransportRoutes.length > 0) {
+      dbBatch.transportRoutes = [...parentTransportRoutes, ...dbBatch.transportRoutes];
+    }
+
+    // Get transfer history for this batch
+    const transferBatchIds = [batchId];
+    if (dbBatch?.parentBatch?.batchId) {
+      transferBatchIds.push(dbBatch.parentBatch.batchId);
+    }
+
+    const transfers = await prisma.batchTransfer.findMany({
+      where: { batchId: { in: transferBatchIds } },
+      orderBy: { transferDate: "asc" },
+    });
+
+    // Enrich transfer history with actor usernames
+    const actorIds = [...new Set(transfers.flatMap(t => [t.fromActorId, t.toActorId]))];
+    const users = await prisma.user.findMany({
+      where: { id: { in: actorIds } },
+      select: {
+        id: true,
+        username: true,
+        farmerProfile: { select: { firstName: true, lastName: true, farmName: true } },
+        processorProfile: { select: { companyName: true } },
+        distributorProfile: { select: { companyName: true } },
+        retailerProfile: { select: { businessName: true } }
+      }
+    });
+
+    // Build user map with display names
+    const userMap = Object.fromEntries(users.map(u => {
+      let displayName = u.username;
+      if (u.farmerProfile) {
+        displayName = `${u.farmerProfile.firstName || ''} ${u.farmerProfile.lastName || ''}`.trim() || u.farmerProfile.farmName || u.username;
+      } else if (u.processorProfile?.companyName) {
+        displayName = u.processorProfile.companyName;
+      } else if (u.distributorProfile?.companyName) {
+        displayName = u.distributorProfile.companyName;
+      } else if (u.retailerProfile?.businessName) {
+        displayName = u.retailerProfile.businessName;
+      }
+      return [u.id, { username: u.username, displayName }];
+    }));
+
+    const transferHistory = transfers.map(t => ({
+      ...t,
+      fromActorUsername: userMap[t.fromActorId]?.username || null,
+      fromActorName: userMap[t.fromActorId]?.displayName || null,
+      toActorUsername: userMap[t.toActorId]?.username || null,
+      toActorName: userMap[t.toActorId]?.displayName || null,
+    }));
 
     // Get from blockchain
     const { gateway, contract } = await blockchainService.connectToNetwork();
@@ -1982,6 +2093,7 @@ app.get("/api/batch/:batchId", authenticate, async (req, res) => {
       batchId: batchId,
       batchData: responseData,
       distributionRecords: distributionRecords, // Location & quantity at distributor level
+      transferHistory: transferHistory, // Ownership transfer history (SC-01)
       blockchain: blockchainBatch
         ? formatBlockchainDates(blockchainBatch)
         : null,
@@ -3619,9 +3731,14 @@ app.post(
       } = req.body;
       const processorId = req.user.id;
 
-      // Find the batch
+      // Find the batch with farmer info for transfer record
       const batch = await prisma.batch.findUnique({
         where: { batchId: batchId },
+        include: {
+          farmer: {
+            select: { userId: true }
+          }
+        }
       });
 
       if (!batch) {
@@ -3644,6 +3761,23 @@ app.post(
         data: {
           status: "PROCESSING",
           updatedAt: new Date(),
+        },
+      });
+
+      // Create BatchTransfer record for ownership transfer from Farmer to Processor (SC-01)
+      await prisma.batchTransfer.create({
+        data: {
+          batchId: batchId,
+          fromActorId: batch.farmer?.userId || batch.farmerId,
+          fromActorRole: "FARMER",
+          toActorId: processorId,
+          toActorRole: "PROCESSOR",
+          transferType: "OWNERSHIP_TRANSFER",
+          transferDate: new Date(),
+          notes: `Batch received by processor for processing`,
+          status: "COMPLETED",
+          statusBefore: "REGISTERED",
+          statusAfter: "PROCESSING",
         },
       });
 
@@ -4013,6 +4147,8 @@ app.get("/api/batches/active-locations", async (req, res) => {
         cropType: true,
         quantity: true,
         productType: true,
+        parentBatchId: true, // Include parent batch ID for split batches
+        splitDate: true, // Include split date to filter inherited records
       },
     });
 
@@ -4044,8 +4180,24 @@ app.get("/api/batches/active-locations", async (req, res) => {
         });
       }
 
-      // 2. Get processing records
-      const processingRecords = await prisma.processingRecord.findMany({
+      // 2. Get processing records (include parent batch records for split batches)
+      // For split batches: only inherit parent records created BEFORE the split
+      let parentBatchStringId = null;
+      const splitDate = batch.splitDate; // When this batch was split from parent
+
+      if (batch.parentBatchId) {
+        // Get parent batch's string batchId for distribution records query
+        const parentBatch = await prisma.batch.findUnique({
+          where: { id: batch.parentBatchId },
+          select: { batchId: true }
+        });
+        if (parentBatch) {
+          parentBatchStringId = parentBatch.batchId;
+        }
+      }
+
+      // Get this batch's own processing records
+      let processingRecords = await prisma.processingRecord.findMany({
         where: { batchId: batch.id },
         orderBy: { processingDate: "asc" },
         select: {
@@ -4060,8 +4212,31 @@ app.get("/api/batches/active-locations", async (req, res) => {
         },
       });
 
+      // For split batches: also get parent's records that happened BEFORE the split
+      if (batch.parentBatchId && splitDate) {
+        const parentProcessingRecords = await prisma.processingRecord.findMany({
+          where: {
+            batchId: batch.parentBatchId,
+            processingDate: { lt: splitDate } // Only records BEFORE split
+          },
+          orderBy: { processingDate: "asc" },
+          select: {
+            latitude: true,
+            longitude: true,
+            processingLocation: true,
+            processingDate: true,
+            temperature: true,
+            humidity: true,
+            weather_main: true,
+            weather_desc: true,
+          },
+        });
+        // Merge: parent records first (chronologically), then this batch's records
+        processingRecords = [...parentProcessingRecords, ...processingRecords];
+      }
+
       // 3. Get transport routes
-      const transportRoutes = await prisma.transportRoute.findMany({
+      let transportRoutes = await prisma.transportRoute.findMany({
         where: { batchId: batch.id },
         orderBy: { departureTime: "asc" },
         select: {
@@ -4075,8 +4250,29 @@ app.get("/api/batches/active-locations", async (req, res) => {
         },
       });
 
+      // For split batches: get parent's transport routes BEFORE the split
+      if (batch.parentBatchId && splitDate) {
+        const parentTransportRoutes = await prisma.transportRoute.findMany({
+          where: {
+            batchId: batch.parentBatchId,
+            departureTime: { lt: splitDate }
+          },
+          orderBy: { departureTime: "asc" },
+          select: {
+            originLat: true,
+            originLng: true,
+            destinationLat: true,
+            destinationLng: true,
+            departureTime: true,
+            arrivalTime: true,
+            status: true,
+          },
+        });
+        transportRoutes = [...parentTransportRoutes, ...transportRoutes];
+      }
+
       // 4. Get distribution records
-      const distributionRecords = await prisma.distributionRecord.findMany({
+      let distributionRecords = await prisma.distributionRecord.findMany({
         where: { batchId: batch.batchId },
         orderBy: { distributionDate: "asc" },
         select: {
@@ -4091,7 +4287,30 @@ app.get("/api/batches/active-locations", async (req, res) => {
         },
       });
 
-      const retailerRecords = await prisma.batchTransfer.findMany({
+      // For split batches: get parent's distribution records BEFORE the split
+      if (parentBatchStringId && splitDate) {
+        const parentDistributionRecords = await prisma.distributionRecord.findMany({
+          where: {
+            batchId: parentBatchStringId,
+            distributionDate: { lt: splitDate }
+          },
+          orderBy: { distributionDate: "asc" },
+          select: {
+            warehouseLat: true,
+            warehouseLng: true,
+            warehouseLocation: true,
+            distributionDate: true,
+            temperature: true,
+            humidity: true,
+            weather_main: true,
+            weather_desc: true,
+          },
+        });
+        distributionRecords = [...parentDistributionRecords, ...distributionRecords];
+      }
+
+      // 5. Get retailer/transfer records
+      let retailerRecords = await prisma.batchTransfer.findMany({
         where: { batchId: batch.batchId },
         orderBy: { transferDate: "asc" },
         select: {
@@ -4103,8 +4322,32 @@ app.get("/api/batches/active-locations", async (req, res) => {
           humidity: true,
           weather_main: true,
           weather_desc: true,
+          transferDate: true,
         },
       });
+
+      // For split batches: get parent's transfers BEFORE the split
+      if (parentBatchStringId && splitDate) {
+        const parentRetailerRecords = await prisma.batchTransfer.findMany({
+          where: {
+            batchId: parentBatchStringId,
+            transferDate: { lt: splitDate }
+          },
+          orderBy: { transferDate: "asc" },
+          select: {
+            transferLocation: true,
+            latitude: true,
+            longitude: true,
+            notes: true,
+            temperature: true,
+            humidity: true,
+            weather_main: true,
+            weather_desc: true,
+            transferDate: true,
+          },
+        });
+        retailerRecords = [...parentRetailerRecords, ...retailerRecords];
+      }
 
       // Build history points
       const historyPoints = [];
@@ -4202,7 +4445,8 @@ app.get("/api/batches/active-locations", async (req, res) => {
         }
       }
 
-      // 5. Get active transport routes (for line segments)
+      // 6. Get active transport routes (for line segments)
+      // Note: We already have transportRoutes from above which includes parent's routes before split
       const activeRoutes = await prisma.transportRoute.findMany({
         where: { batchId: batch.id },
         orderBy: { departureTime: "asc" },
@@ -4330,9 +4574,16 @@ app.get("/api/pricing/history/:batchId", async (req, res) => {
   try {
     const { batchId } = req.params;
 
-    // Check if batch exists
+    // Check if batch exists and get farm-gate price
     const batch = await prisma.batch.findUnique({
       where: { batchId: batchId },
+      include: {
+        farmer: {
+          include: {
+            user: { select: { username: true } }
+          }
+        }
+      }
     });
 
     if (!batch) {
@@ -4354,6 +4605,42 @@ app.get("/api/pricing/history/:batchId", async (req, res) => {
 
     const pricingHistory = JSON.parse(result.toString());
 
+    // Add farmer's farm-gate price as the first entry in pricing history (FT-01)
+    if (batch.pricePerUnit) {
+      const farmerPriceRecord = {
+        level: "FARMER",
+        pricePerUnit: parseFloat(batch.pricePerUnit),
+        totalValue: parseFloat(batch.totalBatchValue) || (parseFloat(batch.pricePerUnit) * batch.quantity),
+        currency: batch.currency || "MYR",
+        unit: batch.unit || "kg",
+        quantity: batch.quantity,
+        timestamp: Math.floor(new Date(batch.createdAt).getTime() / 1000).toString(),
+        recordedBy: batch.farmer?.user?.username || "Farmer",
+        notes: "Farm-gate price at harvest",
+        breakdown: {}
+      };
+
+      // Prepend farmer's price to the pricing history
+      if (pricingHistory.pricingHistory) {
+        pricingHistory.pricingHistory = [farmerPriceRecord, ...pricingHistory.pricingHistory];
+      } else {
+        pricingHistory.pricingHistory = [farmerPriceRecord];
+      }
+
+      // Update total levels count
+      pricingHistory.totalLevels = pricingHistory.pricingHistory.length;
+
+      // If no current price set, use farmer's price
+      if (!pricingHistory.currentPrice) {
+        pricingHistory.currentPrice = {
+          level: "FARMER",
+          pricePerUnit: parseFloat(batch.pricePerUnit),
+          totalValue: parseFloat(batch.totalBatchValue) || (parseFloat(batch.pricePerUnit) * batch.quantity),
+          currency: batch.currency || "MYR"
+        };
+      }
+    }
+
     res.json({
       success: true,
       data: pricingHistory,
@@ -4361,17 +4648,56 @@ app.get("/api/pricing/history/:batchId", async (req, res) => {
   } catch (error) {
     console.error("Get pricing history error:", error);
 
-    // If chaincode returns error about no pricing records, return empty history
+    // If chaincode returns error about no pricing records, still return farmer's price
     if (error.message.includes("No pricing records found")) {
+      // Get batch for farmer's price
+      const batch = await prisma.batch.findUnique({
+        where: { batchId: req.params.batchId },
+        include: {
+          farmer: {
+            include: {
+              user: { select: { username: true } }
+            }
+          }
+        }
+      });
+
+      const responseData = {
+        batchId: req.params.batchId,
+        currentPrice: null,
+        pricingHistory: [],
+        priceIncrease: null,
+        totalLevels: 0,
+      };
+
+      // Include farmer's price if available
+      if (batch?.pricePerUnit) {
+        const farmerPriceRecord = {
+          level: "FARMER",
+          pricePerUnit: parseFloat(batch.pricePerUnit),
+          totalValue: parseFloat(batch.totalBatchValue) || (parseFloat(batch.pricePerUnit) * batch.quantity),
+          currency: batch.currency || "MYR",
+          unit: batch.unit || "kg",
+          quantity: batch.quantity,
+          timestamp: Math.floor(new Date(batch.createdAt).getTime() / 1000).toString(),
+          recordedBy: batch.farmer?.user?.username || "Farmer",
+          notes: "Farm-gate price at harvest",
+          breakdown: {}
+        };
+
+        responseData.pricingHistory = [farmerPriceRecord];
+        responseData.totalLevels = 1;
+        responseData.currentPrice = {
+          level: "FARMER",
+          pricePerUnit: parseFloat(batch.pricePerUnit),
+          totalValue: parseFloat(batch.totalBatchValue) || (parseFloat(batch.pricePerUnit) * batch.quantity),
+          currency: batch.currency || "MYR"
+        };
+      }
+
       return res.json({
         success: true,
-        data: {
-          batchId: req.params.batchId,
-          currentPrice: null,
-          pricingHistory: [],
-          priceIncrease: null,
-          totalLevels: 0,
-        },
+        data: responseData,
       });
     }
 
@@ -4388,7 +4714,7 @@ app.get("/api/pricing/markup/:batchId", async (req, res) => {
   try {
     const { batchId } = req.params;
 
-    // Check if batch exists
+    // Check if batch exists and get farm-gate price for markup baseline
     const batch = await prisma.batch.findUnique({
       where: { batchId: batchId },
     });
@@ -4399,6 +4725,8 @@ app.get("/api/pricing/markup/:batchId", async (req, res) => {
         error: "Batch not found",
       });
     }
+
+    const farmerPrice = batch.pricePerUnit ? parseFloat(batch.pricePerUnit) : null;
 
     // Query blockchain for markup calculation
     const { gateway, contract } = await blockchainService.connectToNetwork();
@@ -4412,6 +4740,43 @@ app.get("/api/pricing/markup/:batchId", async (req, res) => {
 
     const markupData = JSON.parse(result.toString());
 
+    // If we have farmer's price, add FARMER → first level markup (FT-05)
+    if (farmerPrice && markupData.markups && markupData.markups.length > 0) {
+      const firstLevelPrice = markupData.markups[0]?.previousPrice || markupData.markups[0]?.currentPrice;
+
+      // Check if first markup is already from FARMER
+      if (markupData.markups[0]?.fromLevel !== 'FARMER' && firstLevelPrice) {
+        const farmerToFirstMarkup = firstLevelPrice - farmerPrice;
+        const farmerToFirstPercentage = ((farmerToFirstMarkup / farmerPrice) * 100).toFixed(2);
+
+        const farmerMarkupEntry = {
+          fromLevel: "FARMER",
+          toLevel: markupData.markups[0]?.fromLevel || "PROCESSOR",
+          previousPrice: farmerPrice,
+          currentPrice: firstLevelPrice,
+          markup: farmerToFirstMarkup,
+          markupPercentage: farmerToFirstPercentage
+        };
+
+        // Prepend farmer markup
+        markupData.markups = [farmerMarkupEntry, ...markupData.markups];
+
+        // Recalculate totals
+        const totalMarkup = markupData.markups.reduce((sum, m) => sum + (m.markup || 0), 0);
+        const avgPercentage = markupData.markups.length > 0
+          ? (markupData.markups.reduce((sum, m) => sum + parseFloat(m.markupPercentage || 0), 0) / markupData.markups.length).toFixed(2)
+          : "0.00";
+
+        markupData.totalMarkup = totalMarkup;
+        markupData.averageMarkupPercentage = avgPercentage;
+      }
+    } else if (farmerPrice && (!markupData.markups || markupData.markups.length === 0)) {
+      // No blockchain markups but we have farmer price - initialize empty structure
+      markupData.markups = [];
+      markupData.totalMarkup = 0;
+      markupData.averageMarkupPercentage = "0.00";
+    }
+
     res.json({
       success: true,
       data: markupData,
@@ -4421,14 +4786,56 @@ app.get("/api/pricing/markup/:batchId", async (req, res) => {
 
     // If chaincode returns error about insufficient pricing records
     if (error.message.includes("at least 2 pricing records")) {
+      // Get batch to check for farmer price and any other pricing
+      const batch = await prisma.batch.findUnique({
+        where: { batchId: req.params.batchId },
+      });
+
+      const responseData = {
+        batchId: req.params.batchId,
+        markups: [],
+        totalMarkup: 0,
+        averageMarkupPercentage: "0.00",
+      };
+
+      // If we have farmer price and at least one pricing record, try to calculate markup
+      if (batch?.pricePerUnit) {
+        // Check if there's any pricing record in blockchain by querying pricing history
+        try {
+          const { gateway: gw, contract: ct } = await blockchainService.connectToNetwork();
+          const pricingResult = await ct.evaluateTransaction("getPricingHistory", req.params.batchId);
+          await gw.disconnect();
+
+          const pricingHistory = JSON.parse(pricingResult.toString());
+
+          if (pricingHistory.pricingHistory && pricingHistory.pricingHistory.length > 0) {
+            const farmerPrice = parseFloat(batch.pricePerUnit);
+            const firstRecord = pricingHistory.pricingHistory[0];
+            const firstPrice = firstRecord.pricePerUnit;
+
+            const markup = firstPrice - farmerPrice;
+            const markupPercentage = ((markup / farmerPrice) * 100).toFixed(2);
+
+            responseData.markups = [{
+              fromLevel: "FARMER",
+              toLevel: firstRecord.level,
+              previousPrice: farmerPrice,
+              currentPrice: firstPrice,
+              markup: markup,
+              markupPercentage: markupPercentage
+            }];
+            responseData.totalMarkup = markup;
+            responseData.averageMarkupPercentage = markupPercentage;
+          }
+        } catch (innerError) {
+          // Ignore - just return empty markups
+          console.log("No pricing records found for markup calculation");
+        }
+      }
+
       return res.json({
         success: true,
-        data: {
-          batchId: req.params.batchId,
-          markups: [],
-          totalMarkup: 0,
-          averageMarkupPercentage: "0.00",
-        },
+        data: responseData,
       });
     }
 
@@ -4806,6 +5213,343 @@ app.get("/api/ownership/:batchId", authenticate, async (req, res) => {
   }
 });
 
+// ===== QUALITY TEST ENDPOINTS =====
+
+// Add a quality test to a batch
+app.post(
+  "/api/quality-test/:batchId",
+  authenticate,
+  authorize(["PROCESSOR", "REGULATOR", "ADMIN"]),
+  async (req, res) => {
+    try {
+      const { batchId } = req.params;
+      const {
+        testType,
+        testDate,
+        testingLab,
+        testResults,
+        passFailStatus,
+        certificateUrl
+      } = req.body;
+
+      // Validate required fields
+      if (!testType || !testingLab || !passFailStatus) {
+        return res.status(400).json({
+          success: false,
+          error: "Missing required fields: testType, testingLab, passFailStatus"
+        });
+      }
+
+      // Find the batch by batchId string
+      const batch = await prisma.batch.findUnique({
+        where: { batchId: batchId }
+      });
+
+      if (!batch) {
+        return res.status(404).json({
+          success: false,
+          error: "Batch not found"
+        });
+      }
+
+      // Prepare quality test data for integrity hash
+      const qualityData = {
+        testType,
+        testDate: testDate || new Date().toISOString(),
+        testingLab,
+        testResults: testResults || {},
+        passFailStatus,
+        certificateUrl: certificateUrl || null,
+        testedBy: req.user.username,
+        testedByRole: req.user.role,
+        batchId: batchId,
+        timestamp: new Date().toISOString()
+      };
+
+      // Generate SHA-256 hash for data integrity verification
+      // This hash can be used to verify the quality test data hasn't been tampered with
+      const crypto = require('crypto');
+      const dataHash = crypto
+        .createHash('sha256')
+        .update(JSON.stringify(qualityData))
+        .digest('hex');
+
+      // Create the quality test record in database
+      const qualityTest = await prisma.qualityTest.create({
+        data: {
+          batchId: batch.id,
+          testType,
+          testDate: testDate ? new Date(testDate) : new Date(),
+          testingLab,
+          testResults: testResults || {},
+          passFailStatus,
+          certificateUrl: certificateUrl || null,
+          blockchainHash: dataHash // Store integrity hash
+        }
+      });
+
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "ADD_QUALITY_TEST",
+          resource: batchId,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+          metadata: {
+            testId: qualityTest.id,
+            testType,
+            passFailStatus,
+            integrityHash: dataHash
+          }
+        }
+      });
+
+      res.status(201).json({
+        success: true,
+        message: "Quality test added successfully",
+        data: qualityTest,
+        integrityHash: dataHash
+      });
+    } catch (error) {
+      console.error("Add quality test error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to add quality test",
+        details: error.message
+      });
+    }
+  }
+);
+
+// Get quality tests for a batch
+app.get("/api/quality-tests/:batchId", authenticate, async (req, res) => {
+  try {
+    const { batchId } = req.params;
+
+    // Find the batch by batchId string
+    const batch = await prisma.batch.findUnique({
+      where: { batchId: batchId }
+    });
+
+    if (!batch) {
+      return res.status(404).json({
+        success: false,
+        error: "Batch not found"
+      });
+    }
+
+    const qualityTests = await prisma.qualityTest.findMany({
+      where: { batchId: batch.id },
+      orderBy: { testDate: "desc" }
+    });
+
+    res.json({
+      success: true,
+      data: qualityTests,
+      count: qualityTests.length
+    });
+  } catch (error) {
+    console.error("Get quality tests error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get quality tests",
+      details: error.message
+    });
+  }
+});
+
+// ===== TRANSPORT ROUTE ENDPOINTS =====
+
+// Add a transport route manually
+app.post(
+  "/api/transport-route/:batchId",
+  authenticate,
+  authorize(["DISTRIBUTOR", "ADMIN"]),
+  async (req, res) => {
+    try {
+      const { batchId } = req.params;
+      const {
+        vehicleId,
+        originLat,
+        originLng,
+        destinationLat,
+        destinationLng,
+        departureTime,
+        arrivalTime,
+        estimatedTime,
+        distance,
+        fuelConsumption,
+        transportCost,
+        status
+      } = req.body;
+
+      // Validate required fields
+      if (!originLat || !originLng || !destinationLat || !destinationLng) {
+        return res.status(400).json({
+          success: false,
+          error: "Missing required coordinates: originLat, originLng, destinationLat, destinationLng"
+        });
+      }
+
+      // Find the batch by batchId string
+      const batch = await prisma.batch.findUnique({
+        where: { batchId: batchId }
+      });
+
+      if (!batch) {
+        return res.status(404).json({
+          success: false,
+          error: "Batch not found"
+        });
+      }
+
+      // Get distributor profile
+      const distributorProfile = await prisma.distributorProfile.findUnique({
+        where: { userId: req.user.id }
+      });
+
+      if (!distributorProfile) {
+        return res.status(400).json({
+          success: false,
+          error: "Distributor profile not found"
+        });
+      }
+
+      // Prepare blockchain transport data
+      const blockchainTransportData = {
+        transportId: `TRANS${Date.now()}`,
+        origin: `${originLat}, ${originLng}`,
+        originCoordinates: { lat: parseFloat(originLat), lng: parseFloat(originLng) },
+        destination: `${destinationLat}, ${destinationLng}`,
+        destinationCoordinates: { lat: parseFloat(destinationLat), lng: parseFloat(destinationLng) },
+        vehicleId: vehicleId || null,
+        departureTime: departureTime || null,
+        estimatedArrival: arrivalTime || null,
+        transportCost: transportCost ? parseFloat(transportCost) : null,
+        fuelCost: fuelConsumption ? parseFloat(fuelConsumption) : null,
+        currency: "MYR",
+        carrier: distributorProfile.companyName || req.user.username,
+        currentStatus: status || "PLANNED",
+        updateStatus: false // Don't change batch status
+      };
+
+      // Record on blockchain
+      let blockchainTxId = null;
+      try {
+        const { gateway, contract } = await blockchainService.connectToNetwork();
+        const result = await contract.submitTransaction(
+          "addTransportRecord",
+          batchId,
+          JSON.stringify(blockchainTransportData)
+        );
+        const blockchainResult = JSON.parse(result.toString());
+        blockchainTxId = blockchainResult.txId;
+        await gateway.disconnect();
+      } catch (blockchainError) {
+        console.warn("Blockchain recording failed (continuing with database):", blockchainError.message);
+      }
+
+      // Create the transport route record in database
+      const transportRoute = await prisma.transportRoute.create({
+        data: {
+          batchId: batch.id,
+          distributorId: distributorProfile.id,
+          vehicleId: vehicleId || null,
+          originLat: parseFloat(originLat),
+          originLng: parseFloat(originLng),
+          destinationLat: parseFloat(destinationLat),
+          destinationLng: parseFloat(destinationLng),
+          departureTime: departureTime ? new Date(departureTime) : null,
+          arrivalTime: arrivalTime ? new Date(arrivalTime) : null,
+          estimatedTime: estimatedTime ? parseInt(estimatedTime) : 0,
+          distance: distance ? parseFloat(distance) : null,
+          fuelConsumption: fuelConsumption ? parseFloat(fuelConsumption) : null,
+          transportCost: transportCost ? parseFloat(transportCost) : null,
+          status: status || "PLANNED",
+          blockchainHash: blockchainTxId
+        }
+      });
+
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "ADD_TRANSPORT_ROUTE",
+          resource: batchId,
+          ipAddress: req.ip,
+          userAgent: req.get("user-agent"),
+          metadata: {
+            routeId: transportRoute.id,
+            vehicleId,
+            status: status || "PLANNED",
+            blockchainTxId
+          }
+        }
+      });
+
+      res.status(201).json({
+        success: true,
+        message: "Transport route added successfully",
+        data: transportRoute,
+        blockchainTxId
+      });
+    } catch (error) {
+      console.error("Add transport route error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to add transport route",
+        details: error.message
+      });
+    }
+  }
+);
+
+// Get transport routes for a batch
+app.get("/api/transport-routes/:batchId", authenticate, async (req, res) => {
+  try {
+    const { batchId } = req.params;
+
+    // Find the batch by batchId string
+    const batch = await prisma.batch.findUnique({
+      where: { batchId: batchId }
+    });
+
+    if (!batch) {
+      return res.status(404).json({
+        success: false,
+        error: "Batch not found"
+      });
+    }
+
+    const transportRoutes = await prisma.transportRoute.findMany({
+      where: { batchId: batch.id },
+      include: {
+        distributor: {
+          select: {
+            companyName: true,
+            contactPerson: true
+          }
+        }
+      },
+      orderBy: { departureTime: "desc" }
+    });
+
+    res.json({
+      success: true,
+      data: transportRoutes,
+      count: transportRoutes.length
+    });
+  } catch (error) {
+    console.error("Get transport routes error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get transport routes",
+      details: error.message
+    });
+  }
+});
+
 // ===== DISTRIBUTOR ENDPOINTS =====
 
 // Get batches available for distribution (PROCESSED status)
@@ -4911,9 +5655,23 @@ app.post(
         signature: signature || null,
       };
 
+      // Convert fromActorId from username to user ID if needed (blockchain stores username)
+      let fromActorDbId = fromActorId;
+      if (fromActorId && !fromActorId.startsWith('cm')) {
+        // Looks like a username, not a cuid - look up the user
+        const fromUser = await prisma.user.findUnique({
+          where: { username: fromActorId },
+          select: { id: true }
+        });
+        if (fromUser) {
+          fromActorDbId = fromUser.id;
+          console.log(`🔄 Converted username "${fromActorId}" to user ID "${fromActorDbId}"`);
+        }
+      }
+
       console.log("🔄 Transfer params:", {
         batchId,
-        fromActorId,
+        fromActorId: fromActorDbId,
         fromActorRole,
         toActorId: distributorId,
         toActorRole: "DISTRIBUTOR",
@@ -4931,11 +5689,11 @@ app.post(
       );
       const transferRecord = JSON.parse(result.toString());
 
-      // DATABASE: Store transfer record
+      // DATABASE: Store transfer record (use fromActorDbId which is the actual user ID)
       const dbTransfer = await prisma.batchTransfer.create({
         data: {
           batchId: batchId,
-          fromActorId: fromActorId,
+          fromActorId: fromActorDbId,
           fromActorRole: fromActorRole,
           toActorId: distributorId,
           toActorRole: "DISTRIBUTOR",
@@ -5339,6 +6097,48 @@ app.post(
         });
       }
 
+      // Try to convert toRetailerId to actual user ID if possible
+      let retailerDbId = toRetailerId;
+
+      // Check if it's already a valid user ID (starts with 'cm' for cuid)
+      if (!toRetailerId.startsWith('cm')) {
+        // Try to find retailer by username
+        const retailerUser = await prisma.user.findUnique({
+          where: { username: toRetailerId },
+          select: { id: true, role: true }
+        });
+
+        if (retailerUser) {
+          retailerDbId = retailerUser.id;
+          console.log(`🔄 Converted retailer username "${toRetailerId}" to user ID "${retailerDbId}"`);
+        } else {
+          // Try to find by email as fallback
+          const retailerByEmail = await prisma.user.findUnique({
+            where: { email: toRetailerId },
+            select: { id: true, role: true }
+          });
+
+          if (retailerByEmail) {
+            retailerDbId = retailerByEmail.id;
+            console.log(`🔄 Converted retailer email "${toRetailerId}" to user ID "${retailerDbId}"`);
+          } else {
+            // Retailer not found in system - allow transfer anyway with entered value
+            // This supports cases where retailers aren't registered yet
+            console.log(`⚠️ Retailer "${toRetailerId}" not found in database, using entered value`);
+          }
+        }
+      } else {
+        // Verify the ID exists (optional - just log if not found)
+        const retailerExists = await prisma.user.findUnique({
+          where: { id: toRetailerId },
+          select: { id: true }
+        });
+
+        if (!retailerExists) {
+          console.log(`⚠️ Retailer ID "${toRetailerId}" not found in database, using entered value`);
+        }
+      }
+
       const distributorId = req.user.id;
       const temperature = weatherDataRetailer?.temperature;
       const weather_desc = weatherDataRetailer?.weather_desc;
@@ -5361,25 +6161,25 @@ app.post(
 
       const { gateway, contract } = await blockchainService.connectToNetwork();
 
-      // BLOCKCHAIN: Transfer batch
+      // BLOCKCHAIN: Transfer batch (use retailerDbId - the validated user ID)
       const result = await contract.submitTransaction(
         "transferBatch",
         batchId,
         distributorId,
         "DISTRIBUTOR",
-        toRetailerId,
+        retailerDbId,
         "RETAILER",
         JSON.stringify(transferData)
       );
       const transferRecord = JSON.parse(result.toString());
 
-      // DATABASE: Store transfer record
+      // DATABASE: Store transfer record (use retailerDbId - the validated user ID)
       const dbTransfer = await prisma.batchTransfer.create({
         data: {
           batchId: batchId,
           fromActorId: distributorId,
           fromActorRole: "DISTRIBUTOR",
-          toActorId: toRetailerId,
+          toActorId: retailerDbId,
           toActorRole: "RETAILER",
           transferType: "OWNERSHIP_TRANSFER",
           transferLocation: transferLocation || null,
@@ -5422,7 +6222,7 @@ app.post(
           resource: batchId,
           ipAddress: req.ip,
           userAgent: req.get("user-agent"),
-          metadata: { toRetailerId: toRetailerId, transferId: dbTransfer.id },
+          metadata: { toRetailerId: retailerDbId, transferId: dbTransfer.id },
         },
       });
 

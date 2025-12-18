@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  ArrowLeft, 
-  MapPin, 
-  Calendar, 
-  Package, 
-  Users, 
-  Shield, 
-  TrendingUp, 
+import { useRouter } from 'next/navigation';
+import {
+  ArrowLeft,
+  MapPin,
+  Calendar,
+  Package,
+  Users,
+  Shield,
+  TrendingUp,
   Download,
   CheckCircle,
   AlertCircle,
@@ -16,10 +17,15 @@ import {
   FileText,
   Star,
   Edit,
-  RotateCcw
+  RotateCcw,
+  ArrowRightLeft,
+  GitBranch,
+  Plus,
+  FlaskConical
 } from 'lucide-react';
 
 const BatchDetails = ({ batchId, onBack, currentUser }) => {
+  const router = useRouter();
   const [batch, setBatch] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -28,6 +34,7 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
   const [qrCodes, setQrCodes] = useState({ verification: null, processing: null });
   const [qrUrls, setQrUrls] = useState({ verification: '', processing: '' });
   const [updating, setUpdating] = useState(false);
+  const [transferHistory, setTransferHistory] = useState([]);
 
   useEffect(() => {
     if (batchId) {
@@ -52,6 +59,7 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
 
       const data = await response.json();
       setBatch(data.batchData);
+      setTransferHistory(data.transferHistory || []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -321,6 +329,7 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
           <nav className="-mb-px flex space-x-8" aria-label="Tabs">
             {[
               { id: 'overview', name: 'Overview', icon: Package },
+              { id: 'transfers', name: 'Transfers', icon: ArrowRightLeft },
               { id: 'processing', name: 'Processing', icon: TrendingUp },
               { id: 'transport', name: 'Transport', icon: Truck },
               { id: 'quality', name: 'Quality Tests', icon: Shield },
@@ -537,6 +546,298 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
           </div>
         )}
 
+        {activeTab === 'transfers' && (
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-medium text-gray-900 flex items-center">
+                <ArrowRightLeft className="w-5 h-5 mr-2" />
+                Transfer History
+              </h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Ownership transfers recorded on the blockchain (SC-01)
+              </p>
+            </div>
+            <div className="p-6">
+              {transferHistory.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Date
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          From
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          To
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Type
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Status
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Blockchain Tx
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {transferHistory.map((transfer, index) => (
+                        <tr key={transfer.id || index} className="hover:bg-gray-50">
+                          <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-900">
+                            {new Date(transfer.transferDate).toLocaleDateString('en-MY', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap">
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium text-gray-900">
+                                {transfer.fromActorName || transfer.fromActorUsername || '-'}
+                              </span>
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-1 w-fit ${
+                                transfer.fromActorRole === 'FARMER' ? 'bg-green-100 text-green-800' :
+                                transfer.fromActorRole === 'PROCESSOR' ? 'bg-yellow-100 text-yellow-800' :
+                                transfer.fromActorRole === 'DISTRIBUTOR' ? 'bg-blue-100 text-blue-800' :
+                                transfer.fromActorRole === 'RETAILER' ? 'bg-purple-100 text-purple-800' :
+                                'bg-gray-100 text-gray-800'
+                              }`}>
+                                {transfer.fromActorRole}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap">
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium text-gray-900">
+                                {transfer.toActorName || transfer.toActorUsername || '-'}
+                              </span>
+                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium mt-1 w-fit ${
+                                transfer.toActorRole === 'FARMER' ? 'bg-green-100 text-green-800' :
+                                transfer.toActorRole === 'PROCESSOR' ? 'bg-yellow-100 text-yellow-800' :
+                                transfer.toActorRole === 'DISTRIBUTOR' ? 'bg-blue-100 text-blue-800' :
+                                transfer.toActorRole === 'RETAILER' ? 'bg-purple-100 text-purple-800' :
+                                'bg-gray-100 text-gray-800'
+                              }`}>
+                                {transfer.toActorRole}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              transfer.transferType === 'BATCH_SPLIT' ? 'bg-orange-100 text-orange-800' :
+                              transfer.transferType === 'OWNERSHIP_TRANSFER' ? 'bg-indigo-100 text-indigo-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {transfer.transferType === 'BATCH_SPLIT' && <GitBranch className="w-3 h-3 mr-1" />}
+                              {transfer.transferType?.replace('_', ' ')}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap">
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              transfer.status === 'COMPLETED' ? 'bg-green-100 text-green-800' :
+                              transfer.status === 'PENDING' ? 'bg-yellow-100 text-yellow-800' :
+                              transfer.status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-800' :
+                              'bg-gray-100 text-gray-800'
+                            }`}>
+                              {transfer.status === 'COMPLETED' && <CheckCircle className="w-3 h-3 mr-1" />}
+                              {transfer.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 whitespace-nowrap text-sm">
+                            {transfer.blockchainTxId ? (
+                              <span className="font-mono text-xs text-gray-600 bg-gray-100 px-2 py-1 rounded">
+                                {transfer.blockchainTxId.substring(0, 8)}...{transfer.blockchainTxId.substring(transfer.blockchainTxId.length - 6)}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <ArrowRightLeft className="w-12 h-12 text-gray-400 mx-auto" />
+                  <p className="mt-4 text-gray-500">No transfer records yet</p>
+                  <p className="text-sm text-gray-400 mt-2">
+                    Transfers will appear here when the batch ownership changes
+                  </p>
+                </div>
+              )}
+
+              {/* Transfer Info Box */}
+              {transferHistory.length > 0 && (
+                <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start">
+                    <Shield className="w-5 h-5 text-blue-600 mt-0.5 mr-3" />
+                    <div>
+                      <h4 className="text-sm font-medium text-blue-900">Blockchain Verified</h4>
+                      <p className="text-sm text-blue-700 mt-1">
+                        All ownership transfers are recorded on the Hyperledger Fabric blockchain,
+                        ensuring an immutable audit trail (SC-03).
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'quality' && (
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900 flex items-center">
+                    <Shield className="w-5 h-5 mr-2" />
+                    Quality Tests
+                  </h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Quality assurance test results for this batch (QA-01, QA-05)
+                  </p>
+                </div>
+                {(currentUser?.role === 'PROCESSOR' || currentUser?.role === 'REGULATOR' || currentUser?.role === 'ADMIN') && (
+                  <button
+                    onClick={() => router.push(`/processor/quality-test/${batchId}`)}
+                    className="flex items-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium text-sm transition-colors"
+                  >
+                    <Plus className="w-4 h-4 mr-1" />
+                    Add Test
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="p-6">
+              {batch.qualityTests && batch.qualityTests.length > 0 ? (
+                <div className="space-y-4">
+                  {batch.qualityTests.map((test, index) => (
+                    <div key={test.id || index} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <h4 className="font-semibold text-gray-900">{test.testType || 'Quality Test'}</h4>
+                          <p className="text-sm text-gray-500">
+                            {test.testDate ? new Date(test.testDate).toLocaleDateString('en-MY', {
+                              year: 'numeric',
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            }) : 'Date not recorded'}
+                          </p>
+                        </div>
+                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                          test.result === 'PASS' || test.passed ? 'bg-green-100 text-green-800' :
+                          test.result === 'FAIL' || test.passed === false ? 'bg-red-100 text-red-800' :
+                          'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {test.result || (test.passed ? 'PASS' : test.passed === false ? 'FAIL' : 'PENDING')}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                        {test.pesticideResidue !== undefined && (
+                          <div className="bg-gray-50 p-3 rounded-lg">
+                            <p className="text-gray-500 text-xs">Pesticide Residue</p>
+                            <p className="font-semibold text-gray-900">{test.pesticideResidue} ppm</p>
+                          </div>
+                        )}
+                        {test.heavyMetals !== undefined && (
+                          <div className="bg-gray-50 p-3 rounded-lg">
+                            <p className="text-gray-500 text-xs">Heavy Metals</p>
+                            <p className="font-semibold text-gray-900">{test.heavyMetals} ppm</p>
+                          </div>
+                        )}
+                        {test.microbialCount !== undefined && (
+                          <div className="bg-gray-50 p-3 rounded-lg">
+                            <p className="text-gray-500 text-xs">Microbial Count</p>
+                            <p className="font-semibold text-gray-900">{test.microbialCount} CFU/g</p>
+                          </div>
+                        )}
+                        {test.moistureContent !== undefined && (
+                          <div className="bg-gray-50 p-3 rounded-lg">
+                            <p className="text-gray-500 text-xs">Moisture Content</p>
+                            <p className="font-semibold text-gray-900">{test.moistureContent}%</p>
+                          </div>
+                        )}
+                        {test.proteinContent !== undefined && (
+                          <div className="bg-gray-50 p-3 rounded-lg">
+                            <p className="text-gray-500 text-xs">Protein Content</p>
+                            <p className="font-semibold text-gray-900">{test.proteinContent}%</p>
+                          </div>
+                        )}
+                        {test.grade && (
+                          <div className="bg-gray-50 p-3 rounded-lg">
+                            <p className="text-gray-500 text-xs">Quality Grade</p>
+                            <p className="font-semibold text-gray-900">{test.grade}</p>
+                          </div>
+                        )}
+                        {test.testedBy && (
+                          <div className="bg-gray-50 p-3 rounded-lg">
+                            <p className="text-gray-500 text-xs">Tested By</p>
+                            <p className="font-semibold text-gray-900">{test.testedBy}</p>
+                          </div>
+                        )}
+                        {test.labName && (
+                          <div className="bg-gray-50 p-3 rounded-lg">
+                            <p className="text-gray-500 text-xs">Laboratory</p>
+                            <p className="font-semibold text-gray-900">{test.labName}</p>
+                          </div>
+                        )}
+                        {test.certificateNumber && (
+                          <div className="bg-gray-50 p-3 rounded-lg">
+                            <p className="text-gray-500 text-xs">Certificate No.</p>
+                            <p className="font-semibold text-gray-900">{test.certificateNumber}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {test.notes && (
+                        <div className="mt-3 pt-3 border-t border-gray-200">
+                          <p className="text-sm text-gray-600">
+                            <span className="font-medium">Notes:</span> {test.notes}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <Shield className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                  <h4 className="text-lg font-medium text-gray-900 mb-2">No Quality Tests Available</h4>
+                  <p className="text-gray-500 max-w-md mx-auto">
+                    Quality test results have not been recorded for this batch yet.
+                    Tests may include pesticide residue, heavy metals, microbial count,
+                    moisture content, and quality grading.
+                  </p>
+                </div>
+              )}
+
+              {/* Quality Test Info Box */}
+              <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-start">
+                  <Shield className="w-5 h-5 text-blue-600 mt-0.5 mr-3" />
+                  <div>
+                    <h4 className="text-sm font-medium text-blue-900">Quality Assurance Standards</h4>
+                    <p className="text-sm text-blue-700 mt-1">
+                      All quality tests are conducted following Malaysian Agricultural Standards (MS)
+                      and recorded on the blockchain for transparency and traceability.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'qr' && (
           <div className="max-w-5xl mx-auto">
             <div className="bg-white rounded-lg shadow p-8">
@@ -689,6 +990,170 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
         )}
 
         {/* Add other tab content as needed */}
+        {activeTab === 'transport' && (
+          <div className="bg-white rounded-lg shadow">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900 flex items-center">
+                    <Truck className="w-5 h-5 mr-2" />
+                    Transport Records
+                  </h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Transportation routes and logistics information (SC-06, QA-07)
+                  </p>
+                </div>
+                {(currentUser?.role === 'DISTRIBUTOR' || currentUser?.role === 'ADMIN') && (
+                  <button
+                    onClick={() => router.push(`/distributor/transport-route/${batchId}`)}
+                    className="flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg font-medium text-sm transition-colors"
+                  >
+                    <Plus className="w-4 h-4 mr-1" />
+                    Add Route
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="p-6">
+              {batch.transportRoutes && batch.transportRoutes.length > 0 ? (
+                <div className="space-y-4">
+                  {batch.transportRoutes.map((route, index) => (
+                    <div key={route.id || index} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center">
+                          <Truck className="w-8 h-8 text-blue-600 mr-3" />
+                          <div>
+                            <h4 className="font-semibold text-gray-900">
+                              Transport Route #{index + 1}
+                            </h4>
+                            <p className="text-sm text-gray-500">
+                              {route.departureTime ? new Date(route.departureTime).toLocaleDateString('en-MY', {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              }) : 'Departure pending'}
+                            </p>
+                          </div>
+                        </div>
+                        <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                          route.status === 'DELIVERED' ? 'bg-green-100 text-green-800' :
+                          route.status === 'IN_TRANSIT' ? 'bg-blue-100 text-blue-800' :
+                          route.status === 'DELAYED' ? 'bg-red-100 text-red-800' :
+                          route.status === 'CANCELLED' ? 'bg-gray-100 text-gray-800' :
+                          'bg-yellow-100 text-yellow-800'
+                        }`}>
+                          {route.status || 'PLANNED'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mb-4">
+                        {route.distance && (
+                          <div className="bg-gray-50 p-3 rounded-lg">
+                            <p className="text-gray-500 text-xs">Distance</p>
+                            <p className="font-semibold text-gray-900">{route.distance.toFixed(1)} km</p>
+                          </div>
+                        )}
+                        {route.estimatedTime && (
+                          <div className="bg-gray-50 p-3 rounded-lg">
+                            <p className="text-gray-500 text-xs">Est. Duration</p>
+                            <p className="font-semibold text-gray-900">
+                              {Math.floor(route.estimatedTime / 60)}h {route.estimatedTime % 60}m
+                            </p>
+                          </div>
+                        )}
+                        {route.transportCost && (
+                          <div className="bg-gray-50 p-3 rounded-lg">
+                            <p className="text-gray-500 text-xs">Transport Cost</p>
+                            <p className="font-semibold text-gray-900">MYR {route.transportCost.toFixed(2)}</p>
+                          </div>
+                        )}
+                        {route.fuelConsumption && (
+                          <div className="bg-gray-50 p-3 rounded-lg">
+                            <p className="text-gray-500 text-xs">Fuel Used</p>
+                            <p className="font-semibold text-gray-900">{route.fuelConsumption.toFixed(1)} L</p>
+                          </div>
+                        )}
+                        {route.vehicleId && (
+                          <div className="bg-gray-50 p-3 rounded-lg">
+                            <p className="text-gray-500 text-xs">Vehicle ID</p>
+                            <p className="font-semibold text-gray-900">{route.vehicleId}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Route Timeline */}
+                      <div className="flex items-center justify-between bg-gradient-to-r from-green-50 to-blue-50 rounded-lg p-3">
+                        <div className="text-center">
+                          <MapPin className="w-5 h-5 text-green-600 mx-auto mb-1" />
+                          <p className="text-xs text-gray-500">Origin</p>
+                          <p className="text-xs font-medium text-gray-700">
+                            {route.originLat?.toFixed(4)}, {route.originLng?.toFixed(4)}
+                          </p>
+                          {route.departureTime && (
+                            <p className="text-xs text-green-600 mt-1">
+                              {new Date(route.departureTime).toLocaleTimeString('en-MY', { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex-1 mx-4">
+                          <div className="border-t-2 border-dashed border-gray-300 relative">
+                            <Truck className="w-4 h-4 text-blue-600 absolute top-1/2 left-1/2 transform -translate-y-1/2 -translate-x-1/2 bg-white" />
+                          </div>
+                        </div>
+                        <div className="text-center">
+                          <MapPin className="w-5 h-5 text-blue-600 mx-auto mb-1" />
+                          <p className="text-xs text-gray-500">Destination</p>
+                          <p className="text-xs font-medium text-gray-700">
+                            {route.destinationLat?.toFixed(4)}, {route.destinationLng?.toFixed(4)}
+                          </p>
+                          {route.arrivalTime && (
+                            <p className="text-xs text-blue-600 mt-1">
+                              {new Date(route.arrivalTime).toLocaleTimeString('en-MY', { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {route.distributor?.user?.username && (
+                        <div className="mt-3 pt-3 border-t border-gray-200">
+                          <p className="text-sm text-gray-600">
+                            <span className="font-medium">Transported by:</span> {route.distributor.user.username}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <Truck className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                  <h4 className="text-lg font-medium text-gray-900 mb-2">No Transport Records Available</h4>
+                  <p className="text-gray-500 max-w-md mx-auto">
+                    Transport route information has not been recorded for this batch yet.
+                    Routes will appear here once the batch is in transit.
+                  </p>
+                </div>
+              )}
+
+              {/* Transport Info Box */}
+              <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-start">
+                  <Truck className="w-5 h-5 text-blue-600 mt-0.5 mr-3" />
+                  <div>
+                    <h4 className="text-sm font-medium text-blue-900">Transport Tracking</h4>
+                    <p className="text-sm text-blue-700 mt-1">
+                      All transport routes are recorded with GPS coordinates, timestamps, and costs
+                      for complete supply chain visibility and traceability.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'processing' && (
           <div className="bg-white rounded-lg shadow">
             <div className="px-6 py-4 border-b border-gray-200">

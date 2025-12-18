@@ -1,7 +1,7 @@
 // src/components/dashboard/DistributorDashboard.js
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../context/AuthContext";
 import {
   distributorService,
@@ -12,6 +12,7 @@ import { toast } from "react-hot-toast";
 import PricingModal from "./PricingModal";
 import BatchSplitModal from "./BatchSplitModal";
 import RecallBatchModal from "./RecallBatchModal";
+import BatchDetails from "../batch/BatchDetails";
 import LocationInput from "../ui/LocationInput";
 import {
   Package,
@@ -44,6 +45,10 @@ const DistributorDashboard = () => {
     completedToday: 0,
   });
   const [loading, setLoading] = useState(true);
+
+  // View state for BatchDetails
+  const [currentView, setCurrentView] = useState("dashboard");
+  const [selectedBatchId, setSelectedBatchId] = useState(null);
 
   // Modal states
   const [showPricingModal, setShowPricingModal] = useState(false);
@@ -373,6 +378,18 @@ const DistributorDashboard = () => {
     fetchDashboardData(); // Refresh data to show updated batches
   };
 
+  // View Details handlers
+  const handleViewBatch = useCallback((batchId) => {
+    setSelectedBatchId(batchId);
+    setCurrentView("batchDetails");
+  }, []);
+
+  const handleBackToDashboard = useCallback(() => {
+    setCurrentView("dashboard");
+    setSelectedBatchId(null);
+    fetchDashboardData(); // Refresh data when coming back
+  }, []);
+
   const submitTransferToRetailer = async () => {
     try {
       if (!transferData.toRetailerId) {
@@ -491,13 +508,22 @@ const DistributorDashboard = () => {
       </div>
 
       {isAvailable ? (
-        <button
-          onClick={() => handleReceiveBatch(batch.batchId)}
-          className="w-full bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center"
-        >
-          <Package className="h-4 w-4 mr-2" />
-          Receive Batch
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => handleReceiveBatch(batch.batchId)}
+            className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition-colors flex items-center justify-center"
+          >
+            <Package className="h-4 w-4 mr-2" />
+            Receive Batch
+          </button>
+          <button
+            onClick={() => handleViewBatch(batch.batchId)}
+            className="px-4 py-2 text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 rounded-lg font-medium transition-colors flex items-center justify-center"
+          >
+            <Eye className="h-4 w-4 mr-1" />
+            View
+          </button>
+        </div>
       ) : (
         <div className="space-y-2">
           <div className="flex gap-2">
@@ -532,17 +558,37 @@ const DistributorDashboard = () => {
               Transfer
             </button>
           </div>
-          <button
-            onClick={() => handleRecallBatch(batch)}
-            className="w-full mt-2 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm flex items-center justify-center"
-          >
-            <ShieldAlert className="h-4 w-4 mr-1" />
-            Recall Batch
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleViewBatch(batch.batchId)}
+              className="flex-1 px-4 py-2 text-gray-600 hover:text-gray-800 border border-gray-300 hover:border-gray-400 rounded-lg font-medium transition-colors text-sm flex items-center justify-center"
+            >
+              <Eye className="h-4 w-4 mr-1" />
+              View Details
+            </button>
+            <button
+              onClick={() => handleRecallBatch(batch)}
+              className="flex-1 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors text-sm flex items-center justify-center"
+            >
+              <ShieldAlert className="h-4 w-4 mr-1" />
+              Recall
+            </button>
+          </div>
         </div>
       )}
     </div>
   );
+
+  // Render Batch Details View
+  if (currentView === "batchDetails" && selectedBatchId) {
+    return (
+      <BatchDetails
+        batchId={selectedBatchId}
+        onBack={handleBackToDashboard}
+        currentUser={user}
+      />
+    );
+  }
 
   if (loading) {
     return (
