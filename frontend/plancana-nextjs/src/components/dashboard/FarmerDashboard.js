@@ -349,12 +349,17 @@ const FarmerDashboard = () => {
     setShowRecallModal(true);
   }, []);
 
-  const handleRecallSuccess = useCallback((result) => {
-    toast.success(`Batch recalled: ${result.totalAffectedBatches} batch(es) affected`);
-    loadBatches(); // Refresh batches
-    setShowRecallModal(false);
-    setSelectedBatchForRecall(null);
-  }, [loadBatches]);
+  const handleRecallSuccess = useCallback(
+    (result) => {
+      toast.success(
+        `Batch recalled: ${result.totalAffectedBatches} batch(es) affected`
+      );
+      loadBatches(); // Refresh batches
+      setShowRecallModal(false);
+      setSelectedBatchForRecall(null);
+    },
+    [loadBatches]
+  );
 
   // Loading state
   if (loading && !dashboardData) {

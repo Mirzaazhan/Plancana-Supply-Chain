@@ -627,127 +627,129 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
 
   return (
     <>
-      {/* Error Display */}
-      {mapError && (
-        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-20 bg-red-50 border border-red-200 rounded-lg p-4 shadow-lg max-w-md">
-          <div className="flex items-start gap-3">
-            <AlertCircle
-              className="text-red-600 flex-shrink-0 mt-0.5"
-              size={20}
-            />
-            <div>
-              <h4 className="font-semibold text-red-900 mb-1">Map Error</h4>
-              <p className="text-sm text-red-700">{mapError}</p>
-              <button
-                onClick={() => window.location.reload()}
-                className="mt-2 text-sm text-red-600 hover:text-red-800 font-medium underline"
-              >
-                Refresh Page
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Loading Indicator */}
-      {isLoading && !mapError && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600 font-medium">Loading map...</p>
-          </div>
-        </div>
-      )}
-
-      {/* Filter Panel */}
-      <div className="relative">
-        <button
-          onClick={() => setShowFilter(!showFilter)}
-          className="absolute top-4 left-4 z-10 bg-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 hover:bg-gray-50 transition-colors"
-        >
-          <Filter size={18} />
-          <span className="font-medium">Filters</span>
-          {(selectedBatchId || startDate || endDate) && (
-            <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full">
-              Active
-            </span>
-          )}
-        </button>
-
-        {showFilter && (
-          <div className="absolute top-16 left-4 z-10 bg-white p-4 rounded-lg shadow-xl w-80">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-lg">Filter Options</h3>
-              <button
-                onClick={() => setShowFilter(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="space-y-4">
+      <div className="relative w-full" style={{ height: height }}>
+        {/* Error Display */}
+        {mapError && (
+          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-20 bg-red-50 border border-red-200 rounded-lg p-4 shadow-lg max-w-md">
+            <div className="flex items-start gap-3">
+              <AlertCircle
+                className="text-red-600 flex-shrink-0 mt-0.5"
+                size={20}
+              />
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Batch ID
-                </label>
-                <select
-                  value={selectedBatchId}
-                  onChange={(e) => setSelectedBatchId(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">All Batches</option>
-                  {batchIds.map((id) => (
-                    <option key={id} value={id}>
-                      {id}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Start Date
-                </label>
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  End Date
-                </label>
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-
-              {(selectedBatchId || startDate || endDate) && (
+                <h4 className="font-semibold text-red-900 mb-1">Map Error</h4>
+                <p className="text-sm text-red-700">{mapError}</p>
                 <button
-                  onClick={clearFilters}
-                  className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors font-medium"
+                  onClick={() => window.location.reload()}
+                  className="mt-2 text-sm text-red-600 hover:text-red-800 font-medium underline"
                 >
-                  Clear All Filters
+                  Refresh Page
                 </button>
-              )}
+              </div>
             </div>
           </div>
         )}
-      </div>
 
-      {/* Map Container */}
-      <div
-        ref={mapRef}
-        className="map-view-container"
-        style={{ height: height, width: "100%" }}
-      />
+        {/* Loading Indicator */}
+        {isLoading && !mapError && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-600 font-medium">Loading map...</p>
+            </div>
+          </div>
+        )}
+
+        {/* Filter Panel */}
+        <div className="relative">
+          <button
+            onClick={() => setShowFilter(!showFilter)}
+            className="absolute top-4 left-4 z-10 bg-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 hover:bg-gray-50 transition-colors"
+          >
+            <Filter size={18} />
+            <span className="font-medium">Filters</span>
+            {(selectedBatchId || startDate || endDate) && (
+              <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full">
+                Active
+              </span>
+            )}
+          </button>
+
+          {showFilter && (
+            <div className="absolute top-16 left-4 z-10 bg-white p-4 rounded-lg shadow-xl w-80">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-lg">Filter Options</h3>
+                <button
+                  onClick={() => setShowFilter(false)}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Batch ID
+                  </label>
+                  <select
+                    value={selectedBatchId}
+                    onChange={(e) => setSelectedBatchId(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">All Batches</option>
+                    {batchIds.map((id) => (
+                      <option key={id} value={id}>
+                        {id}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Start Date
+                  </label>
+                  <input
+                    type="date"
+                    value={startDate}
+                    onChange={(e) => setStartDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    End Date
+                  </label>
+                  <input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                {(selectedBatchId || startDate || endDate) && (
+                  <button
+                    onClick={clearFilters}
+                    className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors font-medium"
+                  >
+                    Clear All Filters
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Map Container */}
+        <div
+          ref={mapRef}
+          className="map-view-container"
+          style={{ height: height, width: "100%" }}
+        />
+      </div>
     </>
   );
 };

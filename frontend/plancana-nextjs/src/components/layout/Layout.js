@@ -86,6 +86,7 @@ const Layout = ({ children }) => {
         icon: FileText,
       },
       { name: "GIS Mapping", href: "/farmer/gis", icon: Map },
+      { name: "Quality Analytics", href: "/farmer/analytics", icon: BarChart3 },
       {
         name: "Transactions",
         href: "/farmer/transactions",
@@ -138,7 +139,7 @@ const Layout = ({ children }) => {
     return imagePath
       ? imagePath.startsWith("http")
         ? imagePath
-        : `${process.env.NEXT_PUBLIC_API_URL?.replace('/api', '')}${imagePath}`
+        : `${process.env.NEXT_PUBLIC_API_URL?.replace("/api", "")}${imagePath}`
       : null;
   };
 
@@ -164,7 +165,7 @@ const Layout = ({ children }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className="min-h-screen bg-gray-50 flex font-sans">
       {/* Enhanced Sidebar */}
       <div
         className={`${
