@@ -861,8 +861,8 @@ const BatchRegistration = () => {
                   </p>
                   {formData.latitude && formData.longitude && (
                     <p>
-                      <strong>GPS Coordinates:</strong> {formData.latitude},{" "}
-                      {formData.longitude}
+                      <strong>GPS Coordinates:</strong> {formData.longitude},{" "}
+                      {formData.latitude}
                     </p>
                   )}
                 </div>

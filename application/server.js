@@ -3100,7 +3100,10 @@ app.post(
         gateway = connection.gateway;
         contract = connection.contract;
       } catch (bcConnError) {
-        console.warn("Blockchain connection failed, continuing with database only:", bcConnError.message);
+        console.warn(
+          "Blockchain connection failed, continuing with database only:",
+          bcConnError.message
+        );
       }
 
       // Find the original batch
@@ -3168,7 +3171,9 @@ app.post(
             splitData
           );
           blockchainResult = JSON.parse(result.toString());
-          console.log(`Batch split recorded on blockchain: ${batchId} → ${newBatchId}`);
+          console.log(
+            `Batch split recorded on blockchain: ${batchId} → ${newBatchId}`
+          );
         } catch (blockchainError) {
           console.error("Blockchain split error:", blockchainError);
           // Continue with database-only if blockchain fails
@@ -3224,7 +3229,9 @@ app.post(
         try {
           qrCodes = {
             verification: await blockchainService.generateQRCode(newBatchId),
-            processing: await blockchainService.generateProcessingQRCode(newBatchId),
+            processing: await blockchainService.generateProcessingQRCode(
+              newBatchId
+            ),
           };
         } catch (qrError) {
           console.error("QR generation error:", qrError);
@@ -3292,7 +3299,9 @@ app.post(
       console.error("Batch split error:", error);
       // Disconnect gateway on error
       if (gateway) {
-        try { await gateway.disconnect(); } catch (e) {}
+        try {
+          await gateway.disconnect();
+        } catch (e) {}
       }
       res.status(500).json({
         success: false,
@@ -3363,7 +3372,10 @@ app.get("/api/batch/:batchId/lineage", authenticate, async (req, res) => {
     let blockchainLineage = null;
     if (contract) {
       try {
-        const result = await contract.evaluateTransaction("getBatchLineage", batchId);
+        const result = await contract.evaluateTransaction(
+          "getBatchLineage",
+          batchId
+        );
         blockchainLineage = JSON.parse(result.toString());
       } catch (bcError) {
         console.error("Blockchain lineage fetch error:", bcError);
@@ -3403,7 +3415,14 @@ app.get("/api/batch/:batchId/lineage", authenticate, async (req, res) => {
 app.post(
   "/api/batch/:batchId/recall",
   authenticate,
-  authorize(["ADMIN", "REGULATOR", "FARMER", "PROCESSOR", "DISTRIBUTOR", "RETAILER"]),
+  authorize([
+    "ADMIN",
+    "REGULATOR",
+    "FARMER",
+    "PROCESSOR",
+    "DISTRIBUTOR",
+    "RETAILER",
+  ]),
   async (req, res) => {
     let gateway = null;
     try {
@@ -3423,12 +3442,18 @@ app.post(
         where: { batchId: batchId },
         include: {
           farmer: {
-            select: { userId: true }
+            select: { userId: true },
           },
           childBatches: {
-            select: { id: true, batchId: true, quantity: true, unit: true, status: true }
-          }
-        }
+            select: {
+              id: true,
+              batchId: true,
+              quantity: true,
+              unit: true,
+              status: true,
+            },
+          },
+        },
       });
 
       if (!dbBatch) {
@@ -3440,8 +3465,8 @@ app.post(
 
       // Authorization check: Only farmer (creator) or current owner can recall
       // ADMIN and REGULATOR can always recall
-      const isAdmin = req.user.role === 'ADMIN';
-      const isRegulator = req.user.role === 'REGULATOR';
+      const isAdmin = req.user.role === "ADMIN";
+      const isRegulator = req.user.role === "REGULATOR";
       const isFarmer = dbBatch.farmer?.userId === req.user.id;
 
       // Check if user is current owner via BatchTransfer
@@ -3450,9 +3475,9 @@ app.post(
         const latestTransfer = await prisma.batchTransfer.findFirst({
           where: {
             batchId: batchId,
-            status: 'COMPLETED'
+            status: "COMPLETED",
           },
-          orderBy: { transferDate: 'desc' }
+          orderBy: { transferDate: "desc" },
         });
 
         if (latestTransfer && latestTransfer.toActorId === req.user.id) {
@@ -3463,12 +3488,13 @@ app.post(
       if (!isAdmin && !isRegulator && !isFarmer && !isCurrentOwner) {
         return res.status(403).json({
           success: false,
-          error: "Only the batch creator (farmer) or current owner can recall this batch",
+          error:
+            "Only the batch creator (farmer) or current owner can recall this batch",
         });
       }
 
       // Check if already recalled
-      if (dbBatch.status === 'RECALLED') {
+      if (dbBatch.status === "RECALLED") {
         return res.status(400).json({
           success: false,
           error: "Batch is already recalled",
@@ -3482,7 +3508,10 @@ app.post(
         gateway = connection.gateway;
         contract = connection.contract;
       } catch (bcConnError) {
-        console.warn("Blockchain connection failed, continuing with database only:", bcConnError.message);
+        console.warn(
+          "Blockchain connection failed, continuing with database only:",
+          bcConnError.message
+        );
       }
 
       // Record on blockchain first
@@ -3491,11 +3520,11 @@ app.post(
         try {
           const recallData = JSON.stringify({
             reason: reason,
-            severity: severity || 'HIGH',
+            severity: severity || "HIGH",
             recalledBy: req.user.id,
             recalledByRole: req.user.role,
             notes: notes || null,
-            recallChildren: recallChildren || false
+            recallChildren: recallChildren || false,
           });
 
           const result = await contract.submitTransaction(
@@ -3517,9 +3546,9 @@ app.post(
       const updatedBatch = await prisma.batch.update({
         where: { id: dbBatch.id },
         data: {
-          status: 'RECALLED',
+          status: "RECALLED",
           recallReason: reason,
-          recallSeverity: severity || 'HIGH',
+          recallSeverity: severity || "HIGH",
           recallNotes: notes || null,
           recalledAt: recallDate,
           recalledBy: req.user.id,
@@ -3528,23 +3557,29 @@ app.post(
       });
 
       // Track affected batches
-      const affectedBatches = [{
-        batchId: batchId,
-        quantity: dbBatch.quantity,
-        unit: dbBatch.unit,
-        previousStatus: previousStatus
-      }];
+      const affectedBatches = [
+        {
+          batchId: batchId,
+          quantity: dbBatch.quantity,
+          unit: dbBatch.unit,
+          previousStatus: previousStatus,
+        },
+      ];
 
       // Recall child batches if requested
-      if (recallChildren && dbBatch.childBatches && dbBatch.childBatches.length > 0) {
+      if (
+        recallChildren &&
+        dbBatch.childBatches &&
+        dbBatch.childBatches.length > 0
+      ) {
         for (const child of dbBatch.childBatches) {
-          if (child.status !== 'RECALLED') {
+          if (child.status !== "RECALLED") {
             await prisma.batch.update({
               where: { id: child.id },
               data: {
-                status: 'RECALLED',
+                status: "RECALLED",
                 recallReason: `Cascade recall from parent batch ${batchId}: ${reason}`,
-                recallSeverity: severity || 'HIGH',
+                recallSeverity: severity || "HIGH",
                 recallNotes: `Parent batch recalled. Original reason: ${reason}`,
                 recalledAt: recallDate,
                 recalledBy: req.user.id,
@@ -3557,7 +3592,7 @@ app.post(
               quantity: child.quantity,
               unit: child.unit,
               previousStatus: child.status,
-              cascadeRecall: true
+              cascadeRecall: true,
             });
           }
         }
@@ -3571,10 +3606,10 @@ app.post(
           resource: batchId,
           metadata: {
             reason: reason,
-            severity: severity || 'HIGH',
+            severity: severity || "HIGH",
             affectedBatches: affectedBatches.length,
             recallChildren: recallChildren || false,
-            notes: notes
+            notes: notes,
           },
         },
       });
@@ -3589,7 +3624,7 @@ app.post(
         message: `Batch ${batchId} has been recalled`,
         recallInfo: {
           reason: reason,
-          severity: severity || 'HIGH',
+          severity: severity || "HIGH",
           recalledBy: req.user.id,
           recalledByRole: req.user.role,
           recallDate: new Date().toISOString(),
@@ -3602,7 +3637,9 @@ app.post(
     } catch (error) {
       console.error("Batch recall error:", error);
       if (gateway) {
-        try { await gateway.disconnect(); } catch (e) {}
+        try {
+          await gateway.disconnect();
+        } catch (e) {}
       }
       res.status(500).json({
         success: false,
@@ -3614,42 +3651,38 @@ app.post(
 );
 
 // Check if a batch is recalled
-app.get(
-  "/api/batch/:batchId/recall-status",
-  authenticate,
-  async (req, res) => {
-    try {
-      const { batchId } = req.params;
+app.get("/api/batch/:batchId/recall-status", authenticate, async (req, res) => {
+  try {
+    const { batchId } = req.params;
 
-      const batch = await prisma.batch.findFirst({
-        where: { batchId: batchId },
-        select: {
-          batchId: true,
-          status: true,
-        },
-      });
+    const batch = await prisma.batch.findFirst({
+      where: { batchId: batchId },
+      select: {
+        batchId: true,
+        status: true,
+      },
+    });
 
-      if (!batch) {
-        return res.status(404).json({
-          success: false,
-          error: "Batch not found",
-        });
-      }
-
-      res.json({
-        success: true,
-        batchId: batchId,
-        isRecalled: batch.status === 'RECALLED',
-      });
-    } catch (error) {
-      console.error("Check recall status error:", error);
-      res.status(500).json({
+    if (!batch) {
+      return res.status(404).json({
         success: false,
-        error: "Failed to check recall status",
+        error: "Batch not found",
       });
     }
+
+    res.json({
+      success: true,
+      batchId: batchId,
+      isRecalled: batch.status === "RECALLED",
+    });
+  } catch (error) {
+    console.error("Check recall status error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to check recall status",
+    });
   }
-);
+});
 
 // ===============================
 // PROCESSOR ENDPOINTS
@@ -4064,9 +4097,10 @@ app.put(
               ? parseFloat(wasteQuantity)
               : mostRecentRecord.wasteQuantity,
             operatorName: `${req.user.username} (completed)`,
-            qualityTests: qualityGrade
-              ? JSON.stringify({ grade: qualityGrade, notes: completionNotes })
-              : null,
+            // qualityTests: qualityGrade
+            //   ? JSON.stringify({ grade: qualityGrade, notes: completionNotes })
+            //   : null,
+            qualityTests: { grade: qualityGrade, notes: completionNotes },
           },
         });
       }
@@ -4481,6 +4515,98 @@ app.get("/api/batches/active-locations", async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Internal server error fetching collective location data",
+    });
+  }
+});
+
+// GET /api/analytics/weather-quality-correlation
+app.get("/api/analytics/weather-quality-correlation", async (req, res) => {
+  try {
+    const batches = await prisma.batch.findMany({
+      where: {
+        OR: [
+          { moistureContent: { not: null } },
+          { qualityGrade: { not: null } },
+        ],
+      },
+      include: {
+        farmLocation: true,
+        processingRecords: {
+          orderBy: { processingDate: "desc" },
+        },
+      },
+    });
+
+    const batchIds = batches.map((b) => b.id);
+    const distributionRecords = await prisma.distributionRecord.findMany({
+      where: { batchIDHash: { in: batchIds } },
+    });
+
+    const processingRecords = await prisma.processingRecord.findMany({
+      where: { batchId: { in: batchIds } },
+    });
+
+    const correlationData = [];
+
+    batches.forEach((batch) => {
+      const procLogs = processingRecords.filter((p) => p.batchId === batch.id);
+
+      if (batch.farmLocation) {
+        correlationData.push({
+          batchId: batch.batchId,
+          moisture: batch.moistureContent || 0,
+          quality: batch.qualityGrade || "N/A",
+          stage: "farm",
+          temp: batch.farmLocation.temperature,
+          humidity: batch.farmLocation.humidity,
+        });
+      }
+      procLogs.forEach((p) => {
+        correlationData.push({
+          batchId: batch.batchId,
+          moisture: batch.moistureContent || 0,
+          quality: p.qualityTests.grade || "N/A",
+          stage: "processing",
+          temp: parseFloat(p.temperature) || null,
+          humidity: parseFloat(p.humidity) || null,
+        });
+      });
+    });
+
+    const weatherImpact = await prisma.$queryRaw`
+      SELECT 
+        weather_main as condition,
+        COUNT(*) as "totalOccurrences",
+        COUNT(*) FILTER (WHERE "qualityTests"->>'grade' = 'A') as "gradeA",
+        COUNT(*) FILTER (WHERE "qualityTests"->>'grade' = 'B') as "gradeB",
+        COUNT(*) FILTER (WHERE "qualityTests"->>'grade' = 'C') as "gradeC"
+      FROM (
+        SELECT weather_main, "qualityTests" FROM processing_records WHERE weather_main IS NOT NULL
+        UNION ALL
+        SELECT weather_main, NULL as "qualityTests" FROM distribution_records WHERE weather_main IS NOT NULL
+      ) as combined_weather
+      GROUP BY weather_main
+      ORDER BY "totalOccurrences" DESC
+    `;
+
+    const serializedWeatherImpact = weatherImpact.map((item) => ({
+      ...item,
+      totalOccurrences: Number(item.totalOccurrences),
+      gradeA: Number(item.gradeA),
+      gradeB: Number(item.gradeB),
+      gradeC: Number(item.gradeC),
+    }));
+
+    res.json({
+      success: true,
+      correlationData,
+      weatherImpact: serializedWeatherImpact,
+    });
+  } catch (error) {
+    console.error("Analytics Error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to aggregate correlation data",
     });
   }
 });
@@ -5788,7 +5914,10 @@ app.get(
         );
         blockchainBatches = JSON.parse(result.toString());
       } catch (bcError) {
-        console.warn("Blockchain query failed, using database fallback:", bcError.message);
+        console.warn(
+          "Blockchain query failed, using database fallback:",
+          bcError.message
+        );
       }
 
       // Also get batches from database where distributor has received them
@@ -5796,61 +5925,68 @@ app.get(
       const dbTransfers = await prisma.batchTransfer.findMany({
         where: {
           toActorId: distributorId,
-          toActorRole: 'DISTRIBUTOR',
-          status: 'COMPLETED'
+          toActorRole: "DISTRIBUTOR",
+          status: "COMPLETED",
         },
-        select: { batchId: true }
+        select: { batchId: true },
       });
 
       // Get unique batch IDs from transfers
-      const transferredBatchIds = [...new Set(dbTransfers.map(t => t.batchId))];
+      const transferredBatchIds = [
+        ...new Set(dbTransfers.map((t) => t.batchId)),
+      ];
 
       // Get batches from database that were transferred to this distributor
       const dbBatches = await prisma.batch.findMany({
         where: {
           batchId: { in: transferredBatchIds },
-          status: { notIn: ['SOLD', 'RECALLED'] }
+          status: { notIn: ["SOLD", "RECALLED"] },
         },
         include: {
           farmer: {
-            select: { firstName: true, lastName: true, farmName: true }
+            select: { firstName: true, lastName: true, farmName: true },
           },
           farmLocation: {
-            select: { latitude: true, longitude: true, location: true }
+            select: { latitude: true, longitude: true, location: true },
           },
           childBatches: {
-            select: { batchId: true, quantity: true, splitReason: true, status: true }
-          }
-        }
+            select: {
+              batchId: true,
+              quantity: true,
+              splitReason: true,
+              status: true,
+            },
+          },
+        },
       });
 
       // Get the internal IDs of transferred batches
-      const dbBatchInternalIds = dbBatches.map(b => b.id);
+      const dbBatchInternalIds = dbBatches.map((b) => b.id);
 
       // Also get split batches - children of batches this distributor owns
       const splitBatches = await prisma.batch.findMany({
         where: {
           parentBatchId: { in: dbBatchInternalIds },
-          status: { notIn: ['SOLD', 'RECALLED'] }
+          status: { notIn: ["SOLD", "RECALLED"] },
         },
         include: {
           farmer: {
-            select: { firstName: true, lastName: true, farmName: true }
+            select: { firstName: true, lastName: true, farmName: true },
           },
           farmLocation: {
-            select: { latitude: true, longitude: true, location: true }
+            select: { latitude: true, longitude: true, location: true },
           },
           parentBatch: {
-            select: { batchId: true }
-          }
-        }
+            select: { batchId: true },
+          },
+        },
       });
 
       // All split batches from owned parents are valid
       const validSplitBatches = splitBatches;
 
       // Merge blockchain and database results, avoiding duplicates
-      const addedBatchIds = new Set(blockchainBatches.map(b => b.batchId));
+      const addedBatchIds = new Set(blockchainBatches.map((b) => b.batchId));
       const combinedBatches = [...blockchainBatches];
 
       // Add database batches that aren't already added
@@ -5871,17 +6007,23 @@ app.get(
             currency: dbBatch.currency,
             totalBatchValue: dbBatch.totalBatchValue,
             certifications: dbBatch.certifications,
-            parentBatchId: dbBatch.parentBatchId ? (dbBatch.parentBatch?.batchId || dbBatch.parentBatchId) : null,
+            parentBatchId: dbBatch.parentBatchId
+              ? dbBatch.parentBatch?.batchId || dbBatch.parentBatchId
+              : null,
             splitReason: dbBatch.splitReason,
             childBatches: dbBatch.childBatches || [],
-            farmer: dbBatch.farmer ? `${dbBatch.farmer.firstName} ${dbBatch.farmer.lastName}` : null,
+            farmer: dbBatch.farmer
+              ? `${dbBatch.farmer.firstName} ${dbBatch.farmer.lastName}`
+              : null,
             farmName: dbBatch.farmer?.farmName,
             location: dbBatch.farmLocation?.location,
-            coordinates: dbBatch.farmLocation ? {
-              latitude: dbBatch.farmLocation.latitude,
-              longitude: dbBatch.farmLocation.longitude
-            } : null,
-            source: 'database'
+            coordinates: dbBatch.farmLocation
+              ? {
+                  latitude: dbBatch.farmLocation.latitude,
+                  longitude: dbBatch.farmLocation.longitude,
+                }
+              : null,
+            source: "database",
           });
         }
       }
@@ -5896,12 +6038,14 @@ app.get(
         data: combinedBatches,
         count: combinedBatches.length,
         blockchainCount: blockchainBatches.length,
-        databaseCount: combinedBatches.length - blockchainBatches.length
+        databaseCount: combinedBatches.length - blockchainBatches.length,
       });
     } catch (error) {
       console.error("Get distributor batches error:", error);
       if (gateway) {
-        try { await gateway.disconnect(); } catch (e) {}
+        try {
+          await gateway.disconnect();
+        } catch (e) {}
       }
       res.status(500).json({
         success: false,
@@ -5950,6 +6094,9 @@ app.post(
       const weather_desc = weatherData?.weather_description;
       const weather_main = weatherData?.weather_main;
       const humidity = weatherData?.humidity;
+      const batch = await prisma.batch.findUnique({
+        where: { batchId: batchId },
+      });
 
       const distributionData = {
         distributionType: distributionType || null,
@@ -5996,6 +6143,7 @@ app.post(
       const dbDistribution = await prisma.distributionRecord.create({
         data: {
           batchId: batchId,
+          batchIDHash: batch.id,
           distributorId: distributorId,
           distributionType: distributionType || null,
           warehouseLocation: warehouseLocation || null,

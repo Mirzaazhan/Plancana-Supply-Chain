@@ -535,6 +535,7 @@ model DistributionRecord {
   id            String @id @default(cuid())
   batchId       String
   distributorId String
+  batchIDHash   String?
 
   // Distribution details
   distributionType  String? // local, regional, national, export

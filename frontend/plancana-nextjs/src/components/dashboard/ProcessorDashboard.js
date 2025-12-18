@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../context/AuthContext";
+import { Sun, CloudRain, MapPin, Droplets, Wind } from "lucide-react";
 import {
   processorService,
   dashboardService,
@@ -44,6 +45,19 @@ const ProcessorDashboard = () => {
     totalProcessed: 0,
   });
   const [loading, setLoading] = useState(true);
+  // Weather state with loading indicator
+  const [weatherData, setWeatherData] = useState({
+    temperature: "",
+    humidity: "",
+    windSpeed: "",
+    weather_description: "",
+    location: "",
+    forecast: [],
+    loading: true,
+    error: false,
+  });
+  const [currentLatitude, setCurrentLatitude] = useState(null);
+  const [currentLongitude, setCurrentLongitude] = useState(null);
 
   // View state for BatchDetails
   const [currentView, setCurrentView] = useState("dashboard");
@@ -58,9 +72,168 @@ const ProcessorDashboard = () => {
   const [selectedBatch, setSelectedBatch] = useState(null);
   const [selectedBatchForRecall, setSelectedBatchForRecall] = useState(null);
 
+  // Optimized geolocation with timeout and fallback
+  const getBrowserLocation = useCallback(() => {
+    if (!navigator.geolocation) {
+      console.error("Geolocation is not supported by this browser.");
+      setCurrentLatitude(3.139); // Kuala Lumpur as fallback
+      setCurrentLongitude(101.6869);
+      return;
+    }
+
+    // Add timeout to prevent hanging
+    const timeoutId = setTimeout(() => {
+      console.warn("Geolocation timeout, using fallback");
+      setCurrentLatitude(3.139);
+      setCurrentLongitude(101.6869);
+    }, 5000); // 5 second timeout
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        clearTimeout(timeoutId);
+        setCurrentLatitude(position.coords.latitude);
+        setCurrentLongitude(position.coords.longitude);
+      },
+      (error) => {
+        clearTimeout(timeoutId);
+        console.error("Geolocation Error:", error.message);
+        // Use fallback on error
+        setCurrentLatitude(3.139);
+        setCurrentLongitude(101.6869);
+      },
+      {
+        enableHighAccuracy: false, // Set to false for faster response
+        timeout: 5000,
+        maximumAge: 300000, // Cache for 5 minutes
+      }
+    );
+  }, []);
+
+  // Fetch weather data with retry logic and caching
+  const fetchWeatherData = useCallback(async (lat, lon, retryCount = 0) => {
+    const MAX_RETRIES = 2;
+    const CACHE_KEY = `weather_${lat}_${lon}`;
+    const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
+
+    // Check cache first
+    try {
+      const cached = localStorage.getItem(CACHE_KEY);
+      if (cached) {
+        const { data, timestamp } = JSON.parse(cached);
+        if (Date.now() - timestamp < CACHE_DURATION) {
+          setWeatherData((prev) => ({ ...data, loading: false }));
+          return;
+        }
+      }
+    } catch (e) {
+      // Cache read failed, continue to fetch
+    }
+
+    setWeatherData((prev) => ({ ...prev, loading: true, error: false }));
+
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+
+      const response = await fetch(`/api/weather?lat=${lat}&lon=${lon}`, {
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (!data || !data.weather) {
+        throw new Error("Invalid weather data received");
+      }
+
+      const currentWeather = data.weather;
+      const dailyForecastsList = data.forecast?.list ?? [];
+
+      const filteredForecasts = dailyForecastsList
+        .filter((item) => item.dt_txt.includes("12:00:00"))
+        .slice(0, 5)
+        .map((item) => ({
+          day: new Date(item.dt * 1000).toLocaleDateString("en-US", {
+            weekday: "short",
+          }),
+          temp: Math.round(item.main?.temp ?? 0) + "°",
+          main: item.weather?.[0]?.main ?? "Unknown",
+          description: item.weather?.[0]?.description ?? "No data",
+        }));
+
+      const weatherState = {
+        temperature: Math.round(currentWeather.main?.temp ?? 0) + "°C",
+        humidity: (currentWeather.main?.humidity ?? "N/A") + "%",
+        windSpeed: (currentWeather.wind?.speed ?? "N/A") + " km/h",
+        weather_description: currentWeather.weather?.[0]?.description ?? "N/A",
+        location:
+          (currentWeather.name ?? "Unknown") +
+          ", " +
+          (currentWeather.sys?.country ?? "??"),
+        forecast: filteredForecasts,
+        loading: false,
+        error: false,
+      };
+
+      setWeatherData(weatherState);
+
+      // Cache the result
+      try {
+        localStorage.setItem(
+          CACHE_KEY,
+          JSON.stringify({
+            data: weatherState,
+            timestamp: Date.now(),
+          })
+        );
+      } catch (e) {
+        // Cache write failed, not critical
+      }
+    } catch (error) {
+      console.error("Error fetching weather data:", error);
+
+      // Retry logic
+      if (retryCount < MAX_RETRIES) {
+        console.log(
+          `Retrying weather fetch... (${retryCount + 1}/${MAX_RETRIES})`
+        );
+        setTimeout(() => {
+          fetchWeatherData(lat, lon, retryCount + 1);
+        }, 2000 * (retryCount + 1)); // Exponential backoff
+      } else {
+        // All retries failed
+        setWeatherData((prev) => ({
+          ...prev,
+          loading: false,
+          error: true,
+          temperature: "N/A",
+          humidity: "N/A",
+          windSpeed: "N/A",
+          weather_description: "Unable to load weather",
+          location: "Weather unavailable",
+        }));
+        toast.error("Unable to load weather data. Please try again later.");
+      }
+    }
+  }, []);
+
   useEffect(() => {
     fetchDashboardData();
   }, []);
+  useEffect(() => {
+    getBrowserLocation();
+  }, [getBrowserLocation]);
+
+  useEffect(() => {
+    if (currentLatitude !== null && currentLongitude !== null) {
+      fetchWeatherData(currentLatitude, currentLongitude);
+    }
+  }, [currentLatitude, currentLongitude, fetchWeatherData]);
 
   const fetchDashboardData = async () => {
     try {
@@ -205,7 +378,9 @@ const ProcessorDashboard = () => {
   };
 
   const handleSplitSuccess = (result) => {
-    toast.success(`Batch split successfully! New batch: ${result.childBatch.batchId}`);
+    toast.success(
+      `Batch split successfully! New batch: ${result.childBatch.batchId}`
+    );
     fetchDashboardData(); // Refresh data to show updated batches
   };
 
@@ -216,7 +391,9 @@ const ProcessorDashboard = () => {
   };
 
   const handleRecallSuccess = (result) => {
-    toast.success(`Batch recalled: ${result.totalAffectedBatches} batch(es) affected`);
+    toast.success(
+      `Batch recalled: ${result.totalAffectedBatches} batch(es) affected`
+    );
     fetchDashboardData(); // Refresh data
     setShowRecallModal(false);
     setSelectedBatchForRecall(null);
@@ -345,7 +522,8 @@ const ProcessorDashboard = () => {
                 Complete Processing
               </button>
             )}
-            {(batch.status === "PROCESSED" || batch.status === "PROCESSING") && (
+            {(batch.status === "PROCESSED" ||
+              batch.status === "PROCESSING") && (
               <button
                 onClick={() => handleSplitBatch(batch)}
                 className="px-4 py-2 bg-pink-600 hover:bg-pink-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center"
@@ -410,39 +588,125 @@ const ProcessorDashboard = () => {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard
-          title="Available Batches"
-          value={dashboardStats.availableBatches || 12}
-          icon={Package}
-          color="green"
-          description="Ready for processing"
-          trend="+3"
-        />
-        <StatCard
-          title="Processing Now"
-          value={dashboardStats.processingBatches || 5}
-          icon={Clock}
-          color="orange"
-          description="Currently in progress"
-          trend="+2"
-        />
-        <StatCard
-          title="Completed Today"
-          value={dashboardStats.completedToday || 18}
-          icon={CheckCircle}
-          color="blue"
-          description="Finished today"
-          trend="+12%"
-        />
-        <StatCard
-          title="Total Processed"
-          value={dashboardStats.totalProcessed || 2847}
-          icon={BarChart3}
-          color="purple"
-          description="All time total"
-          trend="+8.3%"
-        />
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <StatCard
+            title="Available Batches"
+            value={dashboardStats.availableBatches || 12}
+            icon={Package}
+            color="green"
+            description="Ready for processing"
+            trend="+3"
+          />
+          <StatCard
+            title="Processing Now"
+            value={dashboardStats.processingBatches || 5}
+            icon={Clock}
+            color="orange"
+            description="Currently in progress"
+            trend="+2"
+          />
+          <StatCard
+            title="Completed Today"
+            value={dashboardStats.completedToday || 18}
+            icon={CheckCircle}
+            color="blue"
+            description="Finished today"
+            trend="+12%"
+          />
+          <StatCard
+            title="Total Processed"
+            value={dashboardStats.totalProcessed || 2847}
+            icon={BarChart3}
+            color="purple"
+            description="All time total"
+            trend="+8.3%"
+          />
+        </div>
+        <div className="lg:col-span-1">
+          {/* Weather Conditions */}
+          <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-6 text-white">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-semibold">Weather Conditions</h3>
+              <Sun className="h-6 w-6" />
+            </div>
+
+            {weatherData.loading ? (
+              <div className="flex items-center justify-center h-48">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
+              </div>
+            ) : weatherData.error ? (
+              <div className="text-center py-8">
+                <CloudRain className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p className="text-blue-100">Weather data unavailable</p>
+                <button
+                  onClick={() =>
+                    fetchWeatherData(currentLatitude, currentLongitude)
+                  }
+                  className="mt-4 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm transition-colors"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="mb-6">
+                  <div className="text-5xl font-bold mb-2">
+                    {weatherData.temperature}
+                  </div>
+                  <div className="flex items-center text-blue-100">
+                    <MapPin className="h-4 w-4 mr-1" />
+                    <span>{weatherData.location}</span>
+                  </div>
+                </div>
+
+                <div className="space-y-3 mb-6">
+                  <div className="flex items-center justify-between py-2 border-b border-blue-400">
+                    <div className="flex items-center">
+                      <Droplets className="h-5 w-5 mr-2" />
+                      <span>Humidity</span>
+                    </div>
+                    <span className="font-semibold">
+                      {weatherData.humidity}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-between py-2 border-b border-blue-400">
+                    <div className="flex items-center">
+                      <Wind className="h-5 w-5 mr-2" />
+                      <span>Wind Speed</span>
+                    </div>
+                    <span className="font-semibold">
+                      {weatherData.windSpeed}
+                    </span>
+                  </div>
+
+                  {/* <div className="flex items-center justify-between py-2">
+              <div className="flex items-center">
+                <CloudRain className="h-5 w-5 mr-2" />
+                <span>Precipitation</span>
+              </div>
+              <span className="font-semibold">{weatherData.precipitation}</span>
+            </div> */}
+                </div>
+
+                <div>
+                  <p className="text-sm text-blue-100 mb-3">5-Day Forecast</p>
+                  <div className="grid grid-cols-5 gap-2">
+                    {weatherData.forecast.map((day, index) => (
+                      <div key={index} className="text-center">
+                        <p className="text-xs mb-1">{day.day}</p>
+                        <Sun className="h-5 w-5 mx-auto mb-1" />
+                        <p className="text-sm font-semibold">{day.temp}</p>
+                        <p className="text-xs">{day.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Processing Queue Section */}
