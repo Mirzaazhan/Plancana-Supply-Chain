@@ -93,8 +93,8 @@ const Layout = ({ children }) => {
         href: "/farmer/batch-registration",
         icon: FileText,
       },
-      { name: "GIS Mapping", href: "/farmer/gis", icon: Map },
-      { name: "Quality Analytics", href: "/farmer/analytics", icon: BarChart3 },
+      { name: "GIS Mapping", href: "/gis", icon: Map },
+      { name: "Quality Analytics", href: "/analytics", icon: BarChart3 },
       {
         name: "Transactions",
         href: "/farmer/transactions",
@@ -107,12 +107,18 @@ const Layout = ({ children }) => {
     ],
     PROCESSOR: [
       { name: "Dashboard", href: "/processor/dashboard", icon: LayoutGrid },
+      { name: "GIS Mapping", href: "/gis", icon: Map },
+      { name: "Quality Analytics", href: "/analytics", icon: BarChart3 },
       { name: "Processing Queue", href: "/processor/queue", icon: Clock },
       { name: "My Processes", href: "/processor/processes", icon: Factory },
       { name: "Quality Control", href: "/processor/quality", icon: SearchIcon },
       { name: "Reports", href: "/processor/reports", icon: BarChart3 },
       { name: "Profile", href: "/processor/profile", icon: User },
       { name: "Settings", href: "/processor/settings", icon: Settings },
+    ],
+    DISTRIBUTOR: [
+      { name: "Dashboard", href: "/distributor/dashboard", icon: LayoutGrid },
+      { name: "GIS Mapping", href: "/gis", icon: Map },
     ],
     ADMIN: [
       { name: "Dashboard", href: "/admin/dashboard", icon: LayoutGrid },

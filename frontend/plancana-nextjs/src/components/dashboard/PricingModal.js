@@ -1,25 +1,31 @@
 // src/components/dashboard/PricingModal.js
-'use client';
+"use client";
 
-import React, { useState } from 'react';
-import { XMarkIcon, CurrencyDollarIcon } from '@heroicons/react/24/outline';
+import React, { useState } from "react";
+import { XMarkIcon, CurrencyDollarIcon } from "@heroicons/react/24/outline";
 
-const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' }) => {
+const PricingModal = ({
+  isOpen,
+  onClose,
+  batch,
+  onSubmit,
+  level = "PROCESSOR",
+}) => {
   const [formData, setFormData] = useState({
-    pricePerUnit: '',
-    totalValue: '',
+    pricePerUnit: "",
+    totalValue: "",
     breakdown: {
-      purchasePrice: '',
-      processingCost: '',
-      packaging: '',
-      qualityTesting: '',
-      margin: ''
+      purchasePrice: "",
+      processingCost: "",
+      packaging: "",
+      qualityTesting: "",
+      margin: "",
     },
-    notes: '',
+    notes: "",
     // Processing completion fields (for PROCESSOR level)
-    qualityGrade: 'A',
-    outputQuantity: batch?.quantity || '',
-    wasteQuantity: '0'
+    qualityGrade: "A",
+    outputQuantity: batch?.quantity || "",
+    wasteQuantity: "0",
   });
 
   const [calculating, setCalculating] = useState(false);
@@ -29,10 +35,10 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
     const price = parseFloat(value) || 0;
     const quantity = parseFloat(batch?.quantity) || 0;
 
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       pricePerUnit: value,
-      totalValue: (price * quantity).toFixed(2)
+      totalValue: (price * quantity).toFixed(2),
     }));
   };
 
@@ -40,7 +46,7 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
   const handleBreakdownChange = (field, value) => {
     const newBreakdown = {
       ...formData.breakdown,
-      [field]: value
+      [field]: value,
     };
 
     // Calculate total price from breakdown
@@ -50,11 +56,11 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
 
     const quantity = parseFloat(batch?.quantity) || 0;
 
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       breakdown: newBreakdown,
       pricePerUnit: total.toFixed(2),
-      totalValue: (total * quantity).toFixed(2)
+      totalValue: (total * quantity).toFixed(2),
     }));
   };
 
@@ -63,17 +69,20 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
 
     // Validate
     if (!formData.pricePerUnit || !formData.totalValue) {
-      alert('Please fill in pricing information');
+      alert("Please fill in pricing information");
       return;
     }
 
     // Clean up breakdown - remove empty fields
-    const cleanedBreakdown = Object.entries(formData.breakdown).reduce((acc, [key, value]) => {
-      if (value && parseFloat(value) > 0) {
-        acc[key] = parseFloat(value);
-      }
-      return acc;
-    }, {});
+    const cleanedBreakdown = Object.entries(formData.breakdown).reduce(
+      (acc, [key, value]) => {
+        if (value && parseFloat(value) > 0) {
+          acc[key] = parseFloat(value);
+        }
+        return acc;
+      },
+      {}
+    );
 
     const pricingData = {
       level,
@@ -84,7 +93,7 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
       // Include completion data for PROCESSOR level
       qualityGrade: formData.qualityGrade,
       outputQuantity: formData.outputQuantity,
-      wasteQuantity: formData.wasteQuantity
+      wasteQuantity: formData.wasteQuantity,
     };
 
     onSubmit(pricingData);
@@ -116,15 +125,21 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <span className="text-gray-500">Batch ID:</span>
-              <span className="ml-2 font-semibold text-gray-900">{batch?.batchId}</span>
+              <span className="ml-2 font-semibold text-gray-900">
+                {batch?.batchId}
+              </span>
             </div>
             <div>
               <span className="text-gray-500">Product:</span>
-              <span className="ml-2 font-semibold text-gray-900">{batch?.productType}</span>
+              <span className="ml-2 font-semibold text-gray-900">
+                {batch?.productType}
+              </span>
             </div>
             <div>
               <span className="text-gray-500">Quantity:</span>
-              <span className="ml-2 font-semibold text-gray-900">{batch?.quantity} {batch?.unit}</span>
+              <span className="ml-2 font-semibold text-gray-900">
+                {batch?.quantity} {batch?.unit}
+              </span>
             </div>
             <div>
               <span className="text-gray-500">Level:</span>
@@ -136,7 +151,7 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
         {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 space-y-6">
           {/* Processing Completion Section (PROCESSOR only) */}
-          {level === 'PROCESSOR' && (
+          {level === "PROCESSOR" && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">
                 Processing Completion Details
@@ -149,11 +164,17 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
                   </label>
                   <select
                     value={formData.qualityGrade}
-                    onChange={(e) => setFormData(prev => ({ ...prev, qualityGrade: e.target.value }))}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        qualityGrade: e.target.value,
+                      }))
+                    }
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
                     required
                   >
-                    <option value="A">Grade A (Premium)</option>
+                    <option value="premium">Grade A+ (Premium)</option>
+                    <option value="A">Grade A (Really Good)</option>
                     <option value="B">Grade B (Good)</option>
                     <option value="C">Grade C (Standard)</option>
                     <option value="D">Grade D (Low)</option>
@@ -169,12 +190,19 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
                     step="0.01"
                     min="0"
                     value={formData.outputQuantity}
-                    onChange={(e) => setFormData(prev => ({ ...prev, outputQuantity: e.target.value }))}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        outputQuantity: e.target.value,
+                      }))
+                    }
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
                     placeholder="0.00"
                     required
                   />
-                  <p className="text-xs text-gray-500 mt-1">Original: {batch?.quantity} {batch?.unit}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Original: {batch?.quantity} {batch?.unit}
+                  </p>
                 </div>
 
                 <div>
@@ -186,11 +214,18 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
                     step="0.01"
                     min="0"
                     value={formData.wasteQuantity}
-                    onChange={(e) => setFormData(prev => ({ ...prev, wasteQuantity: e.target.value }))}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        wasteQuantity: e.target.value,
+                      }))
+                    }
                     className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-gray-900"
                     placeholder="0.00"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Loss/waste amount</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Loss/waste amount
+                  </p>
                 </div>
               </div>
             </div>
@@ -228,7 +263,8 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
               placeholder="Auto-calculated"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Calculated: {formData.pricePerUnit || 0} × {batch?.quantity || 0} {batch?.unit}
+              Calculated: {formData.pricePerUnit || 0} × {batch?.quantity || 0}{" "}
+              {batch?.unit}
             </p>
           </div>
 
@@ -238,7 +274,8 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
               Cost Breakdown (Optional)
             </h3>
             <p className="text-sm text-gray-600 mb-4">
-              Add breakdown details to show transparency. The total will auto-calculate price per unit.
+              Add breakdown details to show transparency. The total will
+              auto-calculate price per unit.
             </p>
 
             <div className="grid grid-cols-2 gap-4">
@@ -251,7 +288,9 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
                   step="0.01"
                   min="0"
                   value={formData.breakdown.purchasePrice}
-                  onChange={(e) => handleBreakdownChange('purchasePrice', e.target.value)}
+                  onChange={(e) =>
+                    handleBreakdownChange("purchasePrice", e.target.value)
+                  }
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500"
                   placeholder="0.00"
                 />
@@ -266,7 +305,9 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
                   step="0.01"
                   min="0"
                   value={formData.breakdown.processingCost}
-                  onChange={(e) => handleBreakdownChange('processingCost', e.target.value)}
+                  onChange={(e) =>
+                    handleBreakdownChange("processingCost", e.target.value)
+                  }
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500"
                   placeholder="0.00"
                 />
@@ -281,7 +322,9 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
                   step="0.01"
                   min="0"
                   value={formData.breakdown.packaging}
-                  onChange={(e) => handleBreakdownChange('packaging', e.target.value)}
+                  onChange={(e) =>
+                    handleBreakdownChange("packaging", e.target.value)
+                  }
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500"
                   placeholder="0.00"
                 />
@@ -296,7 +339,9 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
                   step="0.01"
                   min="0"
                   value={formData.breakdown.qualityTesting}
-                  onChange={(e) => handleBreakdownChange('qualityTesting', e.target.value)}
+                  onChange={(e) =>
+                    handleBreakdownChange("qualityTesting", e.target.value)
+                  }
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500"
                   placeholder="0.00"
                 />
@@ -311,7 +356,9 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
                   step="0.01"
                   min="0"
                   value={formData.breakdown.margin}
-                  onChange={(e) => handleBreakdownChange('margin', e.target.value)}
+                  onChange={(e) =>
+                    handleBreakdownChange("margin", e.target.value)
+                  }
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500"
                   placeholder="0.00"
                 />
@@ -319,12 +366,17 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
             </div>
 
             {/* Breakdown Total */}
-            {Object.values(formData.breakdown).some(v => v) && (
+            {Object.values(formData.breakdown).some((v) => v) && (
               <div className="mt-4 p-3 bg-green-50 rounded-md border border-green-200">
                 <div className="flex justify-between text-sm">
-                  <span className="font-medium text-gray-700">Breakdown Total:</span>
+                  <span className="font-medium text-gray-700">
+                    Breakdown Total:
+                  </span>
                   <span className="font-bold text-green-700">
-                    MYR {Object.values(formData.breakdown).reduce((sum, val) => sum + (parseFloat(val) || 0), 0).toFixed(2)}
+                    MYR{" "}
+                    {Object.values(formData.breakdown)
+                      .reduce((sum, val) => sum + (parseFloat(val) || 0), 0)
+                      .toFixed(2)}
                   </span>
                 </div>
               </div>
@@ -338,7 +390,9 @@ const PricingModal = ({ isOpen, onClose, batch, onSubmit, level = 'PROCESSOR' })
             </label>
             <textarea
               value={formData.notes}
-              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+              onChange={(e) =>
+                setFormData({ ...formData, notes: e.target.value })
+              }
               rows={3}
               className="w-full px-4 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-green-500 focus:border-green-500"
               placeholder="Add any additional notes about pricing..."

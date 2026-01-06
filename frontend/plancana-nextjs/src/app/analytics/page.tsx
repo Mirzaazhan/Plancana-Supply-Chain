@@ -4,7 +4,7 @@ import AnalyticDashboard from "@/components/dashboard/AnalyticDashboard";
 
 export default function AnalyticsPage() {
   return (
-    <ProtectedRoute roles={["FARMER"]}>
+    <ProtectedRoute roles={["FARMER", "PROCESSOR"]}>
       <Layout>
         <AnalyticDashboard />
       </Layout>

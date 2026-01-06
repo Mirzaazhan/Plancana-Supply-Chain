@@ -146,15 +146,15 @@ const FarmerDashboard = () => {
       },
       (error) => {
         clearTimeout(timeoutId);
-        console.error("Geolocation Error:", error.message);
+        console.error("Geolocation Error:", error.message || error);
         // Use fallback on error
         setCurrentLatitude(3.139);
         setCurrentLongitude(101.6869);
       },
       {
         enableHighAccuracy: false, // Set to false for faster response
-        timeout: 5000,
-        maximumAge: 300000, // Cache for 5 minutes
+        timeout: 3000,
+        maximumAge: 600000, // Cache for 5 minutes
       }
     );
   }, []);
@@ -801,7 +801,7 @@ const FarmerDashboard = () => {
           <div className="relative">
             <div
               className="h-80 rounded-xl mb-4 overflow-hidden cursor-pointer"
-              onClick={() => router.push("/farmer/gis")}
+              onClick={() => router.push("/gis")}
             >
               <ArcGISMap
                 webMapId={

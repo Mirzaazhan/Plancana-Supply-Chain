@@ -16,7 +16,7 @@ const page = () => {
   return (
     <>
       <div className="h-full">
-        <ProtectedRoute roles={["FARMER"]}>
+        <ProtectedRoute roles={["FARMER", "PROCESSOR", "DISTRIBUTOR"]}>
           <Layout>
             <div className="h-full">
               {" "}
