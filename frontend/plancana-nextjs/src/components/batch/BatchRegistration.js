@@ -216,7 +216,9 @@ const BatchRegistration = () => {
           formData.cropType &&
           formData.crop &&
           formData.quantity &&
-          formData.location
+          formData.location &&
+          formData.qualityGrade &&
+          formData.moistureContent
         );
       case 1: // Farm Details (optional step)
         return true; // All fields in this step are optional
@@ -337,7 +339,7 @@ const BatchRegistration = () => {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Crop Type *
+                      Crop Type <span className="text-red-500">*</span>
                     </label>
                     <select
                       value={formData.cropType}
@@ -401,7 +403,7 @@ const BatchRegistration = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Quantity *
+                        Quantity <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="number"
@@ -543,10 +545,11 @@ const BatchRegistration = () => {
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Quality Grade
+                      Quality Grade <span className="text-red-500">*</span>
                     </label>
                     <select
                       value={formData.qualityGrade}
+                      required
                       onChange={(e) =>
                         handleInputChange("qualityGrade", e.target.value)
                       }
@@ -564,13 +567,15 @@ const BatchRegistration = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Moisture Content (%)
+                        Moisture Content (%){" "}
+                        <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="number"
                         step="0.1"
                         placeholder="0.0"
                         value={formData.moistureContent}
+                        required
                         onChange={(e) =>
                           handleInputChange("moistureContent", e.target.value)
                         }
@@ -621,7 +626,7 @@ const BatchRegistration = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
-                        Price per Unit *
+                        Price per Unit <span className="text-red-500">*</span>
                       </label>
                       <input
                         type="number"

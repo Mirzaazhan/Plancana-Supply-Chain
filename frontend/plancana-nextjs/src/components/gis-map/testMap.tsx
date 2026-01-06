@@ -84,30 +84,128 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
     }
   }
 
+  // const applyFilters = () => {
+  //   const startTime = startDate ? new Date(startDate).getTime() : null;
+  //   const endTime = endDate ? new Date(endDate).getTime() + 86400000 : null;
+
+  //   if (!locationsLayerRef.current || !routesLayerRef.current) return;
+
+  //   let expressions: string[] = [];
+  //   if (selectedBatchId) {
+  //     // BATCH-2026-05-A
+  //     const parts = selectedBatchId.split("-"); // ["BATCH", "2026", "05", "A"]
+  //     const isChildBatch = parts.length > 3; // true if more than 3 parts // this chase is true
+  //     if (isChildBatch) {
+  //       //true
+  //       const parentBatchId = parts.slice(0, 3).join("-"); // "BATCH-2026-05"
+  //       expressions.push(
+  //         `((batchId = '${parentBatchId}' AND isParentPath = 'true' AND timestampNum <= splitTimestamp) OR batchId = '${selectedBatchId}')`
+  //       );
+  //     } else {
+  //       expressions.push(`batchId = '${selectedBatchId}'`);
+  //     }
+  //   }
+  //   if (startDate) expressions.push(`timestampNum >= ${startTime}`);
+  //   if (endDate) expressions.push(`timestampNum <= ${endTime}`);
+
+  //   locationsLayerRef.current.definitionExpression =
+  //     expressions.length > 0 ? expressions.join(" AND ") : "1=1";
+
+  //   routesLayerRef.current.graphics.forEach((graphic: any) => {
+  //     const attr = graphic.attributes;
+  //     let isPathValid = true;
+  //     if (selectedBatchId) {
+  //       const isDirectBatch = attr.batchIdName === selectedBatchId;
+
+  //       const isParentOfSelected =
+  //         attr.isParentPath === true &&
+  //         selectedBatchId.startsWith(attr.batchIdName + "-") &&
+  //         attr.splitTimestamp !== null &&
+  //         attr.splitTimestamp !== undefined &&
+  //         attr.timestamp !== null &&
+  //         attr.timestamp !== undefined &&
+  //         attr.timestamp <= attr.splitTimestamp;
+
+  //       isPathValid = isDirectBatch || isParentOfSelected;
+  //     } else {
+  //       isPathValid = attr.isParentPath !== true;
+  //     }
+
+  //     const afterStart =
+  //       !startTime || !attr.timestamp || attr.timestamp >= startTime;
+  //     const beforeEnd =
+  //       !endTime || !attr.timestamp || attr.timestamp <= endTime;
+
+  //     graphic.visible = isPathValid && afterStart && beforeEnd;
+  //   });
+  // };
   const applyFilters = () => {
-    if (!locationsLayerRef.current) return;
+    const startTime = startDate ? new Date(startDate).getTime() : null;
+    const endTime = endDate ? new Date(endDate).getTime() + 86400000 : null;
+
+    if (!locationsLayerRef.current || !routesLayerRef.current) return;
+
     let expressions: string[] = [];
 
     if (selectedBatchId) {
-      expressions.push(`batchId = '${selectedBatchId}'`);
+      const parts = selectedBatchId.split("-");
+
+      const batchExpressions: string[] = [];
+
+      batchExpressions.push(`batchId = '${selectedBatchId}'`);
+
+      for (let i = 3; i < parts.length; i++) {
+        const ancestorBatch = parts.slice(0, i).join("-");
+        batchExpressions.push(
+          `(batchId = '${ancestorBatch}' AND isParentPath = 'true' AND timestampNum <= splitTimestamp)`
+        );
+      }
+
+      expressions.push(`(${batchExpressions.join(" OR ")})`);
     }
-    if (startDate) {
-      const startTimestamp = new Date(startDate).getTime();
-      expressions.push(`timestampNum >= ${startTimestamp}`);
-    }
-    if (endDate) {
-      const endTimestamp = new Date(endDate).getTime() + 86400000;
-      expressions.push(`timestampNum <= ${endTimestamp}`);
-    }
-    const definitionExpression =
+
+    if (startDate) expressions.push(`timestampNum >= ${startTime}`);
+    if (endDate) expressions.push(`timestampNum <= ${endTime}`);
+
+    const finalExpression =
       expressions.length > 0 ? expressions.join(" AND ") : "1=1";
+    console.log("Applying filter expression:", finalExpression); // Debug log
 
-    locationsLayerRef.current.definitionExpression = definitionExpression;
+    locationsLayerRef.current.definitionExpression = finalExpression;
 
-    if (routesLayerRef.current && selectedBatchId) {
-      routesLayerRef.current.definitionExpression = `batchId = '${selectedBatchId}'`;
-    } else if (routesLayerRef.current) {
-      routesLayerRef.current.definitionExpression = "1=1";
+    routesLayerRef.current.graphics.forEach((graphic: any) => {
+      const attr = graphic.attributes;
+      let isPathValid = true;
+
+      if (selectedBatchId) {
+        const isDirectBatch = attr.batchIdName === selectedBatchId;
+
+        const isAncestor =
+          selectedBatchId.startsWith(attr.batchIdName + "-") &&
+          attr.isParentPath === true;
+
+        const isValidParentPath =
+          isAncestor &&
+          attr.splitTimestamp != null &&
+          attr.timestamp != null &&
+          attr.timestamp <= attr.splitTimestamp;
+
+        isPathValid = isDirectBatch || isValidParentPath;
+      } else {
+        isPathValid = attr.isParentPath !== true;
+      }
+
+      const afterStart =
+        !startTime || !attr.timestamp || attr.timestamp >= startTime;
+      const beforeEnd =
+        !endTime || !attr.timestamp || attr.timestamp <= endTime;
+
+      graphic.visible = isPathValid && afterStart && beforeEnd;
+    });
+
+    // Force layer refresh
+    if (locationsLayerRef.current) {
+      locationsLayerRef.current.refresh();
     }
   };
 
@@ -388,12 +486,15 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
               { name: "weather_desc", type: "string" },
               { name: "timestamp", type: "string" },
               { name: "timestampNum", type: "double" },
+              { name: "isParentPath", type: "string" },
+              { name: "splitTimestamp", type: "double" },
+              { name: "parentBatch", type: "string" },
             ],
             renderer: locationRenderer,
             geometryType: "point",
             popupEnabled: true,
             popupTemplate: {
-              title: "Batch: {batchId}",
+              title: "{expression/dynamic-title}",
               content: `
                 <b>Crop Type:</b> {cropType}<br>
                 <b>Product Name:</b> {productType}<br>
@@ -405,33 +506,51 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
                 <b>Weather:</b> {weather_main} - {weather_desc}<br>
                 <b>Timestamp:</b> {timestamp}
               `,
+              expressionInfos: [
+                {
+                  name: "dynamic-title",
+                  title: "Batch ID Logic",
+                  expression: `
+                  // Check if the point is part of the parent's lineage
+                  if ($feature.isParentPath == 'true' && !IsEmpty($feature.parentBatch)) {
+                    return "Parent Batch: " + $feature.parentBatch;
+                  } else {
+                    return "Batch: " + $feature.batchId;
+                  }
+                `,
+                },
+              ],
             },
           });
 
-          const routesLayer = new FeatureLayer({
-            title: "Active Routes",
-            source: [],
-            objectIdField: "ObjectID",
-            fields: [
-              { name: "ObjectID", type: "oid" },
-              { name: "routeStatus", type: "string" },
-              { name: "batchId", type: "string" },
-            ],
-            renderer: routeRenderer,
-            geometryType: "point",
-            popupEnabled: true,
-          });
+          // const routesLayer = new FeatureLayer({
+          //   title: "Active Routes",
+          //   source: [],
+          //   objectIdField: "ObjectID",
+          //   fields: [
+          //     { name: "ObjectID", type: "oid" },
+          //     { name: "routeStatus", type: "string" },
+          //     { name: "batchId", type: "string" },
+          //   ],
+          //   renderer: routeRenderer,
+          //   geometryType: "point",
+          //   popupEnabled: true,
+          // });
 
-          locationsLayerRef.current = locationsLayer;
-          routesLayerRef.current = routesLayer;
+          const routesGraphicsLayer = new GraphicsLayerModule({
+            title: "Route Lines",
+          });
 
           // Create WebMap with error handling
           const map = new WebMapModule({
             portalItem: {
               id: webMapId,
             },
-            layers: [locationsLayer, routesLayer],
+            layers: [routesGraphicsLayer, locationsLayer],
           });
+
+          locationsLayerRef.current = locationsLayer;
+          routesLayerRef.current = routesGraphicsLayer;
 
           // Handle map load errors
           map.load().catch((error: any) => {
@@ -470,124 +589,172 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
               setIsLoading(false);
 
               // Add legend
-              Promise.all([locationsLayer.when(), routesLayer.when()]).then(
-                () => {
-                  if (!isMounted) return;
+              Promise.all([
+                locationsLayer.when(),
+                routesGraphicsLayer.when(),
+              ]).then(() => {
+                if (!isMounted) return;
 
-                  const legend = new LegendModule({
-                    view: view,
-                    layerInfos: [
-                      {
-                        layer: locationsLayer,
-                        title: "Batch Locations",
-                        hideLayers: false,
-                      },
-                    ],
-                    style: "card",
-                    respectLayerVisibility: true,
-                  });
-                  view.ui.add(legend, "top-right");
-                }
-              );
+                const legend = new LegendModule({
+                  view: view,
+                  layerInfos: [
+                    {
+                      layer: locationsLayer,
+                      title: "Batch Locations",
+                      hideLayers: false,
+                    },
+                  ],
+                  style: "card",
+                  respectLayerVisibility: true,
+                });
+                view.ui.add(legend, "top-right");
+              });
 
               // Fetch and display data
-              Promise.all([locationsLayer.when(), routesLayer.when()]).then(
-                () => {
-                  if (!isMounted) return;
+              Promise.all([
+                locationsLayer.when(),
+                routesGraphicsLayer.when(),
+              ]).then(() => {
+                if (!isMounted) return;
 
-                  fetch("/api/batches/active-locations")
-                    .then((res) => {
-                      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                      return res.json();
-                    })
-                    .then((data) => {
-                      if (!isMounted) return;
+                fetch("/api/batches/active-locations")
+                  .then((res) => {
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    return res.json();
+                  })
+                  .then((data) => {
+                    if (!isMounted) return;
 
-                      const batchesData = data.batchesData || [];
+                    const batchesData = data.batchesData || [];
 
-                      const uniqueBatchIds = Array.from(
-                        new Set(batchesData.map((batch: any) => batch.batchId))
-                      ) as string[];
-                      setBatchIds(uniqueBatchIds);
+                    const uniqueBatchIds = Array.from(
+                      new Set(batchesData.map((batch: any) => batch.batchId))
+                    ) as string[];
+                    setBatchIds(uniqueBatchIds);
 
-                      const locationFeatures: any[] = [];
-                      const routeFeatures: any[] = [];
-                      let objectId = 1;
+                    const locationFeatures: any[] = [];
+                    const routeFeatures: any[] = [];
+                    let objectId = 1;
 
-                      batchesData.forEach((batch: any) => {
-                        const batchId = batch.batchId;
+                    batchesData.forEach((batch: any) => {
+                      const batchId = batch.batchId;
 
-                        batch.historyPoints.forEach((pointData: any) => {
-                          const point = new PointModule({
-                            longitude: pointData.longitude,
-                            latitude: pointData.latitude,
-                          });
-
-                          const role = getRole(pointData.eventType);
-                          const timestamp = new Date(pointData.timestamp);
-
-                          locationFeatures.push({
-                            geometry: point,
-                            attributes: {
-                              ObjectID: objectId++,
-                              role: role,
-                              eventType: pointData.eventType,
-                              batchId: batchId,
-                              status: batch.status,
-                              cropType: batch.cropType,
-                              productType: batch.productType,
-                              quantity: batch.quantity,
-                              location: pointData.metadata.location || "N/A",
-                              temperature:
-                                pointData.metadata.temperature || "N/A",
-                              humidity: pointData.metadata.humidity || "N/A",
-                              weather_main:
-                                pointData.metadata.weather_main || "N/A",
-                              weather_desc:
-                                pointData.metadata.weather_desc || "N/A",
-                              timestamp: timestamp.toLocaleString(),
-                              timestampNum: timestamp.getTime(),
-                            },
-                          });
+                      batch.historyPoints.forEach((pointData: any) => {
+                        const point = new PointModule({
+                          longitude: pointData.longitude,
+                          latitude: pointData.latitude,
                         });
 
-                        batch.activeRoutes.forEach((route: any) => {
-                          const endPoint = new PointModule({
-                            longitude: route.destinationLng,
-                            latitude: route.destinationLat,
-                          });
+                        const role = getRole(pointData.eventType);
+                        const timestamp = new Date(
+                          pointData.timestamp
+                        ).getTime();
 
-                          routeFeatures.push({
-                            geometry: endPoint,
-                            attributes: {
-                              ObjectID: objectId++,
-                              routeStatus: route.status,
-                              batchId: batchId,
-                            },
-                          });
+                        locationFeatures.push({
+                          geometry: point,
+                          attributes: {
+                            ObjectID: objectId++,
+                            role: role,
+                            eventType: pointData.eventType,
+                            batchId: batchId,
+                            status: batch.status,
+                            cropType: batch.cropType,
+                            productType: batch.productType,
+                            quantity: batch.quantity,
+                            location: pointData.metadata.location || "N/A",
+                            temperature:
+                              pointData.metadata.temperature || "N/A",
+                            humidity: pointData.metadata.humidity || "N/A",
+                            weather_main:
+                              pointData.metadata.weather_main || "N/A",
+                            weather_desc:
+                              pointData.metadata.weather_desc || "N/A",
+                            timestamp: new Date(
+                              pointData.timestamp
+                            ).toLocaleString(),
+                            splitTimestamp:
+                              pointData.metadata.splitTimestamp || 0,
+                            timestampNum: new Date(
+                              pointData.timestamp
+                            ).getTime(),
+                            isParentPath: pointData.metadata?.isParentPath
+                              ? "true"
+                              : "false",
+                            parentBatch:
+                              pointData.metadata?.parentBatch || null,
+                          },
                         });
                       });
 
-                      if (locationFeatures.length > 0) {
-                        locationsLayer.applyEdits({
-                          addFeatures: locationFeatures,
-                        });
-                      }
+                      batch.activeRoutes.forEach((route: any) => {
+                        if (route.routePolyline) {
+                          try {
+                            const geojson = JSON.parse(route.routePolyline);
+                            const polyline = {
+                              type: "polyline",
+                              paths: geojson.coordinates,
+                            };
 
-                      if (routeFeatures.length > 0) {
-                        routesLayer.applyEdits({
-                          addFeatures: routeFeatures,
-                        });
-                      }
-                    })
-                    .catch((err) => {
-                      console.error("Error fetching batch data:", err);
-                      if (isMounted) {
-                        setMapError("Failed to load batch data.");
-                      }
+                            const routeSymbol = {
+                              type: "simple-line",
+                              color: [11, 156, 49, 1], // change route colour here
+                              width: 3,
+                              style: "solid",
+                            };
+
+                            const routeGraphic = new Graphic({
+                              geometry: polyline,
+                              symbol: routeSymbol,
+                              attributes: {
+                                batchIdName: route.isParentPath
+                                  ? route.batchIdName
+                                  : batch.batchId,
+                                isParentPath: route.isParentPath ? true : false,
+                                splitTimestamp: route.splitTimestamp || 0,
+                                timestamp: route.timestamp || 0,
+                                TotalTime: route.TotalTime,
+                                distance: route.distance,
+                                eta: route.estimatedTime,
+                              },
+                              popupTemplate: {
+                                title: "Transport Route: {batchIdName}",
+                                content: `
+                                  <b>Distance:</b> {distance} km<br>
+                                  <b>Total Elapsed Time:</b> {TotalTime} minutes<br>
+                                  <b>ETA between points:</b> {eta} minutes<br>
+                                `,
+                              },
+                            });
+
+                            if (routesLayerRef.current) {
+                              routesLayerRef.current.add(routeGraphic);
+                            }
+                          } catch (e) {
+                            console.error("Error parsing route geometry:", e);
+                          }
+                        }
+                      });
                     });
-                }
-              );
+
+                    if (locationFeatures.length > 0) {
+                      locationsLayer.applyEdits({
+                        addFeatures: locationFeatures,
+                      });
+                    }
+
+                    if (routeFeatures.length > 0) {
+                      routesGraphicsLayer.applyEdits({
+                        addFeatures: routeFeatures,
+                      });
+                    }
+                  })
+                  .catch((err) => {
+                    console.error("Error fetching batch data:", err);
+                    if (isMounted) {
+                      setMapError("Failed to load batch data.");
+                    }
+                  });
+              });
 
               view.ui.components = [];
               if (dragable) {

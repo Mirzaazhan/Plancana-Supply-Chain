@@ -198,33 +198,33 @@ const calculateCorrelation = (x, y) => {
 };
 
 const IntelligenceBoard = () => {
-  const [correlationData, setCorrelationData] = useState(dummyCorrelationData);
-  const [weatherImpact, setWeatherImpact] = useState(dummyWeatherImpact);
+  const [correlationData, setCorrelationData] = useState([]);
+  const [weatherImpact, setWeatherImpact] = useState([]);
   const [selectedStage, setSelectedStage] = useState("farm");
 
   //comment for testing
 
-  // useEffect(() => {
-  //   const loadRealAnalytics = async () => {
-  //     try {
-  //       const response = await api.get(
-  //         "/analytics/weather-quality-correlation"
-  //       );
-  //       if (response.data.success) {
-  //         setCorrelationData(response.data.correlationData);
-  //         setWeatherImpact(response.data.weatherImpact);
+  useEffect(() => {
+    const loadRealAnalytics = async () => {
+      try {
+        const response = await api.get(
+          "/analytics/weather-quality-correlation"
+        );
+        if (response.data.success) {
+          setCorrelationData(response.data.correlationData);
+          setWeatherImpact(response.data.weatherImpact);
 
-  //         //   // Map backend weatherImpact to your qualityByWeather format if needed
-  //         //   if (response.data.weatherImpact) {
-  //         //     setWeatherImpact(response.data.weatherImpact);
-  //         //   }
-  //       }
-  //     } catch (err) {
-  //       console.error("Failed to load analytics via Axios:", err);
-  //     }
-  //   };
-  //   loadRealAnalytics();
-  // }, []);
+          //   // Map backend weatherImpact to your qualityByWeather format if needed
+          //   if (response.data.weatherImpact) {
+          //     setWeatherImpact(response.data.weatherImpact);
+          //   }
+        }
+      } catch (err) {
+        console.error("Failed to load analytics via Axios:", err);
+      }
+    };
+    loadRealAnalytics();
+  }, []);
 
   const correlationChangeData = useMemo(() => {
     return correlationData
@@ -239,7 +239,7 @@ const IntelligenceBoard = () => {
   }, [correlationData, selectedStage]);
 
   const temperatureGradeData = useMemo(() => {
-    const grades = ["A", "B", "C"];
+    const grades = ["A+", "A", "B", "C"];
 
     return grades.map((grade) => {
       // Filter batches by the current grade and current selected stage
@@ -274,7 +274,7 @@ const IntelligenceBoard = () => {
 
     // 2. Temperature vs Quality (Converting Quality Grade to Numeric for math)
     // Grade A = 3, B = 2, C = 1
-    const gradeMap = { A: 3, B: 2, C: 1, "N/A": 0 };
+    const gradeMap = { premium: 4, A: 3, B: 2, C: 1, "N/A": 0 };
     const stageData = correlationData.filter((d) => d.stage === selectedStage);
 
     const tempVals = stageData.map((d) => d.temp).filter((t) => t !== null);
@@ -426,6 +426,13 @@ const IntelligenceBoard = () => {
                   />
                   <Tooltip cursor={{ fill: "transparent" }} />
                   <Legend iconType="circle" />
+                  <Bar
+                    dataKey="premium"
+                    name="Premium"
+                    stackId="a"
+                    fill="#146348ff"
+                    radius={[0, 0, 0, 0]}
+                  />
                   <Bar
                     dataKey="gradeA"
                     name="Grade A"

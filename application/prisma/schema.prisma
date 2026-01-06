@@ -158,7 +158,7 @@ model DistributorProfile {
   geom_point       Unsupported("geography(Point, 4326)")?
 
   // Transport routes
-  transportRoutes TransportRoute[]
+
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -404,7 +404,8 @@ model ProcessingRecord {
 
 model TransportRoute {
   id              String                                      @id @default(cuid())
-  batchId         String
+  batchId        String
+  batchIdName     String?
   distributorId   String
   vehicleId       String?
   originLat       Float
@@ -413,6 +414,8 @@ model TransportRoute {
   destinationLng  Float
   departureTime   DateTime?
   arrivalTime     DateTime?
+  timestamp       DateTime?  
+  TotalTime       Int?
   estimatedTime   Int
   distance        Float? // km
   fuelConsumption Float? // liters
@@ -423,8 +426,7 @@ model TransportRoute {
   geom_route      Unsupported("geography(LineString, 4326)")?
 
   batch       Batch              @relation(fields: [batchId], references: [id])
-  distributor DistributorProfile @relation(fields: [distributorId], references: [id])
-
+  
   @@map("transport_routes")
 }
 

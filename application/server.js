@@ -12,6 +12,8 @@ const jwt = require("jsonwebtoken");
 const { PrismaClient, Prisma } = require("@prisma/client");
 const multer = require("multer");
 const nodemailer = require("nodemailer");
+const axios = require("axios");
+const { time } = require("console");
 
 // Initialize Prisma
 const prisma = new PrismaClient();
@@ -86,6 +88,32 @@ async function logBatchLocation(batchId, eventType, lat, lng, metadata = null) {
       `Error logging location history for batch ${batchId}:`,
       error.message
     );
+    return null;
+  }
+}
+
+async function getORSRoute(origin, destination) {
+  const apiKey = process.env.ORS_API_KEY;
+
+  const url = `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${apiKey}&start=${origin.lng},${origin.lat}&end=${destination.lng},${destination.lat}`;
+
+  try {
+    const response = await axios.get(url);
+    const route = response.data.features[0];
+
+    return {
+      durationMinutes: Math.round(route.properties.summary.duration / 60),
+      distanceKm: (route.properties.summary.distance / 1000).toFixed(2),
+
+      geometry: JSON.stringify(route.geometry),
+    };
+  } catch (error) {
+    if (error.response) {
+      console.error("❌ ORS API ERROR:", error.response.data);
+      console.error("Sent Params:", { origin, destination });
+    } else {
+      console.error("❌ Network Error:", error.message);
+    }
     return null;
   }
 }
@@ -1455,40 +1483,9 @@ app.post(
         const activeFarmLocation = farmerProfile.farmLocations[0];
 
         if (activeFarmLocation) {
-          // Use optional chaining just in case, though it should exist if farmerProfile does
-          const farmLocationId = activeFarmLocation.id;
-
-          // 2. Update the Farm Location coordinates in the database (latitude/longitude columns)
-          const updatedFarmLocation = await prisma.farmLocation.update({
-            where: { id: farmLocationId },
+          const newLocationRecord = await prisma.farmLocation.create({
             data: {
-              latitude: latitude
-                ? parseFloat(latitude)
-                : activeFarmLocation.latitude,
-              longitude: longitude
-                ? parseFloat(longitude)
-                : activeFarmLocation.longitude,
-            },
-          });
-
-          // 3. ⭐ EXECUTE RAW SQL TO POPULATE POSTGIS GEOMETRY
-          if (updatedFarmLocation.latitude && updatedFarmLocation.longitude) {
-            await updateGeometryPoint(
-              '"farm_locations"',
-              farmLocationId, // Use the ID of the location, not the batch
-              updatedFarmLocation.latitude,
-              updatedFarmLocation.longitude
-            );
-          }
-        }
-
-        if (activeFarmLocation) {
-          // Use optional chaining just in case, though it should exist if farmerProfile does
-          const farmLocationId = activeFarmLocation.id;
-          // 2. Update the Farm Location coordinates in the database (latitude/longitude/location columns)
-          const updatedFarmLocation = await prisma.farmLocation.update({
-            where: { id: farmLocationId },
-            data: {
+              farmerId: farmerProfile.id, // Link to the farmer
               location: location,
               latitude: latitude
                 ? parseFloat(latitude)
@@ -1504,18 +1501,25 @@ app.post(
                 : null,
               weather_main: additionalData.weather_main || null,
               weather_desc: additionalData.weather_description || null,
+              farmName: farmerProfile.farmName,
             },
           });
 
-          // EXECUTE RAW SQL TO POPULATE POSTGIS GEOMETRY
-          if (updatedFarmLocation.latitude && updatedFarmLocation.longitude) {
+          // 2. Update the PostGIS geometry for this NEW specific row
+          if (newLocationRecord.latitude && newLocationRecord.longitude) {
             await updateGeometryPoint(
               '"farm_locations"',
-              farmLocationId, // Use the ID of the location, not the batch
-              updatedFarmLocation.latitude,
-              updatedFarmLocation.longitude
+              newLocationRecord.id, // Use the ID of the newly created row
+              newLocationRecord.latitude,
+              newLocationRecord.longitude
             );
           }
+
+          // 3. IMPORTANT: Update the Batch to point to this specific location record
+          await prisma.batch.update({
+            where: { id: batch.id },
+            data: { farmLocationId: newLocationRecord.id },
+          });
         }
         if (latitude && longitude && batch.id) {
           await logBatchLocation(
@@ -1530,6 +1534,14 @@ app.post(
               quality: additionalData.qualityGrade,
               cropType: cropType,
               quantity: quantity,
+              temperature: additionalData.temperature
+                ? parseFloat(additionalData.temperature)
+                : null,
+              humidity: additionalData.humidity
+                ? parseFloat(additionalData.humidity)
+                : null,
+              weather_main: additionalData.weather_main || null,
+              weather_desc: additionalData.weather_description || null,
             }
           );
         } else {
@@ -1851,18 +1863,17 @@ app.get("/api/batch/:batchId", authenticate, async (req, res) => {
             facility: true,
           },
         },
-        transportRoutes: {
-          include: {
-            distributor: {
-              include: {
-                user: { select: { username: true } },
-              },
-            },
-          },
-        },
+        transportRoutes: true,
         qualityTests: true,
         transactions: true,
       },
+    });
+
+    const distributorIds = dbBatch.transportRoutes.map(
+      (route) => route.distributorId
+    );
+    const distributors = await prisma.distributorProfile.findMany({
+      where: { id: { in: distributorIds } },
     });
 
     // Get distribution records (they use batchId as string, not relation)
@@ -3003,6 +3014,11 @@ app.post(
         },
       });
 
+      const batchTransfers = await prisma.batchTransfer.findFirst({
+        where: { batchId: batchId },
+        orderBy: { transferDate: "desc" },
+      });
+
       if (!dbBatch) {
         return res.status(404).json({
           success: false,
@@ -3087,6 +3103,7 @@ app.post(
           pesticides: dbBatch.pesticides,
           qualityGrade: dbBatch.qualityGrade,
           moistureContent: dbBatch.moistureContent,
+          cropType: dbBatch.cropType,
           proteinContent: dbBatch.proteinContent,
           certifications: dbBatch.certifications,
           customCertification: dbBatch.customCertification,
@@ -3101,6 +3118,36 @@ app.post(
           blockchainHash: blockchainResult?.txId || null,
         },
       });
+
+      // await prisma.batchTransfer.create({
+      //   data: {
+      //     batchId: newBatchId,
+      //     fromActorId: req.user.id,
+      //     fromActorRole: req.user.role,
+      //     toActorId: req.user.id,
+      //     toActorRole: req.user.role,
+      //     transferType: "BATCH_SPLIT",
+      //     transferDate: new Date(),
+      //     notes: `Split from parent batch ${batchId}: ${splitQty} ${dbBatch.unit}`,
+      //     status: "COMPLETED",
+      //     statusBefore: dbBatch.status,
+      //     statusAfter: dbBatch.status,
+      //     blockchainTxId: blockchainResult?.txId || null,
+      //   },
+      // });
+
+      await logBatchLocation(
+        childBatch.id,
+        "SPLIT_FROM_PARENT",
+        batchTransfers?.latitude || 0,
+        batchTransfers?.longitude || 0,
+        {
+          parentBatchId: dbBatch.batchId,
+          reason: reason,
+          originalQuantity: dbBatch.quantity,
+          splitQuantity: splitQty,
+        }
+      );
 
       // Update parent batch quantity
       const updatedParentBatch = await prisma.batch.update({
@@ -3125,24 +3172,6 @@ app.post(
           console.error("QR generation error:", qrError);
         }
       }
-
-      // Create BatchTransfer record for the child batch to track ownership
-      await prisma.batchTransfer.create({
-        data: {
-          batchId: newBatchId,
-          fromActorId: req.user.id,
-          fromActorRole: req.user.role,
-          toActorId: req.user.id,
-          toActorRole: req.user.role,
-          transferType: "BATCH_SPLIT",
-          transferDate: new Date(),
-          notes: `Split from parent batch ${batchId}: ${splitQty} ${dbBatch.unit}`,
-          status: "COMPLETED",
-          statusBefore: dbBatch.status,
-          statusAfter: dbBatch.status,
-          blockchainTxId: blockchainResult?.txId || null,
-        },
-      });
 
       // Log the activity
       await prisma.activityLog.create({
@@ -3199,6 +3228,191 @@ app.post(
     }
   }
 );
+app.get("/api/batches/all-with-lineage", async (req, res) => {
+  try {
+    const allBatches = await prisma.batch.findMany({
+      include: {
+        farmer: { select: { firstName: true, lastName: true, farmName: true } },
+      },
+    });
+
+    const parentIds = [
+      ...new Set(allBatches.map((b) => b.parentBatchId).filter(Boolean)),
+    ];
+    const parents = await prisma.batch.findMany({
+      where: { id: { in: parentIds } },
+    });
+    const parentLookup = new Map(parents.map((p) => [p.id, p]));
+
+    const batchesData = await Promise.all(
+      allBatches.map(async (currentBatch) => {
+        const getFormattedPoints = async (targetId, limitDate = null) => {
+          const filter = limitDate ? { lte: limitDate } : {};
+
+          const [locations, processing, distribution, transfers] =
+            await Promise.all([
+              prisma.batchLocationHistory.findMany({
+                where: { batchId: targetId, timestamp: filter },
+              }),
+              prisma.processingRecord.findMany({
+                where: { batchId: targetId, processingDate: filter },
+              }),
+              prisma.distributionRecord.findMany({
+                where: { batchIDHash: targetId, distributionDate: filter },
+              }),
+              prisma.batchTransfer.findMany({
+                where: { batchId: currentBatch.batchId, transferDate: filter },
+              }),
+            ]);
+
+          const parentInfo = currentBatch.parentBatchId
+            ? parentLookup.get(currentBatch.parentBatchId)
+            : null;
+          return [
+            ...locations.map((l) => ({
+              eventType: l.eventType,
+              latitude: l.latitude,
+              longitude: l.longitude,
+              timestamp: l.timestamp,
+              metadata: {
+                ...l.metadata,
+                stage: l.eventType,
+                location: l.metadata?.location || "Farm",
+                isParentPath: limitDate !== null,
+                splitTimestamp: limitDate
+                  ? new Date(limitDate).getTime()
+                  : null,
+                temperature: l.metadata?.temperature
+                  ? l.metadata.temperature
+                  : null,
+                humidity: l.metadata?.humidity ? l.metadata.humidity : null,
+                weather_main: l.metadata?.weather_main
+                  ? l.metadata.weather_main
+                  : null,
+                weather_desc: l.metadata?.weather_desc
+                  ? l.metadata.weather_desc
+                  : null,
+                parentBatch: parentInfo ? parentInfo.batchId : null,
+              },
+            })),
+            ...processing.map((p) => ({
+              eventType: "PROCESSING",
+              latitude: p.latitude,
+              longitude: p.longitude,
+              timestamp: p.processingDate,
+              metadata: {
+                location: p.processingLocation,
+                temperature: p.temperature,
+                humidity: p.humidity,
+                weather_main: p.weather_main,
+                weather_desc: p.weather_desc,
+                stage: "Processing",
+              },
+            })),
+            ...distribution.map((d) => ({
+              eventType: "DISTRIBUTION_ARRIVAL",
+              latitude: d.warehouseLat,
+              longitude: d.warehouseLng,
+              timestamp: d.distributionDate,
+              metadata: {
+                location: d.warehouseLocation,
+                temperature: d.temperature,
+                humidity: d.humidity,
+                weather_main: d.weather_main,
+                weather_desc: d.weather_desc,
+                stage: "Distribution",
+              },
+            })),
+            ...transfers.map((t) => ({
+              eventType: "RETAIL_READY",
+              latitude: parseFloat(t.latitude),
+              longitude: parseFloat(t.longitude),
+              timestamp: t.transferDate,
+              metadata: {
+                location: t.transferLocation,
+                notes: t.notes,
+                temperature: t.temperature,
+                humidity: t.humidity,
+                weather_main: t.weather_main,
+                weather_desc: t.weather_desc,
+                stage: "Retail",
+              },
+            })),
+          ];
+        };
+
+        const getFormattedRoutes = async (targetId, limitDate = null) => {
+          const filter = limitDate ? { timestamp: { lte: limitDate } } : {};
+          const routes = await prisma.transportRoute.findMany({
+            where: {
+              OR: [{ batchId: targetId }, { batchIdName: targetId }],
+              ...filter,
+            },
+            orderBy: { departureTime: "asc" },
+          });
+
+          return routes.map((route) => ({
+            ...route,
+            isParentPath: limitDate !== null,
+            splitTimestamp: limitDate ? new Date(limitDate).getTime() : null,
+            timestamp: route.timestamp
+              ? new Date(route.timestamp).getTime()
+              : 0,
+          }));
+        };
+
+        let combinedPoints = [];
+        let combinedRoutes = [];
+
+        if (currentBatch.parentBatchId && currentBatch.splitDate) {
+          const [pPoints, pRoutes] = await Promise.all([
+            getFormattedPoints(
+              currentBatch.parentBatchId,
+              currentBatch.splitDate
+            ),
+            getFormattedRoutes(
+              currentBatch.parentBatchId,
+              currentBatch.splitDate
+            ),
+          ]);
+          combinedPoints.push(...pPoints);
+          combinedRoutes.push(...pRoutes);
+        }
+
+        const [cPoints, cRoutes] = await Promise.all([
+          getFormattedPoints(currentBatch.id),
+          getFormattedRoutes(currentBatch.id),
+        ]);
+        combinedPoints.push(...cPoints);
+        combinedRoutes.push(...cRoutes);
+
+        combinedPoints.sort(
+          (a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
+
+        return {
+          batchId: currentBatch.batchId,
+          status: currentBatch.status,
+          cropType: currentBatch.cropType,
+          quantity: currentBatch.quantity,
+          productType: currentBatch.productType,
+          historyPoints: combinedPoints,
+          activeRoutes: combinedRoutes,
+        };
+      })
+    );
+
+    res.json({
+      success: true,
+      count: batchesData.length,
+      batchesData: batchesData,
+    });
+  } catch (error) {
+    console.error("Global history fetch error:", error);
+    res.status(500).json({ success: false, error: "Internal server error" });
+  }
+});
 
 // Get batch lineage (parent and children)
 app.get("/api/batch/:batchId/lineage", authenticate, async (req, res) => {
@@ -3655,6 +3869,9 @@ app.post(
       // Find the batch
       const batch = await prisma.batch.findUnique({
         where: { batchId: batchId },
+        include: {
+          farmLocation: true,
+        },
       });
 
       if (!batch) {
@@ -3752,6 +3969,41 @@ app.post(
           weather_desc: additionalData.weather_description || null,
         },
       });
+
+      if (batch.farmLocation && latitude && longitude) {
+        const routeData = await getORSRoute(
+          {
+            lat: batch.farmLocation.latitude,
+            lng: batch.farmLocation.longitude,
+          },
+          { lat: parseFloat(latitude), lng: parseFloat(longitude) }
+        );
+
+        if (routeData) {
+          await prisma.transportRoute.create({
+            data: {
+              batch: { connect: { id: batch.id } },
+              batchIdName: batch.batchId,
+              distributorId: req.user.id,
+              originLat: batch.farmLocation.latitude,
+              originLng: batch.farmLocation.longitude,
+              destinationLat: parseFloat(latitude),
+              destinationLng: parseFloat(longitude),
+              distance: parseFloat(routeData.distanceKm),
+              estimatedTime: parseFloat(routeData.durationMinutes),
+              // idea is the eta will be the diff between when the farmer registered it the crop and when the processor accepts it for processing
+              TotalTime: Math.ceil(
+                (processingRecord.processingDate.getTime() -
+                  batch.createdAt.getTime()) /
+                  60000
+              ),
+              timestamp: processingRecord.processingDate,
+              routePolyline: routeData.geometry,
+              status: "IN_TRANSIT",
+            },
+          });
+        }
+      }
 
       // Update blockchain with processing details
       try {
@@ -4106,6 +4358,7 @@ app.get("/api/batches/active-locations", async (req, res) => {
           departureTime: true,
           arrivalTime: true,
           status: true,
+          timestamp: true,
         },
       });
 
@@ -4241,12 +4494,18 @@ app.get("/api/batches/active-locations", async (req, res) => {
         where: { batchId: batch.id },
         orderBy: { departureTime: "asc" },
         select: {
+          batchId: true,
+          batchIdName: true,
           routePolyline: true,
           status: true,
           originLat: true,
           originLng: true,
           destinationLat: true,
           destinationLng: true,
+          distance: true,
+          estimatedTime: true,
+          timestamp: true,
+          TotalTime: true,
         },
       });
 
@@ -4321,7 +4580,7 @@ app.get("/api/analytics/weather-quality-correlation", async (req, res) => {
         correlationData.push({
           batchId: batch.batchId,
           moisture: batch.moistureContent || 0,
-          quality: p.qualityTests.grade || "N/A",
+          quality: p.qualityTests?.grade || "N/A",
           stage: "processing",
           temp: parseFloat(p.temperature) || null,
           humidity: parseFloat(p.humidity) || null,
@@ -4748,6 +5007,10 @@ app.post(
         updateStatus,
       } = req.body;
 
+      const batch = await prisma.batch.findUnique({
+        where: { batchId: id },
+      });
+
       // Validation
       if (!batchId) {
         return res.status(400).json({
@@ -4791,7 +5054,7 @@ app.post(
       // Store in database (TransportRoute table)
       const dbTransport = await prisma.transportRoute.create({
         data: {
-          batchId: batchId,
+          batchId: batch.id,
           distributorId: req.user.id,
           vehicleId: vehicleId || null,
           originLat: originCoordinates?.latitude || 0,
@@ -5084,6 +5347,7 @@ app.post(
       // Update batch status in database if exists
       const dbBatch = await prisma.batch.findUnique({
         where: { batchId: batchId },
+        // include: { processingRecords: true },
       });
       if (dbBatch) {
         await prisma.batch.update({
@@ -5092,6 +5356,32 @@ app.post(
         });
       }
 
+      // if (dbBatch.processingRecords && latitude && longitude) {
+      //   const routeData = await getORSRoute(
+      //     {
+      //       lat: dbBatch.processingRecords.latitude,
+      //       lng: dbBatch.processingRecords.longitude,
+      //     },
+      //     { lat: parseFloat(latitude), lng: parseFloat(longitude) }
+      //   );
+
+      //   if (routeData) {
+      //     await prisma.transportRoute.create({
+      //       data: {
+      //         batchId: batchId,
+      //         distributorId: req.user.id,
+      //         originLat: dbBatch.processingRecords.latitude,
+      //         originLng: dbBatch.processingRecords.longitude,
+      //         destinationLat: parseFloat(latitude),
+      //         destinationLng: parseFloat(longitude),
+      //         estimatedTime: routeData.durationMinutes,
+      //         distance: routeData.distanceKm,
+      //         routePolyline: routeData.geometry,
+      //         status: "IN_TRANSIT",
+      //       },
+      //     });
+      //   }
+      // }
       await gateway.disconnect();
 
       // Log activity
@@ -5338,7 +5628,29 @@ app.post(
       const humidity = weatherData?.humidity;
       const batch = await prisma.batch.findUnique({
         where: { batchId: batchId },
+        include: { processingRecords: true },
       });
+
+      let latestProcessing = null;
+      if (batch.parentBatchId) {
+        const parentBatch = await prisma.batch.findUnique({
+          where: { id: batch.parentBatchId },
+          include: { processingRecords: true },
+        });
+        if (
+          parentBatch &&
+          parentBatch.processingRecords &&
+          parentBatch.processingRecords.length > 0
+        ) {
+          latestProcessing =
+            parentBatch.processingRecords[
+              parentBatch.processingRecords.length - 1
+            ];
+        }
+      } else {
+        latestProcessing =
+          batch.processingRecords[batch.processingRecords.length - 1];
+      }
 
       const distributionData = {
         distributionType: distributionType || null,
@@ -5423,6 +5735,49 @@ app.post(
           weather_main: weather_main || null,
         },
       });
+
+      const distributionTime = dbDistribution.distributionDate;
+      const startTime = latestProcessing.processingDate.getTime();
+      const endTime = dbDistribution.createdAt.getTime();
+
+      const totalTimeCalc = Math.ceil((endTime - startTime) / 60000);
+
+      if (
+        batch.processingRecords &&
+        warehouseCoordinates.latitude &&
+        warehouseCoordinates.longitude
+      ) {
+        const routeData = await getORSRoute(
+          {
+            lat: latestProcessing.latitude,
+            lng: latestProcessing.longitude,
+          },
+          {
+            lat: parseFloat(warehouseCoordinates.latitude),
+            lng: parseFloat(warehouseCoordinates.longitude),
+          }
+        );
+        if (routeData) {
+          await prisma.transportRoute.create({
+            data: {
+              batch: { connect: { id: batch.id } },
+              batchIdName: batch.batchId,
+              distributorId: req.user.id,
+              originLat: latestProcessing.latitude,
+              originLng: latestProcessing.longitude,
+              destinationLat: parseFloat(warehouseCoordinates?.latitude),
+              destinationLng: parseFloat(warehouseCoordinates?.longitude),
+              estimatedTime: routeData.durationMinutes,
+              // idea is the eta will be the diff between when the farmer registered it the crop and when the processor accepts it for processing
+              TotalTime: totalTimeCalc,
+              distance: parseFloat(routeData.distanceKm),
+              timestamp: distributionTime,
+              routePolyline: routeData.geometry,
+              status: "DELIVERED",
+            },
+          });
+        }
+      }
 
       await gateway.disconnect();
 
@@ -5552,12 +5907,76 @@ app.post(
       // Update batch status in database if exists
       const dbBatch = await prisma.batch.findUnique({
         where: { batchId: batchId },
+        include: { processingRecords: true },
       });
       if (dbBatch) {
         await prisma.batch.update({
           where: { batchId: batchId },
           data: { status: "RETAIL_READY" },
         });
+      }
+
+      const distributionRecords = await prisma.distributionRecord.findMany({
+        where: { batchId: batchId },
+        orderBy: { createdAt: "asc" },
+      });
+
+      const latestDistributing =
+        distributionRecords.length > 0
+          ? distributionRecords[distributionRecords.length - 1]
+          : null;
+
+      const latestProcessing =
+        dbBatch.processingRecords.length > 0
+          ? dbBatch.processingRecords[dbBatch.processingRecords.length - 1]
+          : null;
+
+      let originCoords = null;
+      if (
+        latestDistributing?.warehouseLat &&
+        latestDistributing?.warehouseLng
+      ) {
+        originCoords = {
+          lat: parseFloat(latestDistributing.warehouseLat),
+          lng: parseFloat(latestDistributing.warehouseLng),
+        };
+      } else if (latestProcessing?.latitude && latestProcessing?.longitude) {
+        originCoords = {
+          lat: parseFloat(latestProcessing.latitude),
+          lng: parseFloat(latestProcessing.longitude),
+        };
+      }
+
+      if (originCoords && latitude && longitude) {
+        const routeData = await getORSRoute(originCoords, {
+          lat: parseFloat(latitude),
+          lng: parseFloat(longitude),
+        });
+
+        if (routeData) {
+          await prisma.transportRoute.create({
+            data: {
+              batch: { connect: { id: dbBatch.id } },
+              batchIdName: dbBatch.batchId,
+              distributorId: req.user.id,
+              originLat: originCoords.lat,
+              originLng: originCoords.lng,
+              destinationLat: parseFloat(latitude),
+              destinationLng: parseFloat(longitude),
+              estimatedTime: routeData.durationMinutes,
+              distance: parseFloat(routeData.distanceKm),
+              // idea is the eta will be the diff between when the farmer registered it the crop and when the processor accepts it for processing
+              TotalTime: Math.ceil(
+                (dbTransfer.transferDate.getTime() -
+                  latestDistributing.createdAt.getTime()) /
+                  60000
+              ),
+              timestamp: dbTransfer.transferDate,
+              routePolyline: routeData.geometry,
+              status: "IN_TRANSIT",
+            },
+          });
+        }
       }
 
       await gateway.disconnect();
@@ -5906,105 +6325,6 @@ app.get(
 // ===============================
 // GIS & ROUTING ENDPOINT
 // ===============================
-
-app.post(
-  "/api/distributor/transport-route",
-  authenticate,
-  authorize(["DISTRIBUTOR"]),
-  async (req, res) => {
-    // 1. Destructure and validate input coordinates
-    const { batchId, originLat, originLng, destinationLat, destinationLng } =
-      req.body;
-    const distributorId = req.user.id;
-
-    if (
-      !batchId ||
-      !originLat ||
-      !originLng ||
-      !destinationLat ||
-      !destinationLng
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Missing coordinates or batchId for routing.",
-      });
-    }
-
-    try {
-      const ARC_GIS_API_KEY = process.env.ARC_GIS_API_KEY;
-      const ROUTE_URL = process.env.ARCGIS_ROUTE_URL;
-
-      // ArcGIS Route API requires coordinates as "lng,lat"
-      const stops = `${originLng},${originLat};${destinationLng},${destinationLat}`;
-
-      // 2. Call the ArcGIS Route Service
-      const apiResponse = await axios.get(ROUTE_URL, {
-        params: {
-          f: "json",
-          token: ARC_GIS_API_KEY,
-          stops: stops,
-          travelMode: "Driving Time", // Optimizes for time
-          returnRoutes: true,
-          returnDirections: false,
-          // Request the geometry in Esri's Encoded Polyline format for compact storage
-          directionsOutputType: "esriDIRNAEncodedPolyline",
-        },
-      });
-
-      const routeResult = apiResponse.data.routes?.features?.[0];
-      if (!routeResult) {
-        // ❌ Failures often occur if coordinates are in the ocean or on private roads
-        return res.status(500).json({
-          success: false,
-          error: "ArcGIS could not calculate a feasible route.",
-        });
-      }
-
-      // 3. Extract key data
-      const distanceKm = routeResult.attributes.Total_Kilometers;
-      const totalTimeMinutes = routeResult.attributes.Total_Time;
-      // The Encoded Polyline string is located in the geometry path
-      const encodedPolyline = routeResult.geometry.compressedGeometry.paths[0];
-
-      // 4. Find Distributor Profile ID
-      const distributorProfile = await prisma.distributorProfile.findUnique({
-        where: { userId: distributorId },
-      });
-
-      // 5. Create new TransportRoute record
-      const newRoute = await prisma.transportRoute.create({
-        data: {
-          batchId: batchId,
-          distributorId: distributorProfile.id,
-          originLat: parseFloat(originLat),
-          originLng: parseFloat(originLng),
-          destinationLat: parseFloat(destinationLat),
-          destinationLng: parseFloat(destinationLng),
-          distance: distanceKm,
-          estimatedTime: totalTimeMinutes,
-          routePolyline: encodedPolyline, // Stored as string for ArcGIS Pro/Online
-          status: "PLANNED",
-        },
-      });
-
-      res.status(201).json({
-        success: true,
-        route: newRoute,
-        message: "Route calculated and stored successfully.",
-      });
-    } catch (error) {
-      console.error(
-        "Routing API error:",
-        error.response?.data?.error?.message || error.message
-      );
-      res.status(500).json({
-        success: false,
-        error: "Failed to calculate route.",
-        details: error.message,
-      });
-    }
-  }
-);
 
 const geocodeAddress = async (address, state, country) => {
   const GEOCODE_URL = process.env.ARCGIS_GEOCODE_URL;
