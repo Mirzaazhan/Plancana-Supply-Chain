@@ -720,7 +720,6 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
                                 title: "Transport Route: {batchIdName}",
                                 content: `
                                   <b>Distance:</b> {distance} km<br>
-                                  <b>Total Elapsed Time:</b> {TotalTime} minutes<br>
                                   <b>ETA between points:</b> {eta} minutes<br>
                                 `,
                               },
