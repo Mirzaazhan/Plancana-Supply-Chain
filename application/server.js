@@ -2833,6 +2833,994 @@ app.get(
   }
 );
 
+// ==================== ADMIN USER MANAGEMENT ENDPOINTS ====================
+
+// Get all users with pagination, search, and filters
+app.get(
+  "/api/admin/users",
+  authenticate,
+  authorize(["ADMIN"]),
+  async (req, res) => {
+    try {
+      const {
+        page = 1,
+        limit = 10,
+        search = "",
+        role = "",
+        status = "",
+        sortBy = "createdAt",
+        sortOrder = "desc",
+      } = req.query;
+
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+
+      // Build where clause
+      const where = {};
+
+      // Search filter - searches across username, email, and profile names
+      if (search) {
+        where.OR = [
+          { username: { contains: search, mode: "insensitive" } },
+          { email: { contains: search, mode: "insensitive" } },
+          {
+            farmerProfile: {
+              OR: [
+                { firstName: { contains: search, mode: "insensitive" } },
+                { lastName: { contains: search, mode: "insensitive" } },
+                { farmName: { contains: search, mode: "insensitive" } },
+              ],
+            },
+          },
+          {
+            processorProfile: {
+              companyName: { contains: search, mode: "insensitive" },
+            },
+          },
+          {
+            distributorProfile: {
+              companyName: { contains: search, mode: "insensitive" },
+            },
+          },
+          {
+            retailerProfile: {
+              businessName: { contains: search, mode: "insensitive" },
+            },
+          },
+          {
+            adminProfile: {
+              OR: [
+                { firstName: { contains: search, mode: "insensitive" } },
+                { lastName: { contains: search, mode: "insensitive" } },
+              ],
+            },
+          },
+        ];
+      }
+
+      // Role filter
+      if (role) {
+        where.role = role;
+      }
+
+      // Status filter
+      if (status) {
+        where.status = status;
+      }
+
+      // Build orderBy
+      const orderBy = {};
+      orderBy[sortBy] = sortOrder;
+
+      // Fetch users with all profile relations
+      const users = await prisma.user.findMany({
+        where,
+        include: {
+          farmerProfile: true,
+          processorProfile: true,
+          distributorProfile: true,
+          retailerProfile: true,
+          adminProfile: true,
+          regulatorProfile: true,
+          _count: {
+            select: {
+              activityLogs: true,
+              sessions: true,
+            },
+          },
+        },
+        orderBy,
+        skip,
+        take: parseInt(limit),
+      });
+
+      const totalCount = await prisma.user.count({ where });
+
+      // Remove password from response
+      const sanitizedUsers = users.map(({ password, ...user }) => user);
+
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "VIEW_USERS",
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent"),
+          metadata: {
+            filters: { search, role, status },
+            resultCount: users.length,
+          },
+        },
+      });
+
+      res.json({
+        success: true,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalCount,
+          totalPages: Math.ceil(totalCount / parseInt(limit)),
+          hasNext: skip + parseInt(limit) < totalCount,
+          hasPrev: parseInt(page) > 1,
+        },
+        filters: { search, role, status, sortBy, sortOrder },
+        users: sanitizedUsers,
+      });
+    } catch (error) {
+      console.error("API error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to fetch users",
+        details: error.message,
+      });
+    }
+  }
+);
+
+// Get single user with full details and activity logs
+app.get(
+  "/api/admin/users/:userId",
+  authenticate,
+  authorize(["ADMIN"]),
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { activityLimit = 20 } = req.query;
+
+      // Fetch user with all relations
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: {
+          farmerProfile: {
+            include: {
+              farmLocations: true,
+              batches: {
+                select: {
+                  id: true,
+                  batchId: true,
+                  status: true,
+                  createdAt: true,
+                },
+                take: 10,
+                orderBy: { createdAt: "desc" },
+              },
+            },
+          },
+          processorProfile: {
+            include: {
+              facilities: true,
+              processingRecords: {
+                select: {
+                  id: true,
+                  batchId: true,
+                  processingDate: true,
+                },
+                take: 10,
+                orderBy: { processingDate: "desc" },
+              },
+            },
+          },
+          distributorProfile: true,
+          retailerProfile: true,
+          adminProfile: true,
+          regulatorProfile: true,
+          sessions: {
+            orderBy: { createdAt: "desc" },
+            take: 5,
+          },
+          activityLogs: {
+            orderBy: { timestamp: "desc" },
+            take: parseInt(activityLimit),
+          },
+        },
+      });
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error: "User not found",
+        });
+      }
+
+      // Remove password
+      const { password, ...userDetails } = user;
+
+      // Get additional statistics
+      const stats = {
+        totalActivityLogs: await prisma.activityLog.count({
+          where: { userId },
+        }),
+        totalSessions: await prisma.userSession.count({ where: { userId } }),
+      };
+
+      // Role-specific stats
+      if (user.role === "FARMER" && user.farmerProfile) {
+        stats.totalBatches = await prisma.batch.count({
+          where: { farmerId: user.farmerProfile.id },
+        });
+        stats.totalFarmLocations = await prisma.farmLocation.count({
+          where: { farmerId: user.farmerProfile.id },
+        });
+      } else if (user.role === "PROCESSOR" && user.processorProfile) {
+        stats.totalProcessingRecords = await prisma.processingRecord.count({
+          where: { processorId: user.processorProfile.id },
+        });
+      }
+
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "VIEW_USER_DETAILS",
+          resource: userId,
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent"),
+          metadata: { viewedUserId: userId, viewedUserRole: user.role },
+        },
+      });
+
+      res.json({
+        success: true,
+        user: userDetails,
+        stats,
+      });
+    } catch (error) {
+      console.error("API error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to fetch user details",
+        details: error.message,
+      });
+    }
+  }
+);
+
+// Update user profile
+app.put(
+  "/api/admin/users/:userId",
+  authenticate,
+  authorize(["ADMIN"]),
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { personalData, profileData } = req.body;
+
+      // Fetch current user to know their role
+      const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, role: true, email: true, username: true },
+      });
+
+      if (!currentUser) {
+        return res.status(404).json({
+          success: false,
+          error: "User not found",
+        });
+      }
+
+      // Security check: Prevent admin from editing their own account through this endpoint
+      if (req.user.id === userId) {
+        return res.status(403).json({
+          success: false,
+          error: "Use /api/auth/profile to update your own profile",
+        });
+      }
+
+      // Update basic user info if provided
+      const userUpdateData = {};
+
+      if (personalData?.email && personalData.email !== currentUser.email) {
+        // Check if email already exists
+        const existingUser = await prisma.user.findFirst({
+          where: {
+            email: personalData.email,
+            NOT: { id: userId },
+          },
+        });
+
+        if (existingUser) {
+          return res.status(400).json({
+            success: false,
+            error: "Email already in use",
+          });
+        }
+        userUpdateData.email = personalData.email;
+      }
+
+      if (
+        personalData?.username &&
+        personalData.username !== currentUser.username
+      ) {
+        // Check if username already exists
+        const existingUser = await prisma.user.findFirst({
+          where: {
+            username: personalData.username,
+            NOT: { id: userId },
+          },
+        });
+
+        if (existingUser) {
+          return res.status(400).json({
+            success: false,
+            error: "Username already in use",
+          });
+        }
+        userUpdateData.username = personalData.username;
+      }
+
+      // Update user if there are changes
+      if (Object.keys(userUpdateData).length > 0) {
+        await prisma.user.update({
+          where: { id: userId },
+          data: userUpdateData,
+        });
+      }
+
+      // Update role-specific profile
+      let updatedProfile = null;
+
+      switch (currentUser.role) {
+        case "FARMER":
+          updatedProfile = await prisma.farmerProfile.update({
+            where: { userId: userId },
+            data: {
+              firstName: profileData.firstName,
+              lastName: profileData.lastName,
+              phone: profileData.phone,
+              farmName: profileData.farmName,
+              farmSize: profileData.farmSize
+                ? parseFloat(profileData.farmSize)
+                : null,
+              address: profileData.address,
+              state: profileData.state,
+              primaryCrops: profileData.primaryCrops || [],
+              farmingType: profileData.farmingType || [],
+              certifications: profileData.certifications || [],
+              licenseNumber: profileData.licenseNumber,
+            },
+          });
+          break;
+
+        case "PROCESSOR":
+          updatedProfile = await prisma.processorProfile.update({
+            where: { userId: userId },
+            data: {
+              companyName: profileData.companyName,
+              contactPerson: profileData.contactPerson,
+              phone: profileData.phone,
+              email: profileData.email,
+              address: profileData.address,
+              state: profileData.state,
+              facilityType: profileData.facilityType || [],
+              processingCapacity: profileData.processingCapacity
+                ? parseFloat(profileData.processingCapacity)
+                : null,
+              certifications: profileData.certifications || [],
+              licenseNumber: profileData.licenseNumber,
+            },
+          });
+          break;
+
+        case "DISTRIBUTOR":
+          updatedProfile = await prisma.distributorProfile.update({
+            where: { userId: userId },
+            data: {
+              companyName: profileData.companyName,
+              contactPerson: profileData.contactPerson,
+              phone: profileData.phone,
+              email: profileData.email,
+              address: profileData.address,
+              state: profileData.state,
+              distributionType: profileData.distributionType || [],
+              vehicleTypes: profileData.vehicleTypes || [],
+              storageCapacity: profileData.storageCapacity
+                ? parseFloat(profileData.storageCapacity)
+                : null,
+              licenseNumber: profileData.licenseNumber,
+            },
+          });
+          break;
+
+        case "RETAILER":
+          updatedProfile = await prisma.retailerProfile.update({
+            where: { userId: userId },
+            data: {
+              businessName: profileData.businessName,
+              contactPerson: profileData.contactPerson,
+              phone: profileData.phone,
+              email: profileData.email,
+              address: profileData.address,
+              state: profileData.state,
+              businessType: profileData.businessType || [],
+              storageCapacity: profileData.storageCapacity
+                ? parseFloat(profileData.storageCapacity)
+                : null,
+              licenseNumber: profileData.licenseNumber,
+            },
+          });
+          break;
+
+        case "ADMIN":
+          updatedProfile = await prisma.adminProfile.update({
+            where: { userId: userId },
+            data: {
+              firstName: profileData.firstName,
+              lastName: profileData.lastName,
+              phone: profileData.phone,
+              email: profileData.email,
+              permissions: profileData.permissions || [],
+            },
+          });
+          break;
+
+        default:
+          return res.status(400).json({
+            success: false,
+            error: "Profile update not supported for this role",
+          });
+      }
+
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "ADMIN_UPDATE_USER_PROFILE",
+          resource: userId,
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent"),
+          metadata: {
+            updatedUserId: userId,
+            updatedUserRole: currentUser.role,
+            updatedFields: [
+              ...Object.keys(userUpdateData),
+              ...Object.keys(profileData),
+            ],
+          },
+        },
+      });
+
+      res.json({
+        success: true,
+        message: "User profile updated successfully",
+        profile: updatedProfile,
+      });
+    } catch (error) {
+      console.error("Profile update error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to update user profile",
+        details: error.message,
+      });
+    }
+  }
+);
+
+// Change user role
+app.put(
+  "/api/admin/users/:userId/role",
+  authenticate,
+  authorize(["ADMIN"]),
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { newRole, confirmDataLoss } = req.body;
+
+      // Validate new role
+      const validRoles = [
+        "FARMER",
+        "PROCESSOR",
+        "DISTRIBUTOR",
+        "RETAILER",
+        "ADMIN",
+        "REGULATOR",
+      ];
+      if (!validRoles.includes(newRole)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid role",
+        });
+      }
+
+      // Fetch current user
+      const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          role: true,
+          email: true,
+          farmerProfile: { select: { id: true } },
+          processorProfile: { select: { id: true } },
+        },
+      });
+
+      if (!currentUser) {
+        return res.status(404).json({
+          success: false,
+          error: "User not found",
+        });
+      }
+
+      // Prevent modifying SUPER_ADMIN
+      if (currentUser.role === "SUPER_ADMIN") {
+        return res.status(403).json({
+          success: false,
+          error: "Cannot modify SUPER_ADMIN role",
+        });
+      }
+
+      // Check if same role
+      if (currentUser.role === newRole) {
+        return res.status(400).json({
+          success: false,
+          error: "User already has this role",
+        });
+      }
+
+      // Check for active batches if changing from FARMER
+      if (currentUser.role === "FARMER" && currentUser.farmerProfile) {
+        const activeBatches = await prisma.batch.count({
+          where: {
+            farmerId: currentUser.farmerProfile.id,
+            status: { in: ["PENDING", "IN_PROGRESS", "PROCESSING"] },
+          },
+        });
+
+        if (activeBatches > 0) {
+          return res.status(400).json({
+            success: false,
+            error: `Cannot change role: User has ${activeBatches} active batch(es)`,
+          });
+        }
+      }
+
+      // Check for active processing records if changing from PROCESSOR
+      if (currentUser.role === "PROCESSOR" && currentUser.processorProfile) {
+        const activeRecords = await prisma.processingRecord.count({
+          where: {
+            processorId: currentUser.processorProfile.id,
+            status: { in: ["PENDING", "IN_PROGRESS"] },
+          },
+        });
+
+        if (activeRecords > 0) {
+          return res.status(400).json({
+            success: false,
+            error: `Cannot change role: User has ${activeRecords} active processing record(s)`,
+          });
+        }
+      }
+
+      // Require confirmation
+      if (!confirmDataLoss) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Role change requires data migration. Set confirmDataLoss: true to proceed.",
+        });
+      }
+
+      // Perform role change in transaction
+      await prisma.$transaction(async (tx) => {
+        // Delete old profile
+        switch (currentUser.role) {
+          case "FARMER":
+            if (currentUser.farmerProfile) {
+              await tx.farmerProfile.delete({
+                where: { userId: userId },
+              });
+            }
+            break;
+          case "PROCESSOR":
+            if (currentUser.processorProfile) {
+              await tx.processorProfile.delete({
+                where: { userId: userId },
+              });
+            }
+            break;
+          case "DISTRIBUTOR":
+            await tx.distributorProfile.deleteMany({ where: { userId } });
+            break;
+          case "RETAILER":
+            await tx.retailerProfile.deleteMany({ where: { userId } });
+            break;
+          case "ADMIN":
+            await tx.adminProfile.deleteMany({ where: { userId } });
+            break;
+          case "REGULATOR":
+            await tx.regulatorProfile.deleteMany({ where: { userId } });
+            break;
+        }
+
+        // Update role
+        await tx.user.update({
+          where: { id: userId },
+          data: { role: newRole },
+        });
+
+        // Create new profile
+        switch (newRole) {
+          case "FARMER":
+            await tx.farmerProfile.create({
+              data: { userId },
+            });
+            break;
+          case "PROCESSOR":
+            await tx.processorProfile.create({
+              data: { userId },
+            });
+            break;
+          case "DISTRIBUTOR":
+            await tx.distributorProfile.create({
+              data: { userId },
+            });
+            break;
+          case "RETAILER":
+            await tx.retailerProfile.create({
+              data: { userId },
+            });
+            break;
+          case "ADMIN":
+            await tx.adminProfile.create({
+              data: { userId },
+            });
+            break;
+          case "REGULATOR":
+            await tx.regulatorProfile.create({
+              data: { userId },
+            });
+            break;
+        }
+
+        // Log activity
+        await tx.activityLog.create({
+          data: {
+            userId: req.user.id,
+            action: "ADMIN_CHANGE_USER_ROLE",
+            resource: userId,
+            ipAddress: req.ip,
+            userAgent: req.get("User-Agent"),
+            metadata: {
+              targetUserId: userId,
+              oldRole: currentUser.role,
+              newRole: newRole,
+            },
+          },
+        });
+      });
+
+      res.json({
+        success: true,
+        message: `User role changed from ${currentUser.role} to ${newRole}`,
+      });
+    } catch (error) {
+      console.error("Role change error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to change user role",
+        details: error.message,
+      });
+    }
+  }
+);
+
+// Change user status
+app.put(
+  "/api/admin/users/:userId/status",
+  authenticate,
+  authorize(["ADMIN"]),
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { status, reason } = req.body;
+
+      // Validate status
+      const validStatuses = ["ACTIVE", "SUSPENDED", "INACTIVE", "PENDING"];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid status",
+        });
+      }
+
+      // Fetch current user
+      const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, role: true, status: true },
+      });
+
+      if (!currentUser) {
+        return res.status(404).json({
+          success: false,
+          error: "User not found",
+        });
+      }
+
+      // Prevent self-suspension
+      if (req.user.id === userId) {
+        return res.status(403).json({
+          success: false,
+          error: "Cannot change your own status",
+        });
+      }
+
+      // Prevent SUPER_ADMIN suspension
+      if (currentUser.role === "SUPER_ADMIN") {
+        return res.status(403).json({
+          success: false,
+          error: "Cannot change SUPER_ADMIN status",
+        });
+      }
+
+      // Check if already has this status
+      if (currentUser.status === status) {
+        return res.status(400).json({
+          success: false,
+          error: "User already has this status",
+        });
+      }
+
+      // Update status
+      await prisma.user.update({
+        where: { id: userId },
+        data: { status },
+      });
+
+      // Invalidate all sessions if suspended or inactive
+      if (status === "SUSPENDED" || status === "INACTIVE") {
+        await prisma.userSession.deleteMany({
+          where: { userId: userId },
+        });
+      }
+
+      // Log activity
+      await prisma.activityLog.create({
+        data: {
+          userId: req.user.id,
+          action: "ADMIN_CHANGE_USER_STATUS",
+          resource: userId,
+          ipAddress: req.ip,
+          userAgent: req.get("User-Agent"),
+          metadata: {
+            targetUserId: userId,
+            oldStatus: currentUser.status,
+            newStatus: status,
+            reason: reason || "No reason provided",
+          },
+        },
+      });
+
+      res.json({
+        success: true,
+        message: `User status changed to ${status}`,
+        sessionsInvalidated:
+          status === "SUSPENDED" || status === "INACTIVE" ? true : false,
+      });
+    } catch (error) {
+      console.error("Status change error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to change user status",
+        details: error.message,
+      });
+    }
+  }
+);
+
+// Delete user
+app.delete(
+  "/api/admin/users/:userId",
+  authenticate,
+  authorize(["ADMIN"]),
+  async (req, res) => {
+    try {
+      const { userId } = req.params;
+      const { confirm, hardDelete = false } = req.body;
+
+      // Require confirmation
+      if (!confirm) {
+        return res.status(400).json({
+          success: false,
+          error: "Deletion requires confirmation. Set confirm: true",
+        });
+      }
+
+      // Fetch current user
+      const currentUser = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          role: true,
+          email: true,
+          farmerProfile: { select: { id: true } },
+          processorProfile: { select: { id: true } },
+        },
+      });
+
+      if (!currentUser) {
+        return res.status(404).json({
+          success: false,
+          error: "User not found",
+        });
+      }
+
+      // Prevent self-deletion
+      if (req.user.id === userId) {
+        return res.status(403).json({
+          success: false,
+          error: "Cannot delete your own account",
+        });
+      }
+
+      // Prevent SUPER_ADMIN deletion
+      if (currentUser.role === "SUPER_ADMIN") {
+        return res.status(403).json({
+          success: false,
+          error: "Cannot delete SUPER_ADMIN account",
+        });
+      }
+
+      // Check for active batches
+      if (currentUser.role === "FARMER" && currentUser.farmerProfile) {
+        const activeBatches = await prisma.batch.count({
+          where: {
+            farmerId: currentUser.farmerProfile.id,
+            status: { in: ["PENDING", "IN_PROGRESS", "PROCESSING"] },
+          },
+        });
+
+        if (activeBatches > 0) {
+          return res.status(400).json({
+            success: false,
+            error: `Cannot delete: User has ${activeBatches} active batch(es)`,
+          });
+        }
+      }
+
+      // Check for active processing records
+      if (currentUser.role === "PROCESSOR" && currentUser.processorProfile) {
+        const activeRecords = await prisma.processingRecord.count({
+          where: {
+            processorId: currentUser.processorProfile.id,
+            status: { in: ["PENDING", "IN_PROGRESS"] },
+          },
+        });
+
+        if (activeRecords > 0) {
+          return res.status(400).json({
+            success: false,
+            error: `Cannot delete: User has ${activeRecords} active processing record(s)`,
+          });
+        }
+      }
+
+      if (hardDelete) {
+        // Hard delete - GDPR compliance
+        await prisma.$transaction(async (tx) => {
+          // Delete sessions
+          await tx.userSession.deleteMany({ where: { userId } });
+
+          // Delete activity logs
+          await tx.activityLog.deleteMany({ where: { userId } });
+
+          // Delete role-specific profile
+          switch (currentUser.role) {
+            case "FARMER":
+              if (currentUser.farmerProfile) {
+                await tx.farmerProfile.delete({ where: { userId } });
+              }
+              break;
+            case "PROCESSOR":
+              if (currentUser.processorProfile) {
+                await tx.processorProfile.delete({ where: { userId } });
+              }
+              break;
+            case "DISTRIBUTOR":
+              await tx.distributorProfile.deleteMany({ where: { userId } });
+              break;
+            case "RETAILER":
+              await tx.retailerProfile.deleteMany({ where: { userId } });
+              break;
+            case "ADMIN":
+              await tx.adminProfile.deleteMany({ where: { userId } });
+              break;
+            case "REGULATOR":
+              await tx.regulatorProfile.deleteMany({ where: { userId } });
+              break;
+          }
+
+          // Delete user
+          await tx.user.delete({ where: { id: userId } });
+
+          // Log deletion (by admin)
+          await tx.activityLog.create({
+            data: {
+              userId: req.user.id,
+              action: "ADMIN_HARD_DELETE_USER",
+              resource: userId,
+              ipAddress: req.ip,
+              userAgent: req.get("User-Agent"),
+              metadata: {
+                deletedUserId: userId,
+                deletedUserEmail: currentUser.email,
+                deletedUserRole: currentUser.role,
+              },
+            },
+          });
+        });
+
+        res.json({
+          success: true,
+          message: "User permanently deleted",
+          deletionType: "hard",
+        });
+      } else {
+        // Soft delete - mark as deleted
+        await prisma.$transaction(async (tx) => {
+          // Update user status
+          await tx.user.update({
+            where: { id: userId },
+            data: {
+              status: "INACTIVE",
+              email: `deleted_${userId}@deleted.local`, // Prevent email conflicts
+            },
+          });
+
+          // Delete all sessions
+          await tx.userSession.deleteMany({ where: { userId } });
+
+          // Log deletion
+          await tx.activityLog.create({
+            data: {
+              userId: req.user.id,
+              action: "ADMIN_SOFT_DELETE_USER",
+              resource: userId,
+              ipAddress: req.ip,
+              userAgent: req.get("User-Agent"),
+              metadata: {
+                deletedUserId: userId,
+                deletedUserEmail: currentUser.email,
+                deletedUserRole: currentUser.role,
+              },
+            },
+          });
+        });
+
+        res.json({
+          success: true,
+          message: "User soft deleted (status set to INACTIVE)",
+          deletionType: "soft",
+        });
+      }
+    } catch (error) {
+      console.error("User deletion error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to delete user",
+        details: error.message,
+      });
+    }
+  }
+);
+
 // Get QR code for existing batch (ENHANCED)
 app.get("/api/qr/:batchId", async (req, res) => {
   try {

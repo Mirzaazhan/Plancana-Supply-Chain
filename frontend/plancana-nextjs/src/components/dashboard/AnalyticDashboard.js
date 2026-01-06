@@ -198,33 +198,33 @@ const calculateCorrelation = (x, y) => {
 };
 
 const IntelligenceBoard = () => {
-  const [correlationData, setCorrelationData] = useState(dummyCorrelationData);
-  const [weatherImpact, setWeatherImpact] = useState(dummyWeatherImpact);
+  const [correlationData, setCorrelationData] = useState([]);
+  const [weatherImpact, setWeatherImpact] = useState([]);
   const [selectedStage, setSelectedStage] = useState("farm");
 
   //comment for testing
 
-  // useEffect(() => {
-  //   const loadRealAnalytics = async () => {
-  //     try {
-  //       const response = await api.get(
-  //         "/analytics/weather-quality-correlation"
-  //       );
-  //       if (response.data.success) {
-  //         setCorrelationData(response.data.correlationData);
-  //         setWeatherImpact(response.data.weatherImpact);
+  useEffect(() => {
+    const loadRealAnalytics = async () => {
+      try {
+        const response = await api.get(
+          "/analytics/weather-quality-correlation"
+        );
+        if (response.data.success) {
+          setCorrelationData(response.data.correlationData);
+          setWeatherImpact(response.data.weatherImpact);
 
-  //         //   // Map backend weatherImpact to your qualityByWeather format if needed
-  //         //   if (response.data.weatherImpact) {
-  //         //     setWeatherImpact(response.data.weatherImpact);
-  //         //   }
-  //       }
-  //     } catch (err) {
-  //       console.error("Failed to load analytics via Axios:", err);
-  //     }
-  //   };
-  //   loadRealAnalytics();
-  // }, []);
+            // Map backend weatherImpact to your qualityByWeather format if needed
+            if (response.data.weatherImpact) {
+              setWeatherImpact(response.data.weatherImpact);
+            }
+        }
+      } catch (err) {
+        console.error("Failed to load analytics via Axios:", err);
+      }
+    };
+    loadRealAnalytics();
+  }, []);
 
   const correlationChangeData = useMemo(() => {
     return correlationData

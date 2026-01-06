@@ -136,8 +136,8 @@ const BatchCard = ({ batch, onViewDetails, onRecall, showActions = true }) => {
           </div>
 
           {/* Additional Information */}
-          {(batch.processingRecords?.length > 0 || batch.transportRoutes?.length > 0 || batch.qualityTests?.length > 0) && (
-            <div className="border-t border-gray-100 pt-3 mb-4">
+          <div className="border-t border-gray-100 pt-3 mb-4 min-h-[52px]">
+            {(batch._count?.processingRecords > 0 || batch._count?.transportRoutes > 0 || batch._count?.qualityTests > 0) && (
               <div className="grid grid-cols-3 gap-2 text-xs text-gray-600">
                 {batch._count?.processingRecords > 0 && (
                   <div className="text-center">
@@ -158,12 +158,12 @@ const BatchCard = ({ batch, onViewDetails, onRecall, showActions = true }) => {
                   </div>
                 )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Action Buttons */}
           {showActions && (
-            <div className="space-y-2">
+            <div className="space-y-2 min-h-[84px]">
               <div className="flex space-x-2">
                 <button
                   onClick={handleViewDetails}

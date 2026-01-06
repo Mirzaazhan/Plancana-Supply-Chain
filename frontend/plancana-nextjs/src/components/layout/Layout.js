@@ -56,6 +56,14 @@ const Layout = ({ children }) => {
           active: "bg-purple-100 text-purple-700",
           ring: "focus:ring-purple-500",
         };
+      case "RETAILER":
+        return {
+          bg: "bg-orange-600",
+          text: "text-orange-600",
+          hover: "hover:bg-orange-50",
+          active: "bg-orange-100 text-orange-700",
+          ring: "focus:ring-orange-500",
+        };
       case "ADMIN":
         return {
           bg: "bg-gray-800",

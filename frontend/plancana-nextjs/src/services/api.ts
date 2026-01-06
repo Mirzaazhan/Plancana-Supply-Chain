@@ -162,11 +162,22 @@ export const adminService = {
     return api.get(`/batches?${queryString}`);
   },
 
-  // User management (if implemented)
+  // User management
   getAllUsers: (params: QueryParams = {}) =>
     api.get("/admin/users", { params }),
-  updateUserStatus: (userId: string, status: string) =>
-    api.put(`/admin/users/${userId}/status`, { status }),
+  getUserDetails: (userId: string) => api.get(`/admin/users/${userId}`),
+  updateUser: (
+    userId: string,
+    userData: { personalData?: any; profileData?: any }
+  ) => api.put(`/admin/users/${userId}`, userData),
+  changeUserRole: (
+    userId: string,
+    data: { newRole: string; confirmDataLoss: boolean }
+  ) => api.put(`/admin/users/${userId}/role`, data),
+  changeUserStatus: (userId: string, data: { status: string; reason?: string }) =>
+    api.put(`/admin/users/${userId}/status`, data),
+  deleteUser: (userId: string, data: { confirm: boolean; hardDelete: boolean }) =>
+    api.delete(`/admin/users/${userId}`, { data }),
 
   // System monitoring
   getSystemStats: () => api.get("/admin/stats"),

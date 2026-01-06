@@ -579,7 +579,7 @@ const ProcessorDashboard = () => {
       {/* Blue Gradient Welcome Banner */}
       <div className="bg-gradient-to-r from-blue-600 to-blue-500 rounded-xl shadow-lg p-8 text-white">
         <h1 className="text-3xl font-bold mb-2 flex items-center gap-2">
-          Welcome back, {user?.username}! ⚙️
+          Welcome back, {user?.username}! 
         </h1>
         <p className="text-blue-50 text-lg">
           Manage your batch processing operations and maintain quality

@@ -519,9 +519,9 @@ const RetailerDashboard = () => {
   return (
     <div className="min-h-screen bg-gray-50 p-6 space-y-6">
       {/* Purple Gradient Welcome Banner */}
-      <div className="bg-gradient-to-r from-purple-600 to-purple-500 rounded-xl shadow-lg p-8 text-white">
+      <div className="bg-gradient-to-r from-orange-700 to-orange-600 rounded-xl shadow-lg p-8 text-white">
         <h1 className="text-3xl font-bold mb-2 flex items-center gap-2">
-          Welcome back, {user?.username}! 🏪
+          Welcome back, {user?.username}! 
         </h1>
         <p className="text-purple-50 text-lg">
           Manage your retail inventory and complete the supply chain journey.
@@ -562,7 +562,7 @@ const RetailerDashboard = () => {
         </div>
         <div className="lg:col-span-1">
           {/* Weather Conditions */}
-          <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-6 text-white">
+          <div className="bg-gradient-to-r from-orange-700 to-orange-600 rounded-xl shadow-lg p-8 text-white">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-semibold">Weather Conditions</h3>
               <Sun className="h-6 w-6" />
