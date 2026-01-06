@@ -4574,6 +4574,7 @@ app.get("/api/analytics/weather-quality-correlation", async (req, res) => {
           stage: "farm",
           temp: batch.farmLocation.temperature,
           humidity: batch.farmLocation.humidity,
+          weather_main: batch.farmLocation.weather_main,
         });
       }
       procLogs.forEach((p) => {
@@ -4584,23 +4585,24 @@ app.get("/api/analytics/weather-quality-correlation", async (req, res) => {
           stage: "processing",
           temp: parseFloat(p.temperature) || null,
           humidity: parseFloat(p.humidity) || null,
+          weatherImpact: p.weather_main || null,
         });
       });
     });
 
     const weatherImpact = await prisma.$queryRaw`
       SELECT 
-        weather_main as condition,
+        condition,
         COUNT(*) as "totalOccurrences",
-        COUNT(*) FILTER (WHERE "qualityTests"->>'grade' = 'A') as "gradeA",
-        COUNT(*) FILTER (WHERE "qualityTests"->>'grade' = 'B') as "gradeB",
-        COUNT(*) FILTER (WHERE "qualityTests"->>'grade' = 'C') as "gradeC"
+        COUNT(*) FILTER (WHERE grade = 'A') as "gradeA",
+        COUNT(*) FILTER (WHERE grade = 'B') as "gradeB",
+        COUNT(*) FILTER (WHERE grade = 'C') as "gradeC"
       FROM (
-        SELECT weather_main, "qualityTests" FROM processing_records WHERE weather_main IS NOT NULL
+        SELECT weather_main as condition, "qualityTests" ->> 'grade' as grade FROM processing_records WHERE weather_main IS NOT NULL
         UNION ALL
-        SELECT weather_main, NULL as "qualityTests" FROM distribution_records WHERE weather_main IS NOT NULL
+        SELECT metadata ->> 'weather_main' as condition,metadata ->> 'quality' as grade FROM batch_location_history WHERE metadata ->> 'weather_main' IS NOT NULL
       ) as combined_weather
-      GROUP BY weather_main
+      GROUP BY condition
       ORDER BY "totalOccurrences" DESC
     `;
 
@@ -5909,6 +5911,15 @@ app.post(
         where: { batchId: batchId },
         include: { processingRecords: true },
       });
+      if (dbBatch.parentBatchId) {
+        const parentBatch = await prisma.batch.findUnique({
+          where: { id: dbBatch.parentBatchId },
+          include: { processingRecords: true },
+        });
+        if (parentBatch) {
+          dbBatch.processingRecords = parentBatch.processingRecords;
+        }
+      }
       if (dbBatch) {
         await prisma.batch.update({
           where: { batchId: batchId },
@@ -5930,6 +5941,14 @@ app.post(
         dbBatch.processingRecords.length > 0
           ? dbBatch.processingRecords[dbBatch.processingRecords.length - 1]
           : null;
+
+      const startTime =
+        latestDistributing?.createdAt?.getTime() ||
+        latestProcessing?.processingDate?.getTime() ||
+        dbBatch.createdAt.getTime();
+
+      const endTime = dbTransfer.transferDate.getTime();
+      const totalTimeCalc = Math.ceil((endTime - startTime) / 60000);
 
       let originCoords = null;
       if (
@@ -5966,11 +5985,7 @@ app.post(
               estimatedTime: routeData.durationMinutes,
               distance: parseFloat(routeData.distanceKm),
               // idea is the eta will be the diff between when the farmer registered it the crop and when the processor accepts it for processing
-              TotalTime: Math.ceil(
-                (dbTransfer.transferDate.getTime() -
-                  latestDistributing.createdAt.getTime()) /
-                  60000
-              ),
+              TotalTime: totalTimeCalc,
               timestamp: dbTransfer.transferDate,
               routePolyline: routeData.geometry,
               status: "IN_TRANSIT",
