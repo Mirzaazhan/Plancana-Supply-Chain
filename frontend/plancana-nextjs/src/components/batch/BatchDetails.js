@@ -23,6 +23,7 @@ import {
   Plus,
   FlaskConical
 } from 'lucide-react';
+import MLValidationBadge from '../ml/MLValidationBadge';
 
 const BatchDetails = ({ batchId, onBack, currentUser }) => {
   const router = useRouter();
@@ -60,11 +61,34 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
       const data = await response.json();
       setBatch(data.batchData);
       setTransferHistory(data.transferHistory || []);
+      console.log('Batch data:', data.batchData);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Parse ML validation from notes
+  const parseMLValidation = (notes) => {
+    if (!notes || !notes.includes('🤖 ML Fraud Detection')) return null;
+
+    const mlSection = notes.split('🤖 ML Fraud Detection:')[1];
+    if (!mlSection) return null;
+
+    const riskMatch = mlSection.match(/Risk Level: (\w+)/);
+    const scoreMatch = mlSection.match(/Anomaly Score: ([\d.]+)%/);
+    const statusMatch = mlSection.match(/Status: (.+)/);
+    const recommendationMatch = mlSection.match(/Recommendation: (\w+)/);
+    const flagsMatch = mlSection.match(/Flags: (.+)/);
+
+    return {
+      isAnomaly: statusMatch && statusMatch[1].includes('FLAGGED'),
+      anomalyScore: scoreMatch ? parseFloat(scoreMatch[1]) / 100 : 0,
+      riskLevel: riskMatch ? riskMatch[1] : 'UNKNOWN',
+      recommendation: recommendationMatch ? recommendationMatch[1] : 'UNKNOWN',
+      flags: flagsMatch ? flagsMatch[1].split(', ').map(f => ({ type: f })) : []
+    };
   };
 
   const fetchQRCode = async () => {
@@ -427,11 +451,19 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
                   </div>
                 )}
 
+                {/* ML Validation Badge */}
+                {batch.notes && parseMLValidation(batch.notes) && (
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <label className="block text-sm font-medium text-gray-500 mb-3">AI Fraud Detection</label>
+                    <MLValidationBadge mlValidation={parseMLValidation(batch.notes)} />
+                  </div>
+                )}
+
                 {/* Additional details */}
                 {batch.notes && (
                   <div className="mt-4 pt-4 border-t border-gray-200">
                     <label className="block text-sm font-medium text-gray-500">Notes</label>
-                    <p className="mt-1 text-sm text-gray-900">{batch.notes}</p>
+                    <p className="mt-1 text-sm text-gray-900 whitespace-pre-wrap">{batch.notes}</p>
                   </div>
                 )}
               </div>

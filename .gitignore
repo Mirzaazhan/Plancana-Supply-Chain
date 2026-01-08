@@ -115,3 +115,23 @@ screenshots/
 # Azure deployment files
 deploy/
 *.pem*:Zone.Identifier
+
+# ML Service
+ml-service/venv/
+ml-service/data/*.json
+ml-service/data/*.csv
+ml-service/saved_models/*.pkl
+ml-service/saved_models/*.joblib
+ml-service/__pycache__/
+ml-service/*/__pycache__/
+ml-service/*/*/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Python virtual environments
+venv/
+ENV/
+env/
+.venv/

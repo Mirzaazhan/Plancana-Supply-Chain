@@ -200,7 +200,7 @@ const AdminDashboard = () => {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <button
           onClick={() => router.push('/admin/users')}
           className="bg-white rounded-xl shadow-sm p-6 hover:shadow-lg transition-all text-left group"
@@ -241,6 +241,20 @@ const AdminDashboard = () => {
             </div>
             <h3 className="text-lg font-bold text-gray-900 mb-2">Analytics</h3>
             <p className="text-sm text-gray-600">View insights and reports</p>
+        </button>
+
+        <button
+          onClick={() => router.push('/admin/ml-dashboard')}
+          className="bg-white rounded-xl shadow-sm p-6 hover:shadow-lg transition-all text-left group"
+        >
+            <div className="flex items-center justify-between mb-4">
+              <div className="bg-gradient-to-br from-blue-100 to-purple-100 p-3 rounded-lg group-hover:from-blue-200 group-hover:to-purple-200 transition-colors">
+                <Sparkles className="h-6 w-6 text-purple-600" />
+              </div>
+              <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-purple-600 transition-colors" />
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">ML Fraud Detection</h3>
+            <p className="text-sm text-gray-600">AI-powered anomaly detection dashboard</p>
         </button>
       </div>
 

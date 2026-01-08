@@ -118,6 +118,120 @@ async function getORSRoute(origin, destination) {
   }
 }
 
+// ============================================================================
+// ML SERVICE INTEGRATION - Fraud Detection & Anomaly Detection
+// ============================================================================
+
+const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:5000';
+const ML_SERVICE_ENABLED = process.env.ML_SERVICE_ENABLED === 'true';
+
+/**
+ * Check if ML service is available
+ * @returns {Promise<boolean>}
+ */
+async function checkMLService() {
+  if (!ML_SERVICE_ENABLED) {
+    return false;
+  }
+
+  try {
+    const response = await axios.get(`${ML_SERVICE_URL}/health`, { timeout: 2000 });
+    return response.data.status === 'healthy';
+  } catch (error) {
+    console.warn('⚠️  ML Service not available:', error.message);
+    return false;
+  }
+}
+
+/**
+ * Validate batch data using ML anomaly detection
+ * @param {Object} batchData - Batch information to validate
+ * @returns {Promise<Object|null>} ML validation result or null if service unavailable
+ */
+async function validateBatchWithML(batchData) {
+  const mlAvailable = await checkMLService();
+
+  if (!mlAvailable) {
+    console.log('ℹ️  ML validation skipped - service not available');
+    return null;
+  }
+
+  try {
+    console.log('🤖 Validating batch with ML fraud detection...');
+
+    const mlPayload = {
+      batchId: batchData.batchId || 'UNKNOWN',
+      crop: batchData.crop || batchData.productType,
+      quantity: parseFloat(batchData.quantity) || 0,
+      pricePerUnit: parseFloat(batchData.pricePerUnit) || 0,
+      latitude: parseFloat(batchData.latitude) || 0,
+      longitude: parseFloat(batchData.longitude) || 0,
+      temperature: parseFloat(batchData.temperature) || 28,
+      humidity: parseFloat(batchData.humidity) || 75,
+      moistureContent: parseFloat(batchData.moistureContent) || 12,
+      qualityGrade: batchData.qualityGrade || 'B',
+      weather_main: batchData.weather_main || 'Clear'
+    };
+
+    const response = await axios.post(
+      `${ML_SERVICE_URL}/api/ml/anomaly-check`,
+      mlPayload,
+      { timeout: 5000 }
+    );
+
+    const mlResult = response.data;
+
+    // Log ML validation result
+    if (mlResult.isAnomaly) {
+      console.warn('⚠️  ML ANOMALY DETECTED:', {
+        batchId: mlPayload.batchId,
+        score: mlResult.anomalyScore,
+        risk: mlResult.riskLevel,
+        flags: mlResult.flags
+      });
+    } else {
+      console.log('✅ ML Validation passed:', {
+        batchId: mlPayload.batchId,
+        score: mlResult.anomalyScore,
+        risk: mlResult.riskLevel
+      });
+    }
+
+    return mlResult;
+
+  } catch (error) {
+    console.error('❌ ML validation error:', error.message);
+    // Don't fail the request if ML service fails - graceful degradation
+    return null;
+  }
+}
+
+/**
+ * Get detailed fraud score for a batch
+ * @param {Object} batchData - Batch information
+ * @returns {Promise<Object|null>}
+ */
+async function getFraudScore(batchData) {
+  const mlAvailable = await checkMLService();
+
+  if (!mlAvailable) {
+    return null;
+  }
+
+  try {
+    const response = await axios.post(
+      `${ML_SERVICE_URL}/api/ml/fraud-score`,
+      batchData,
+      { timeout: 5000 }
+    );
+
+    return response.data;
+  } catch (error) {
+    console.error('❌ Fraud score calculation error:', error.message);
+    return null;
+  }
+}
+
 /**
  * Fetches the Latitude and Longitude for any given spatial entity record ID.
  * @param {string} recordId // the user id
@@ -1419,6 +1533,46 @@ app.post(
         // STEP 2: Create hash of database data for integrity
         const dataHash = calculateStableHash(batch);
 
+        // STEP 2.5: 🤖 ML VALIDATION - Fraud Detection
+        let mlValidation = null;
+        try {
+          mlValidation = await validateBatchWithML({
+            batchId: batchId,
+            crop: crop,
+            productType: crop,
+            quantity: parseFloat(quantity),
+            pricePerUnit: additionalData.pricePerUnit ? parseFloat(additionalData.pricePerUnit) : 0,
+            latitude: parseFloat(latitude) || 0,
+            longitude: parseFloat(longitude) || 0,
+            temperature: batch.farmLocation?.temperature || 28,
+            humidity: batch.farmLocation?.humidity || 75,
+            moistureContent: additionalData.moistureContent ? parseFloat(additionalData.moistureContent) : 12,
+            qualityGrade: additionalData.qualityGrade || 'B',
+            weather_main: batch.farmLocation?.weather_main || 'Clear'
+          });
+
+          // Log ML validation to notes field for transparency
+          if (mlValidation) {
+            const mlNote = `\n\n🤖 ML Fraud Detection:\n` +
+              `- Risk Level: ${mlValidation.riskLevel}\n` +
+              `- Anomaly Score: ${(mlValidation.anomalyScore * 100).toFixed(1)}%\n` +
+              `- Status: ${mlValidation.isAnomaly ? '⚠️  FLAGGED FOR REVIEW' : '✅ PASSED'}\n` +
+              `- Recommendation: ${mlValidation.recommendation}` +
+              (mlValidation.flags && mlValidation.flags.length > 0 ?
+                `\n- Flags: ${mlValidation.flags.map(f => f.type).join(', ')}` : '');
+
+            // Update batch notes with ML validation
+            await prisma.batch.update({
+              where: { id: batch.id },
+              data: {
+                notes: (batch.notes || '') + mlNote
+              }
+            });
+          }
+        } catch (mlError) {
+          console.error('⚠️  ML validation failed, continuing without it:', mlError.message);
+        }
+
         // STEP 3: Submit critical data to blockchain with pricing and certifications
         const blockchainData = {
           cropType: cropType,
@@ -1443,6 +1597,14 @@ app.post(
                   longitude: parseFloat(additionalData.longitude),
                 }
               : null,
+          // 🤖 ML Fraud Detection Results
+          mlValidation: mlValidation ? {
+            verified: !mlValidation.isAnomaly,
+            anomalyScore: mlValidation.anomalyScore,
+            riskLevel: mlValidation.riskLevel,
+            flags: mlValidation.flags || [],
+            timestamp: new Date().toISOString()
+          } : null
         };
 
         const result = await blockchainService.submitTransactionWithRetry(
@@ -1578,6 +1740,19 @@ app.post(
             blockchainHash: result.toString(),
             databaseHash: dataHash,
           },
+          // 🤖 ML Fraud Detection Results
+          mlValidation: mlValidation ? {
+            isAnomaly: mlValidation.isAnomaly,
+            anomalyScore: mlValidation.anomalyScore,
+            riskLevel: mlValidation.riskLevel,
+            recommendation: mlValidation.recommendation,
+            flags: mlValidation.flags || [],
+            message: mlValidation.isAnomaly ?
+              '⚠️  Batch flagged by ML system for review' :
+              '✅  Batch verified by ML fraud detection'
+          } : {
+            message: 'ℹ️  ML validation not available'
+          }
         };
 
         console.log(`Successfully created batch: ${batchId}`);
@@ -7306,6 +7481,32 @@ app.get(
         }
       }
 
+      // Query for distribution records for all batches
+      const allBatchIds = combinedBatches.map((b) => b.batchId);
+
+      // Check which batches have distribution records
+      const distributionRecords = await prisma.distributionRecord.findMany({
+        where: { batchId: { in: allBatchIds } },
+        select: { batchId: true },
+      });
+      const batchesWithDistribution = new Set(
+        distributionRecords.map((r) => r.batchId)
+      );
+
+      // Note: Pricing records are stored on blockchain only and would require
+      // individual queries per batch via getPricingHistory chaincode function.
+      // For performance, we skip this check. Frontend can query individually if needed.
+
+      // Add flags to each batch and filter to only IN_DISTRIBUTION status
+      const enrichedBatches = combinedBatches
+        .filter((batch) => batch.status === "IN_DISTRIBUTION")
+        .map((batch) => ({
+          ...batch,
+          hasDistributionRecord: batchesWithDistribution.has(batch.batchId),
+          // hasPricingRecord flag can be added by querying blockchain individually
+          // For now, we don't check this to avoid performance issues
+        }));
+
       // Disconnect gateway if connected
       if (gateway) {
         await gateway.disconnect();
@@ -7313,8 +7514,8 @@ app.get(
 
       res.json({
         success: true,
-        data: combinedBatches,
-        count: combinedBatches.length,
+        data: enrichedBatches,
+        count: enrichedBatches.length,
         blockchainCount: blockchainBatches.length,
         databaseCount: combinedBatches.length - blockchainBatches.length,
       });
@@ -8166,6 +8367,77 @@ const geocodeAddress = async (address, state, country) => {
   }
 };
 
+// ============================================================================
+// ML ADMIN ENDPOINTS - Fraud Detection Monitoring
+// ============================================================================
+
+/**
+ * Get batches flagged by ML fraud detection
+ */
+app.get("/api/ml/flagged-batches", authenticate, authorize(["ADMIN", "REGULATOR"]), async (req, res) => {
+  try {
+    const flaggedBatches = await prisma.batch.findMany({
+      where: {
+        notes: {
+          contains: '⚠️  FLAGGED FOR REVIEW'
+        }
+      },
+      include: {
+        farmer: {
+          include: {
+            user: { select: { username: true, email: true } }
+          }
+        },
+        farmLocation: true
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 50
+    });
+
+    res.json({
+      success: true,
+      count: flaggedBatches.length,
+      batches: flaggedBatches
+    });
+  } catch (error) {
+    console.error('Error fetching flagged batches:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch flagged batches'
+    });
+  }
+});
+
+/**
+ * Get ML service statistics
+ */
+app.get("/api/ml/stats", authenticate, async (req, res) => {
+  try {
+    const mlAvailable = await checkMLService();
+
+    if (!mlAvailable) {
+      return res.json({
+        success: true,
+        mlServiceAvailable: false,
+        message: 'ML service is not currently available'
+      });
+    }
+
+    const response = await axios.get(`${ML_SERVICE_URL}/api/ml/batch-stats`, { timeout: 3000 });
+
+    res.json({
+      success: true,
+      mlServiceAvailable: true,
+      stats: response.data
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err);
@@ -8176,7 +8448,7 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler
+// 404 handler (MUST be last!)
 app.use("*", (req, res) => {
   res.status(404).json({
     success: false,

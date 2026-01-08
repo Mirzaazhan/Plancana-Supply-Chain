@@ -112,11 +112,13 @@ const BatchRegistration = () => {
       )}`;
     };
 
-    setBatchId(generateBatchId());
+    // Generate batch ID only once and use it for both state and form
+    const generatedBatchId = generateBatchId();
+    setBatchId(generatedBatchId);
     setFormData((prev) => ({
       ...prev,
       farmer: user?.username || "",
-      customBatchId: generateBatchId(),
+      customBatchId: generatedBatchId,
     }));
   }, [user]);
 
