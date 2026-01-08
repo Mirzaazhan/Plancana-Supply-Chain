@@ -666,9 +666,10 @@ const IntelligenceBoard = () => {
         <div className="h-[500px] rounded-xl overflow-hidden border border-gray-200 shadow-inner">
           <ArcGISMap
             webMapId="a24b5bc059d2478e843f4c1968e47860"
-            dragable={true}
+            dragable={false}
             height="500px"
             zoom={6}
+            heatmap={true}
           />
         </div>
 

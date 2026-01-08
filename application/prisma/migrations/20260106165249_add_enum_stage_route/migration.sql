@@ -1,0 +1,2 @@
+-- CreateEnum
+CREATE TYPE "StageRoute" AS ENUM ('PROCESSED', 'DISTRIBUTED', 'TRANSFERED');

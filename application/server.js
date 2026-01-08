@@ -4633,6 +4633,10 @@ app.get("/api/batches/all-with-lineage", async (req, res) => {
             timestamp: route.timestamp
               ? new Date(route.timestamp).getTime()
               : 0,
+            humidity: route.metadata?.humidity ? route.metadata.humidity : null,
+            temperature: route.metadata?.temperature
+              ? route.metadata.temperature
+              : null,
           }));
         };
 
@@ -5294,7 +5298,6 @@ app.post(
               ),
               timestamp: processingRecord.processingDate,
               routePolyline: routeData.geometry,
-              status: "IN_TRANSIT",
             },
           });
         }
@@ -7720,7 +7723,7 @@ app.post(
               distance: parseFloat(routeData.distanceKm),
               timestamp: distributionTime,
               routePolyline: routeData.geometry,
-              status: "DELIVERED",
+              status: "IN_TRANSIT",
             },
           });
         }
@@ -7975,7 +7978,7 @@ app.post(
               TotalTime: totalTimeCalc,
               timestamp: dbTransfer.transferDate,
               routePolyline: routeData.geometry,
-              status: "IN_TRANSIT",
+              status: "DELIVERED",
             },
           });
         }
