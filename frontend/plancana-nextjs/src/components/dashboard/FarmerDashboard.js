@@ -809,7 +809,7 @@ const FarmerDashboard = () => {
                   process.env.NEXT_PUBLIC_ARCGIS_TOKEN_ID_WEBMAP ||
                   "a24b5bc059d2478e843f4c1968e47860"
                 }
-                dragable={true}
+                dragable={false}
                 height="70vh"
                 zoom={5}
               />

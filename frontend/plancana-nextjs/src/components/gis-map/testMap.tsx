@@ -12,27 +12,45 @@ import {
   X,
   AlertCircle,
 } from "lucide-react";
+import { batchService } from "@/services/api";
+import { unique } from "next/dist/build/utils";
+import { get } from "http";
+import { parse } from "path";
 
 interface MapProps {
   webMapId: any;
   dragable: any;
   height: string;
   zoom?: number;
+  heatmap?: boolean;
+  initialBatchId?: string;
 }
 
-const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
+const TestMap = ({
+  webMapId,
+  dragable,
+  height,
+  zoom,
+  heatmap,
+  initialBatchId,
+}: MapProps) => {
   const mapRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<any>(null);
   const locationsLayerRef = useRef<any>(null);
   const routesLayerRef = useRef<any>(null);
   const [batchIds, setBatchIds] = useState<string[]>([]);
-  const [selectedBatchId, setSelectedBatchId] = useState<string>("");
+  const [selectedBatchId, setSelectedBatchId] = useState<string>(
+    initialBatchId || ""
+  );
+  const [isLocked, setIsLocked] = useState(!!initialBatchId);
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [showFilter, setShowFilter] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [mapError, setMapError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isHeatmapEnabled, setIsHeatmapEnabled] = useState(heatmap || false);
+  const locationRendererRef = useRef<any>(null);
 
   // Helper function to map eventType to role
   function getRole(eventType: string): string {
@@ -84,61 +102,55 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
     }
   }
 
-  // const applyFilters = () => {
-  //   const startTime = startDate ? new Date(startDate).getTime() : null;
-  //   const endTime = endDate ? new Date(endDate).getTime() + 86400000 : null;
+  const getConditionStatus = (temp: number, humidity: number) => {
+    // GRADE C - High Spoilage Risk (>85% Hum OR >30°C Temp)
+    if (humidity > 85 || temp > 30) {
+      return {
+        label: "High Spoilage Risk",
+        color: "#ef4444",
+        grade: "C",
+        description: ": High moisture and heat detected.",
+      };
+    }
 
-  //   if (!locationsLayerRef.current || !routesLayerRef.current) return;
+    // GRADE C - High Risk (75-85% Hum OR 25-30°C Temp)
+    if (humidity >= 75 || temp >= 25) {
+      return {
+        label: "High Risk",
+        color: "#f97316",
+        grade: "C",
+        description: ": Conditions favorable for degradation.",
+      };
+    }
 
-  //   let expressions: string[] = [];
-  //   if (selectedBatchId) {
-  //     // BATCH-2026-05-A
-  //     const parts = selectedBatchId.split("-"); // ["BATCH", "2026", "05", "A"]
-  //     const isChildBatch = parts.length > 3; // true if more than 3 parts // this chase is true
-  //     if (isChildBatch) {
-  //       //true
-  //       const parentBatchId = parts.slice(0, 3).join("-"); // "BATCH-2026-05"
-  //       expressions.push(
-  //         `((batchId = '${parentBatchId}' AND isParentPath = 'true' AND timestampNum <= splitTimestamp) OR batchId = '${selectedBatchId}')`
-  //       );
-  //     } else {
-  //       expressions.push(`batchId = '${selectedBatchId}'`);
-  //     }
-  //   }
-  //   if (startDate) expressions.push(`timestampNum >= ${startTime}`);
-  //   if (endDate) expressions.push(`timestampNum <= ${endTime}`);
+    //  GRADE A - Optimal (65-72% Hum AND <25°C Temp)
+    if (humidity >= 65 && humidity <= 72 && temp < 25) {
+      return {
+        label: "Optimal",
+        color: "#22c55e",
+        grade: "A",
+        description: ": Stable storage conditions.",
+      };
+    }
 
-  //   locationsLayerRef.current.definitionExpression =
-  //     expressions.length > 0 ? expressions.join(" AND ") : "1=1";
+    // GRADE B - Warning (55-60% Hum AND <25°C Temp)
+    if (humidity >= 55 && humidity <= 60 && temp < 25) {
+      return {
+        label: "Warning",
+        color: "#eab308",
+        grade: "B",
+        description: ": Slightly low moisture levels.",
+      };
+    }
 
-  //   routesLayerRef.current.graphics.forEach((graphic: any) => {
-  //     const attr = graphic.attributes;
-  //     let isPathValid = true;
-  //     if (selectedBatchId) {
-  //       const isDirectBatch = attr.batchIdName === selectedBatchId;
-
-  //       const isParentOfSelected =
-  //         attr.isParentPath === true &&
-  //         selectedBatchId.startsWith(attr.batchIdName + "-") &&
-  //         attr.splitTimestamp !== null &&
-  //         attr.splitTimestamp !== undefined &&
-  //         attr.timestamp !== null &&
-  //         attr.timestamp !== undefined &&
-  //         attr.timestamp <= attr.splitTimestamp;
-
-  //       isPathValid = isDirectBatch || isParentOfSelected;
-  //     } else {
-  //       isPathValid = attr.isParentPath !== true;
-  //     }
-
-  //     const afterStart =
-  //       !startTime || !attr.timestamp || attr.timestamp >= startTime;
-  //     const beforeEnd =
-  //       !endTime || !attr.timestamp || attr.timestamp <= endTime;
-
-  //     graphic.visible = isPathValid && afterStart && beforeEnd;
-  //   });
-  // };
+    // Default / Neutral
+    return {
+      label: "Other",
+      color: "#94a3b8",
+      grade: "N/A",
+      description: "Conditions outside standard classification.",
+    };
+  };
   const applyFilters = () => {
     const startTime = startDate ? new Date(startDate).getTime() : null;
     const endTime = endDate ? new Date(endDate).getTime() + 86400000 : null;
@@ -214,6 +226,18 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
     setStartDate("");
     setEndDate("");
   };
+  useEffect(() => {
+    if (initialBatchId) {
+      setSelectedBatchId(initialBatchId);
+      setIsLocked(true);
+    }
+
+    console.log("selectedBatchId :", selectedBatchId);
+  }, [initialBatchId]);
+
+  if (initialBatchId) {
+    applyFilters();
+  }
 
   useEffect(() => {
     applyFilters();
@@ -414,56 +438,7 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
             ],
           });
 
-          // Create renderer for routes
-          const routeRenderer = new UniqueValueRenderer({
-            field: "routeStatus",
-            defaultLabel: "Other",
-            legendOptions: {
-              title: " ",
-            },
-            uniqueValueInfos: [
-              {
-                value: "PLANNED",
-                symbol: {
-                  type: "picture-marker",
-                  url: iconToSvgString(Truck, "#FFC800", 30),
-                  width: "30px",
-                  height: "30px",
-                },
-                label: "Planned",
-              },
-              {
-                value: "IN_TRANSIT",
-                symbol: {
-                  type: "picture-marker",
-                  url: iconToSvgString(Truck, "#0064FF", 30),
-                  width: "30px",
-                  height: "30px",
-                },
-                label: "In Transit",
-              },
-              {
-                value: "DELIVERED",
-                symbol: {
-                  type: "picture-marker",
-                  url: iconToSvgString(Truck, "#009600", 30),
-                  width: "30px",
-                  height: "30px",
-                },
-                label: "Delivered",
-              },
-              {
-                value: "DELAYED",
-                symbol: {
-                  type: "picture-marker",
-                  url: iconToSvgString(Truck, "#FF0000", 30),
-                  width: "30px",
-                  height: "30px",
-                },
-                label: "Delayed",
-              },
-            ],
-          });
+          locationRendererRef.current = locationRenderer;
 
           // Create feature layers
           const locationsLayer = new FeatureLayer({
@@ -480,8 +455,8 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
               { name: "productType", type: "string" },
               { name: "quantity", type: "string" },
               { name: "location", type: "string" },
-              { name: "temperature", type: "string" },
-              { name: "humidity", type: "string" },
+              { name: "tempDisplay", type: "string" },
+              { name: "humDisplay", type: "string" },
               { name: "weather_main", type: "string" },
               { name: "weather_desc", type: "string" },
               { name: "timestamp", type: "string" },
@@ -489,23 +464,54 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
               { name: "isParentPath", type: "string" },
               { name: "splitTimestamp", type: "double" },
               { name: "parentBatch", type: "string" },
+              { name: "weatherRisk", type: "string" },
+              { name: "weatherColor", type: "string" },
+              { name: "weatherRiskDesc", type: "string" },
+              { name: "riskValue", type: "double" },
             ],
-            renderer: locationRenderer,
+            renderer: isHeatmapEnabled
+              ? {
+                  type: "heatmap",
+                  field: "riskValue",
+                  colorStops: [
+                    { color: "rgba(0, 0, 0, 0)", ratio: 0 },
+                    { color: "rgba(34, 197, 94, 0.3)", ratio: 0.1 },
+                    { color: "rgba(34, 197, 94, 0.4)", ratio: 0.3 },
+                    { color: "rgba(234, 179, 8, 0.6)", ratio: 0.5 },
+                    { color: "rgba(249, 115, 22, 0.8)", ratio: 0.7 },
+                    { color: "rgba(239, 68, 68, 1)", ratio: 0.9 },
+                    { color: "rgba(220, 38, 38, 1)", ratio: 1.0 },
+                  ],
+                  maxDensity: 0.008,
+                  minDensity: 0,
+                  radius: 45,
+                  blurRadius: 10,
+                }
+              : locationRenderer,
             geometryType: "point",
             popupEnabled: true,
             popupTemplate: {
               title: "{expression/dynamic-title}",
               content: `
-                <b>Crop Type:</b> {cropType}<br>
-                <b>Product Name:</b> {productType}<br>
+              <div style="background-color:{expression/alert-color}; color:white; padding:10px; margin-bottom:10px; border-radius:4px; text-align:center; font-weight:bold;">
+                {expression/alert-icon} {weatherRisk}: {weatherRiskDesc}
+              </div>
+              
+              <div style="padding: 5px;">
+                <b>Current Status:</b> {status}<br>
+                <hr>
+                <b>Environmental Conditions:</b><br>
+                <span style="font-size: 1.1em;">🌡️ <b>Temp:</b> {tempDisplay}</span><br>
+                <span style="font-size: 1.1em;">💧 <b>Humidity:</b> {humDisplay}</span><br>
+                <b>Weather:</b> {weather_main} ({weather_desc})<br>
+                <hr>
+                <b>Product Details:</b><br>
+                <b>Crop:</b> {cropType} ({productType})<br>
                 <b>Quantity:</b> {quantity}<br>
-                <b>Status:</b> {status}<br>
                 <b>Location:</b> {location}<br>
-                <b>Temperature:</b> {temperature}<br>
-                <b>Humidity:</b> {humidity}<br>
-                <b>Weather:</b> {weather_main} - {weather_desc}<br>
-                <b>Timestamp:</b> {timestamp}
-              `,
+                <b>Time:</b> {timestamp}
+              </div>
+            `,
               expressionInfos: [
                 {
                   name: "dynamic-title",
@@ -519,23 +525,28 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
                   }
                 `,
                 },
+                {
+                  name: "alert-color",
+                  expression: `
+                  var risk = $feature.riskValue;
+                  if (risk >= 100) return "#ef4444"; // Red (Critical)
+                  if (risk >= 50) return "#f97316";  // Orange (High Risk)
+                  if (risk >= 40) return "#eab308";  // Yellow (Warning)
+                  return "#22c55e";                  // Green (Optimal)
+                `,
+                },
+                {
+                  name: "alert-text",
+                  expression: `
+                  var risk = $feature.riskValue;
+                  if (risk >= 100) return "ACTION REQUIRED: CRITICAL ENVIRONMENTAL BREACH";
+                  if (risk >= 50) return "WARNING: HIGH DEGRADATION RISK";
+                  return "STABLE: OPTIMAL CONDITIONS";
+                `,
+                },
               ],
             },
           });
-
-          // const routesLayer = new FeatureLayer({
-          //   title: "Active Routes",
-          //   source: [],
-          //   objectIdField: "ObjectID",
-          //   fields: [
-          //     { name: "ObjectID", type: "oid" },
-          //     { name: "routeStatus", type: "string" },
-          //     { name: "batchId", type: "string" },
-          //   ],
-          //   renderer: routeRenderer,
-          //   geometryType: "point",
-          //   popupEnabled: true,
-          // });
 
           const routesGraphicsLayer = new GraphicsLayerModule({
             title: "Route Lines",
@@ -644,11 +655,21 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
                           longitude: pointData.longitude,
                           latitude: pointData.latitude,
                         });
-
+                        const temp =
+                          parseFloat(pointData.metadata.temperature) || 0;
+                        const hum =
+                          parseFloat(pointData.metadata.humidity) || 0;
+                        const condition = getConditionStatus(temp, hum);
                         const role = getRole(pointData.eventType);
                         const timestamp = new Date(
                           pointData.timestamp
                         ).getTime();
+                        const riskScore =
+                          condition.grade === "C"
+                            ? 100
+                            : condition.grade === "B"
+                            ? 50
+                            : 10;
 
                         locationFeatures.push({
                           geometry: point,
@@ -662,9 +683,11 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
                             productType: batch.productType,
                             quantity: batch.quantity,
                             location: pointData.metadata.location || "N/A",
-                            temperature:
-                              pointData.metadata.temperature || "N/A",
-                            humidity: pointData.metadata.humidity || "N/A",
+                            weatherRisk: condition.label,
+                            weatherColor: condition.color,
+                            riskValue: riskScore,
+                            tempDisplay: temp ? `${temp}°C` : "N/A",
+                            humDisplay: hum ? `${hum}%` : "N/A",
                             weather_main:
                               pointData.metadata.weather_main || "N/A",
                             weather_desc:
@@ -682,11 +705,53 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
                               : "false",
                             parentBatch:
                               pointData.metadata?.parentBatch || null,
+                            weatherRiskDesc: condition.description || "N/A",
                           },
                         });
                       });
 
                       batch.activeRoutes.forEach((route: any) => {
+                        const arrivalPoint = batch.historyPoints.find(
+                          (p: any) =>
+                            new Date(p.timestamp).getTime() >=
+                            new Date(route.timestamp).getTime()
+                        );
+                        const temp = arrivalPoint
+                          ? parseFloat(arrivalPoint.metadata.temperature)
+                          : 0;
+                        const hum = arrivalPoint
+                          ? parseFloat(arrivalPoint.metadata.humidity)
+                          : 0;
+                        // 2. Determine Risk Level
+                        let routeColor = [34, 197, 94, 1]; // Default Green (Optimal/Grade A)
+                        let strokeWidth = 3;
+                        let strokeStyle = "solid";
+
+                        if (hum > 85 || temp > 30) {
+                          routeColor = [220, 38, 38, 1]; // Bright Red
+                          strokeWidth = 3;
+                          strokeStyle = "dash";
+                        } else if (
+                          (hum >= 75 && hum <= 85) ||
+                          (temp >= 25 && temp <= 30)
+                        ) {
+                          // Grade C
+                          routeColor = [249, 115, 22, 1]; // Orange
+                          strokeWidth = 3;
+                        } else if (hum >= 65 && hum <= 72 && temp < 25) {
+                          // Grade A - Optimal
+                          routeColor = [34, 197, 94, 1]; // Green
+                          strokeWidth = 3;
+                        } else if (hum >= 55 && hum <= 60 && temp < 25) {
+                          // Grade B
+                          routeColor = [234, 179, 8, 1]; // Yellow/Gold
+                          strokeWidth = 3;
+                        } else {
+                          // Conditions outside specific thesis brackets
+                          routeColor = [148, 163, 184, 1]; // Gray (Unknown/Neutral)
+                          strokeWidth = 2;
+                        }
+
                         if (route.routePolyline) {
                           try {
                             const geojson = JSON.parse(route.routePolyline);
@@ -694,12 +759,11 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
                               type: "polyline",
                               paths: geojson.coordinates,
                             };
-
                             const routeSymbol = {
                               type: "simple-line",
-                              color: [11, 156, 49, 1], // change route colour here
-                              width: 3,
-                              style: "solid",
+                              color: routeColor, // change route colour here
+                              width: strokeWidth,
+                              style: strokeStyle,
                             };
 
                             const routeGraphic = new Graphic({
@@ -715,6 +779,10 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
                                 TotalTime: route.TotalTime,
                                 distance: route.distance,
                                 eta: route.estimatedTime,
+                                riskLevel: temp
+                                  ? getConditionStatus(temp, hum).label
+                                  : "Unknown",
+                                tempAtArrival: temp || "N/A",
                               },
                               popupTemplate: {
                                 title: "Transport Route: {batchIdName}",
@@ -734,7 +802,6 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
                         }
                       });
                     });
-
                     if (locationFeatures.length > 0) {
                       locationsLayer.applyEdits({
                         addFeatures: locationFeatures,
@@ -791,6 +858,91 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
     };
   }, [webMapId, token, dragable, zoom]);
 
+  useEffect(() => {
+    if (locationsLayerRef.current) {
+      if (isHeatmapEnabled) {
+        locationsLayerRef.current.renderer = {
+          type: "heatmap",
+          field: "riskValue",
+          colorStops: [
+            { color: "rgba(0, 0, 0, 0)", ratio: 0 }, // Transparent (no data)
+            { color: "rgba(34, 197, 94, 0.3)", ratio: 0.1 }, // Faint green (Low risk - value 10)
+            { color: "rgba(34, 197, 94, 0.4)", ratio: 0.3 }, // Green (Low risk)
+            { color: "rgba(234, 179, 8, 0.6)", ratio: 0.5 }, // Yellow (Medium risk - value 50)
+            { color: "rgba(249, 115, 22, 0.8)", ratio: 0.7 }, // Orange (High risk)
+            { color: "rgba(239, 68, 68, 1)", ratio: 0.9 }, // Red (Very high risk)
+            { color: "rgba(220, 38, 38, 1)", ratio: 1.0 }, // Bright RED (Critical - value 100)
+          ],
+          maxDensity: 0.008,
+          minDensity: 0,
+          radius: 45,
+          blurRadius: 10,
+        };
+      } else {
+        locationsLayerRef.current.renderer = locationRendererRef.current;
+      }
+      locationsLayerRef.current.refresh();
+    }
+  }, [isHeatmapEnabled]);
+
+  const WeatherLegend = () => (
+    <div className="absolute bottom-10 left-4 z-10 bg-white/90 backdrop-blur-sm p-4 rounded-lg shadow-2xl border border-gray-200 max-w-xs">
+      <div className="flex items-center gap-2 mb-3 border-b pb-2">
+        <AlertCircle size={18} className="text-blue-600" />
+        <h3 className="font-bold text-sm text-gray-800">Quality Risk Legend</h3>
+      </div>
+      <div className="space-y-3">
+        <div className="flex items-start gap-3">
+          <div className="w-6 h-1 mt-2 bg-[#ef4444] border-t-2 border-dashed border-red-800"></div>
+          <div>
+            <p className="text-xs font-bold text-red-700">
+              High Spoilage Risk (Grade C)
+            </p>
+            <p className="text-[10px] text-gray-600">
+              {">"}85% Hum / {">"}30°C | EMC {">"}17%
+            </p>
+          </div>
+        </div>
+        <div className="flex items-start gap-3">
+          <div className="w-6 h-1 mt-2 bg-[#f97316]"></div>
+          <div>
+            <p className="text-xs font-bold text-orange-600">
+              High Risk (Grade C)
+            </p>
+            <p className="text-[10px] text-gray-600">
+              75-85% Hum / 25-30°C | EMC 15-17%
+            </p>
+          </div>
+        </div>
+        <div className="flex items-start gap-3">
+          <div className="w-6 h-1 mt-2 bg-[#22c55e]"></div>
+          <div>
+            <p className="text-xs font-bold text-green-700">
+              Optimal (Grade A)
+            </p>
+            <p className="text-[10px] text-gray-600">
+              65-72% Hum / &lt;25°C | EMC 13-14.5%
+            </p>
+          </div>
+        </div>
+        <div className="flex items-start gap-3">
+          <div className="w-6 h-1 mt-2 bg-[#eab308]"></div>
+          <div>
+            <p className="text-xs font-bold text-yellow-700">
+              Warning (Grade B)
+            </p>
+            <p className="text-[10px] text-gray-600">
+              55-60% Hum / &lt;25°C | EMC ~12%
+            </p>
+          </div>
+        </div>
+      </div>
+      <p className="mt-3 text-[9px] text-gray-400 italic">
+        *Based on Equilibrium Moisture Content (EMC) standard D245.
+      </p>
+    </div>
+  );
+
   return (
     <>
       <div className="relative w-full" style={{ height: height }}>
@@ -826,89 +978,101 @@ const TestMap = ({ webMapId, dragable, height, zoom }: MapProps) => {
           </div>
         )}
 
-        {/* Filter Panel */}
-        <div className="relative">
-          <button
-            onClick={() => setShowFilter(!showFilter)}
-            className="absolute top-4 left-4 z-10 bg-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 hover:bg-gray-50 transition-colors"
-          >
-            <Filter size={18} />
-            <span className="font-medium">Filters</span>
-            {(selectedBatchId || startDate || endDate) && (
-              <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full">
-                Active
-              </span>
-            )}
-          </button>
-
-          {showFilter && (
-            <div className="absolute top-16 left-4 z-10 bg-white p-4 rounded-lg shadow-xl w-80">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-lg">Filter Options</h3>
-                <button
-                  onClick={() => setShowFilter(false)}
-                  className="text-gray-500 hover:text-gray-700"
-                >
-                  <X size={20} />
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Batch ID
-                  </label>
-                  <select
-                    value={selectedBatchId}
-                    onChange={(e) => setSelectedBatchId(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">All Batches</option>
-                    {batchIds.map((id) => (
-                      <option key={id} value={id}>
-                        {id}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Start Date
-                  </label>
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    End Date
-                  </label>
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                {(selectedBatchId || startDate || endDate) && (
+        {!isLocked && (
+          <div className="relative">
+            <button
+              onClick={() => setShowFilter(!showFilter)}
+              className="absolute top-4 left-4 z-10 bg-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-2 hover:bg-gray-50 transition-colors"
+            >
+              <Filter size={18} />
+              <span className="font-medium">Filters</span>
+              {(selectedBatchId || startDate || endDate) && (
+                <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full">
+                  Active
+                </span>
+              )}
+            </button>
+            {showFilter && (
+              <div className="absolute top-16 left-4 z-10 bg-white p-4 rounded-lg shadow-xl w-80">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-semibold text-lg">Filter Options</h3>
                   <button
-                    onClick={clearFilters}
-                    className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors font-medium"
+                    onClick={() => setShowFilter(false)}
+                    className="text-gray-500 hover:text-gray-700"
                   >
-                    Clear All Filters
+                    <X size={20} />
                   </button>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+                </div>
 
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Batch ID
+                    </label>
+                    <select
+                      value={selectedBatchId}
+                      onChange={(e) => setSelectedBatchId(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">All Batches</option>
+                      {batchIds.map((id) => (
+                        <option key={id} value={id}>
+                          {id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Start Date
+                    </label>
+                    <input
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      End Date
+                    </label>
+                    <input
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  {(selectedBatchId || startDate || endDate) && (
+                    <button
+                      onClick={clearFilters}
+                      className="w-full px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors font-medium"
+                    >
+                      Clear All Filters
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setIsHeatmapEnabled(!isHeatmapEnabled)}
+                    className={`w-full px-4 py-2 mt-2 rounded-md transition-colors font-medium ${
+                      isHeatmapEnabled
+                        ? "bg-red-500 text-white"
+                        : "bg-blue-600 text-white"
+                    }`}
+                  >
+                    {isHeatmapEnabled
+                      ? "View Individual Batches"
+                      : "Show Quality Hotspots (Heatmap)"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {!isLoading && !mapError && <WeatherLegend />}
         {/* Map Container */}
         <div
           ref={mapRef}
