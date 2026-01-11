@@ -71,6 +71,8 @@ const DistributorDashboard = () => {
   const [showRecallModal, setShowRecallModal] = useState(false);
   const [selectedBatch, setSelectedBatch] = useState(null);
 
+  const [error, setError] = useState("");
+
   // Distribution form state
   const [distributionData, setDistributionData] = useState({
     distributionType: "regional",
@@ -457,6 +459,13 @@ const DistributorDashboard = () => {
   };
 
   const submitDistributionRecord = async () => {
+    setError("");
+    if (!distributionData.latitude || !distributionData.longitude) {
+      setError(
+        "Longitude and latitude are required to record distribution location."
+      );
+      return;
+    }
     try {
       // Prepare data with warehouseCoordinates as an object
       const payload = {
@@ -488,6 +497,7 @@ const DistributorDashboard = () => {
     } catch (error) {
       console.error("Add distribution error:", error);
       toast.error("Failed to add distribution record");
+      setError("Failed to add distribution record.");
     }
   };
 
@@ -567,6 +577,13 @@ const DistributorDashboard = () => {
   }, []);
 
   const submitTransferToRetailer = async () => {
+    setError("");
+    if (!transferData.latitude || !transferData.longitude) {
+      setError(
+        "Longitude and latitude are required to record transfer location."
+      );
+      return;
+    }
     try {
       if (!transferData.toRetailerId) {
         toast.error("Please enter retailer ID");
@@ -594,6 +611,7 @@ const DistributorDashboard = () => {
     } catch (error) {
       console.error("Transfer error:", error);
       toast.error("Failed to transfer batch to retailer");
+      setError("Failed to transfer batch to retailer.");
     }
   };
 
@@ -796,7 +814,7 @@ const DistributorDashboard = () => {
       {/* Purple Gradient Welcome Banner */}
       <div className="bg-gradient-to-r from-purple-600 to-purple-500 rounded-xl shadow-lg p-8 text-white">
         <h1 className="text-3xl font-bold mb-2 flex items-center gap-2">
-          Welcome back, {user?.username}! 
+          Welcome back, {user?.username}!
         </h1>
         <p className="text-purple-50 text-lg">
           Manage your distribution operations and coordinate deliveries across
@@ -842,7 +860,7 @@ const DistributorDashboard = () => {
         </div>
         {/* Weather Conditions */}
         <div className="lg:col-span-1">
-        <div className="bg-gradient-to-r from-purple-600 to-purple-500 rounded-xl shadow-lg p-8 text-white">
+          <div className="bg-gradient-to-r from-purple-600 to-purple-500 rounded-xl shadow-lg p-8 text-white">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-xl font-semibold">Weather Conditions</h3>
               <Sun className="h-6 w-6" />
@@ -1153,6 +1171,12 @@ const DistributorDashboard = () => {
                       handleInputChange("longitude", value)
                     }
                   />
+                  {error && (
+                    <div className="mt-3 flex items-center gap-2 p-3 mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg animate-pulse">
+                      <ShieldAlert size={16} />
+                      <span className="font-medium">{error}</span>
+                    </div>
+                  )}
                 </div>
                 {/* <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1344,7 +1368,7 @@ const DistributorDashboard = () => {
       {/* Transfer to Retailer Modal */}
       {showTransferModal && selectedBatch && (
         <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-bold mb-4">Transfer to Retailer</h2>
             <p className="text-gray-600 mb-6">Batch: {selectedBatch.batchId}</p>
 
@@ -1372,18 +1396,6 @@ const DistributorDashboard = () => {
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Transfer Location
                 </label>
-                {/* <input
-                  type="text"
-                  value={transferData.transferLocation}
-                  onChange={(e) =>
-                    setTransferData({
-                      ...transferData,
-                      transferLocation: e.target.value,
-                    })
-                  }
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="Retail Store Location"
-                /> */}
                 <LocationInput
                   locationValue={transferData.transferLocation}
                   latitudeValue={transferData.latitude}
@@ -1398,6 +1410,12 @@ const DistributorDashboard = () => {
                     handleTransferInputChange("longitude", value);
                   }}
                 />
+                {error && (
+                  <div className="mt-3 flex items-center gap-2 p-3 mb-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg animate-pulse">
+                    <ShieldAlert size={16} />
+                    <span className="font-medium">{error}</span>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">

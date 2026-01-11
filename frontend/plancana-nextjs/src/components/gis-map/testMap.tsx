@@ -12,6 +12,7 @@ import {
   X,
   AlertCircle,
 } from "lucide-react";
+import { useDebounce } from "use-debounce";
 import { batchService } from "@/services/api";
 import { unique } from "next/dist/build/utils";
 import { get } from "http";
@@ -25,6 +26,84 @@ interface MapProps {
   heatmap?: boolean;
   initialBatchId?: string;
 }
+function getRole(eventType: string): string {
+  switch (eventType) {
+    case "FARM_REGISTRATION":
+    case "REGISTERED":
+      return "FARMER";
+    case "PROCESSING":
+    case "PROCESSED":
+      return "PROCESSOR";
+    case "WAREHOUSE_ARRIVAL":
+    case "DISTRIBUTION_ARRIVAL":
+      return "DISTRIBUTOR";
+    case "RETAIL_READY":
+      return "RETAILER";
+    default:
+      return "OTHER";
+  }
+}
+
+function iconToSvgString(
+  IconComponent: any,
+  color: string,
+  size: number = 24,
+  opacity: number = 1.0
+) {
+  const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" style="opacity: ${opacity};" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        ${getIconPath(IconComponent)}
+      </svg>
+    `;
+  return `data:image/svg+xml;base64,${btoa(svg)}`;
+}
+
+function getIconPath(IconComponent: any) {
+  switch (IconComponent) {
+    case MapPin:
+      return '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>';
+    case Factory:
+      return '<path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M17 18h1"/><path d="M12 18h1"/><path d="M7 18h1"/>';
+    case Truck:
+      return '<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>';
+    case Store:
+      return '<path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2v0a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12v0a2 2 0 0 1-2-2V7"/>';
+    case CheckCircle:
+      return '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>';
+    default:
+      return '<circle cx="12" cy="12" r="10"/>';
+  }
+}
+
+const getConditionStatus = (temp: number, humidity: number) => {
+  // GRADE C - High Spoilage Risk (>85% Hum OR >30°C Temp)
+  if (humidity > 85 || temp > 30) {
+    return {
+      label: "High Spoilage Risk",
+      color: "#ef4444",
+      grade: "C",
+      description: ": High moisture and heat detected.",
+    };
+  }
+
+  // GRADE C - High Risk (75-85% Hum OR 25-30°C Temp)
+  if (humidity >= 75 || temp >= 25) {
+    return {
+      label: "High Risk",
+      color: "#f97316",
+      grade: "C",
+      description: ": Conditions favorable for degradation.",
+    };
+  }
+
+  //  GRADE A - Optimal (65-72% Hum AND <25°C Temp)
+  return {
+    label: "Optimal",
+    color: "#22c55e",
+    grade: "A",
+    description: ": Stable storage conditions.",
+  };
+};
 
 const TestMap = ({
   webMapId,
@@ -39,6 +118,8 @@ const TestMap = ({
   const locationsLayerRef = useRef<any>(null);
   const routesLayerRef = useRef<any>(null);
   const [batchIds, setBatchIds] = useState<string[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch] = useDebounce(searchTerm, 300);
   const [selectedBatchId, setSelectedBatchId] = useState<string>(
     initialBatchId || ""
   );
@@ -52,105 +133,11 @@ const TestMap = ({
   const [isHeatmapEnabled, setIsHeatmapEnabled] = useState(heatmap || false);
   const locationRendererRef = useRef<any>(null);
 
+  useEffect(() => {
+    setSelectedBatchId(debouncedSearch);
+  }, [debouncedSearch]);
+
   // Helper function to map eventType to role
-  function getRole(eventType: string): string {
-    switch (eventType) {
-      case "FARM_REGISTRATION":
-      case "REGISTERED":
-        return "FARMER";
-      case "PROCESSING":
-      case "PROCESSED":
-        return "PROCESSOR";
-      case "WAREHOUSE_ARRIVAL":
-      case "DISTRIBUTION_ARRIVAL":
-        return "DISTRIBUTOR";
-      case "RETAIL_READY":
-        return "RETAILER";
-      default:
-        return "OTHER";
-    }
-  }
-
-  function iconToSvgString(
-    IconComponent: any,
-    color: string,
-    size: number = 24,
-    opacity: number = 1.0
-  ) {
-    const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="${color}" style="opacity: ${opacity};" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        ${getIconPath(IconComponent)}
-      </svg>
-    `;
-    return `data:image/svg+xml;base64,${btoa(svg)}`;
-  }
-
-  function getIconPath(IconComponent: any) {
-    switch (IconComponent) {
-      case MapPin:
-        return '<path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>';
-      case Factory:
-        return '<path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M17 18h1"/><path d="M12 18h1"/><path d="M7 18h1"/>';
-      case Truck:
-        return '<path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/>';
-      case Store:
-        return '<path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2v0a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12v0a2 2 0 0 1-2-2V7"/>';
-      case CheckCircle:
-        return '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>';
-      default:
-        return '<circle cx="12" cy="12" r="10"/>';
-    }
-  }
-
-  const getConditionStatus = (temp: number, humidity: number) => {
-    // GRADE C - High Spoilage Risk (>85% Hum OR >30°C Temp)
-    if (humidity > 85 || temp > 30) {
-      return {
-        label: "High Spoilage Risk",
-        color: "#ef4444",
-        grade: "C",
-        description: ": High moisture and heat detected.",
-      };
-    }
-
-    // GRADE C - High Risk (75-85% Hum OR 25-30°C Temp)
-    if (humidity >= 75 || temp >= 25) {
-      return {
-        label: "High Risk",
-        color: "#f97316",
-        grade: "C",
-        description: ": Conditions favorable for degradation.",
-      };
-    }
-
-    //  GRADE A - Optimal (65-72% Hum AND <25°C Temp)
-    if (humidity >= 65 && humidity <= 72 && temp < 25) {
-      return {
-        label: "Optimal",
-        color: "#22c55e",
-        grade: "A",
-        description: ": Stable storage conditions.",
-      };
-    }
-
-    // GRADE B - Warning (55-60% Hum AND <25°C Temp)
-    if (humidity >= 55 && humidity <= 60 && temp < 25) {
-      return {
-        label: "Warning",
-        color: "#eab308",
-        grade: "B",
-        description: ": Slightly low moisture levels.",
-      };
-    }
-
-    // Default / Neutral
-    return {
-      label: "Other",
-      color: "#94a3b8",
-      grade: "N/A",
-      description: "Conditions outside standard classification.",
-    };
-  };
   const applyFilters = () => {
     const startTime = startDate ? new Date(startDate).getTime() : null;
     const endTime = endDate ? new Date(endDate).getTime() + 86400000 : null;
@@ -468,6 +455,8 @@ const TestMap = ({
               { name: "weatherColor", type: "string" },
               { name: "weatherRiskDesc", type: "string" },
               { name: "riskValue", type: "double" },
+              { name: "blockchain_txId", type: "string" },
+              { name: "blockchain_verifiedBy", type: "string" },
             ],
             renderer: isHeatmapEnabled
               ? {
@@ -493,10 +482,18 @@ const TestMap = ({
             popupTemplate: {
               title: "{expression/dynamic-title}",
               content: `
-              <div style="background-color:{expression/alert-color}; color:white; padding:10px; margin-bottom:10px; border-radius:4px; text-align:center; font-weight:bold;">
-                {expression/alert-icon} {weatherRisk}: {weatherRiskDesc}
+              <div style="background-color:{weatherColor}; color:white; padding:10px; margin-bottom:10px; border-radius:4px; text-align:center; font-weight:bold;">
+                {weatherRisk}: {weatherRiskDesc}
               </div>
               
+              <div style="margin-bottom: 10px; padding: 10px; border: 1px solid #e2e8f0; border-radius: 6px; background-color: #f8fafc;">
+                <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                  <span style="font-weight: bold; color: {expression/bc-color};">
+                    {expression/bc-status}
+                  </span>
+                </div>
+              </div>
+
               <div style="padding: 5px;">
                 <b>Current Status:</b> {status}<br>
                 <hr>
@@ -515,34 +512,29 @@ const TestMap = ({
               expressionInfos: [
                 {
                   name: "dynamic-title",
-                  title: "Batch ID Logic",
                   expression: `
-                  // Check if the point is part of the parent's lineage
-                  if ($feature.isParentPath == 'true' && !IsEmpty($feature.parentBatch)) {
-                    return "Parent Batch: " + $feature.parentBatch;
-                  } else {
-                    return "Batch: " + $feature.batchId;
-                  }
-                `,
+              if ($feature.isParentPath == 'true' && !IsEmpty($feature.parentBatch)) {
+                return "Parent Batch: " + $feature.parentBatch;
+              } else {
+                return "Batch: " + $feature.batchId;
+              }
+            `,
                 },
                 {
-                  name: "alert-color",
+                  name: "bc-status",
                   expression: `
-                  var risk = $feature.riskValue;
-                  if (risk >= 100) return "#ef4444"; // Red (Critical)
-                  if (risk >= 50) return "#f97316";  // Orange (High Risk)
-                  if (risk >= 40) return "#eab308";  // Yellow (Warning)
-                  return "#22c55e";                  // Green (Optimal)
-                `,
+              if (!IsEmpty($feature.blockchain_txId)) {
+                return "✓ Blockchain Verified";
+              }
+              return "Database Record Only";
+            `,
                 },
                 {
-                  name: "alert-text",
+                  name: "bc-color",
                   expression: `
-                  var risk = $feature.riskValue;
-                  if (risk >= 100) return "ACTION REQUIRED: CRITICAL ENVIRONMENTAL BREACH";
-                  if (risk >= 50) return "WARNING: HIGH DEGRADATION RISK";
-                  return "STABLE: OPTIMAL CONDITIONS";
-                `,
+                if (!IsEmpty($feature.blockchain_txId)) { return "#16a34a"; }
+                return "#ca8a04";
+              `,
                 },
               ],
             },
@@ -706,6 +698,10 @@ const TestMap = ({
                             parentBatch:
                               pointData.metadata?.parentBatch || null,
                             weatherRiskDesc: condition.description || "N/A",
+                            blockchain_txId:
+                              pointData.metadata.blockchain?.txId || "",
+                            blockchain_verifiedBy:
+                              pointData.metadata.blockchain?.verifiedBy || "",
                           },
                         });
                       });
@@ -895,9 +891,7 @@ const TestMap = ({
         <div className="flex items-start gap-3">
           <div className="w-6 h-1 mt-2 bg-[#ef4444] border-t-2 border-dashed border-red-800"></div>
           <div>
-            <p className="text-xs font-bold text-red-700">
-              High Spoilage Risk (Grade C)
-            </p>
+            <p className="text-xs font-bold text-red-700">High Spoilage Risk</p>
             <p className="text-[10px] text-gray-600">
               {">"}85% Hum / {">"}30°C | EMC {">"}17%
             </p>
@@ -906,9 +900,7 @@ const TestMap = ({
         <div className="flex items-start gap-3">
           <div className="w-6 h-1 mt-2 bg-[#f97316]"></div>
           <div>
-            <p className="text-xs font-bold text-orange-600">
-              High Risk (Grade C)
-            </p>
+            <p className="text-xs font-bold text-orange-600">High Risk</p>
             <p className="text-[10px] text-gray-600">
               75-85% Hum / 25-30°C | EMC 15-17%
             </p>
@@ -917,9 +909,7 @@ const TestMap = ({
         <div className="flex items-start gap-3">
           <div className="w-6 h-1 mt-2 bg-[#22c55e]"></div>
           <div>
-            <p className="text-xs font-bold text-green-700">
-              Optimal (Grade A)
-            </p>
+            <p className="text-xs font-bold text-green-700">Optimal</p>
             <p className="text-[10px] text-gray-600">
               65-72% Hum / &lt;25°C | EMC 13-14.5%
             </p>
@@ -928,9 +918,7 @@ const TestMap = ({
         <div className="flex items-start gap-3">
           <div className="w-6 h-1 mt-2 bg-[#eab308]"></div>
           <div>
-            <p className="text-xs font-bold text-yellow-700">
-              Warning (Grade B)
-            </p>
+            <p className="text-xs font-bold text-yellow-700">Warning</p>
             <p className="text-[10px] text-gray-600">
               55-60% Hum / &lt;25°C | EMC ~12%
             </p>
@@ -1007,20 +995,36 @@ const TestMap = ({
                 <div className="space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Batch ID
+                      Search Batch ID
                     </label>
-                    <select
-                      value={selectedBatchId}
-                      onChange={(e) => setSelectedBatchId(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">All Batches</option>
-                      {batchIds.map((id) => (
-                        <option key={id} value={id}>
-                          {id}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        placeholder="Type to search batch..."
+                        value={selectedBatchId}
+                        onChange={(e) =>
+                          setSelectedBatchId(e.target.value.toUpperCase())
+                        }
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+
+                      {selectedBatchId &&
+                        !batchIds.includes(selectedBatchId) && (
+                          <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-xl max-h-40 overflow-y-auto">
+                            {batchIds
+                              .filter((id) => id.includes(selectedBatchId))
+                              .map((id) => (
+                                <button
+                                  key={id}
+                                  onClick={() => setSelectedBatchId(id)}
+                                  className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 hover:text-blue-700 transition-colors border-b border-gray-50 last:border-0"
+                                >
+                                  <span className="font-medium">{id}</span>
+                                </button>
+                              ))}
+                          </div>
+                        )}
+                    </div>
                   </div>
 
                   <div>

@@ -8,6 +8,35 @@ import { toast } from "react-hot-toast";
 import ArcGISMap from "@/components/gis-map/geolocation";
 import { Cloudy } from "lucide-react";
 
+const getEMCAlert = (temp, humidity) => {
+  if (!temp || !humidity) return null;
+
+  // High Spoilage Risk (Grade C)
+  if (humidity > 85 || temp > 30) {
+    return {
+      label: "High Spoilage Risk",
+      color: "#ef4444",
+      desc: "EMC >17%: Immediate risk of mold and rapid degradation.",
+    };
+  }
+
+  // High Risk (Grade C)
+  if (humidity >= 75 || temp >= 25) {
+    return {
+      label: "High Risk",
+      color: "#f97316",
+      desc: "EMC 15-17%: Warning. Conditions favor product spoilage.",
+    };
+  }
+
+  // Optimal (Grade A)
+  return {
+    label: "Optimal",
+    color: "#22c55e",
+    desc: "EMC 13-14.5%: Safe and stable environmental conditions.",
+  };
+};
+
 const LocationInput = ({
   locationValue,
   latitudeValue,
@@ -116,11 +145,13 @@ const LocationInput = ({
             </label>
             <input
               type="number"
-              step="0.000001"
-              placeholder="0.000000"
               value={longitudeValue || ""}
               onChange={(e) => onLongitudeChange(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+              className={`w-full px-3 py-2 text-sm border rounded-md focus:ring-2 focus:ring-blue-500 text-gray-900 ${
+                required && !longitudeValue
+                  ? "border-red-500 bg-red-50"
+                  : "border-gray-300"
+              }`}
             />
           </div>
           <div>
@@ -129,38 +160,66 @@ const LocationInput = ({
             </label>
             <input
               type="number"
-              step="0.000001"
-              placeholder="0.000000"
               value={latitudeValue || ""}
               onChange={(e) => onLatitudeChange(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+              className={`w-full px-3 py-2 text-sm border rounded-md focus:ring-2 focus:ring-blue-500 text-gray-900 ${
+                required && !latitudeValue
+                  ? "border-red-500 bg-red-50"
+                  : "border-gray-300"
+              }`}
             />
           </div>
         </div>
 
         {latitudeValue !== 0 && longitudeValue !== 0 && (
-          <div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded-md">
-            <div className="flex items-center mb-1">
-              <Cloudy className="h-4 w-4 text-blue-700 mr-1" />
-              <strong className="text-sm text-blue-700">Weather Info</strong>
-            </div>
-            <div className="space-y-1.5 text-xs text-blue-700">
-              <p>
-                <span className="font-bold">Weather:</span>{" "}
-                {WeatherData.weather_main} ({WeatherData.weather_description})
-              </p>
-              <p>
-                <span className="font-bold">Temperature:</span>{" "}
-                {WeatherData.temperature}°C
-              </p>
-              <p>
-                <span className="font-bold">Humidity:</span>{" "}
-                {WeatherData.humidity}%
-              </p>
-              <p>
-                <span className="font-bold">Wind Speed:</span>{" "}
-                {WeatherData.windSpeed} m/s
-              </p>
+          <div className="mt-3 space-y-3">
+            {(() => {
+              const alert = getEMCAlert(
+                WeatherData.temperature,
+                WeatherData.humidity
+              );
+              if (!alert) return null;
+              return (
+                <div
+                  className="p-3 rounded-lg border-l-4 shadow-sm"
+                  style={{
+                    backgroundColor: `${alert.color}15`,
+                    color: alert.color,
+                  }}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-lg">{alert.icon}</span>
+                    <strong className="text-sm font-bold uppercase">
+                      {alert.label}
+                    </strong>
+                  </div>
+                  <p className="text-xs font-medium opacity-90">{alert.desc}</p>
+                </div>
+              );
+            })()}
+            <div className="mt-3 p-2 bg-blue-50 border border-blue-200 rounded-md">
+              <div className="flex items-center mb-1">
+                <Cloudy className="h-4 w-4 text-blue-700 mr-1" />
+                <strong className="text-sm text-blue-700">Weather Info</strong>
+              </div>
+              <div className="space-y-1.5 text-xs text-blue-700">
+                <p>
+                  <span className="font-bold">Weather:</span>{" "}
+                  {WeatherData.weather_main} ({WeatherData.weather_description})
+                </p>
+                <p>
+                  <span className="font-bold">Temperature:</span>{" "}
+                  {WeatherData.temperature}°C
+                </p>
+                <p>
+                  <span className="font-bold">Humidity:</span>{" "}
+                  {WeatherData.humidity}%
+                </p>
+                <p>
+                  <span className="font-bold">Wind Speed:</span>{" "}
+                  {WeatherData.windSpeed} m/s
+                </p>
+              </div>
             </div>
           </div>
         )}

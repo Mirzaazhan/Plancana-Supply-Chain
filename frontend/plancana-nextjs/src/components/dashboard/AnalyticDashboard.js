@@ -529,12 +529,27 @@ const IntelligenceBoard = () => {
                     }}
                   />
                   <Scatter name="Batches" data={correlationChangeData}>
-                    {correlationChangeData.map((entry, index) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={entry.moisture > 20 ? "#ef4444" : "#3b82f6"}
-                      />
-                    ))}
+                    {correlationChangeData.map((entry, index) => {
+                      const isCritical =
+                        entry.moisture > 17 && entry.humidity > 85;
+                      const isWarning =
+                        entry.moisture > 14.5 && entry.humidity > 75;
+
+                      return (
+                        <Cell
+                          key={`cell-${index}`}
+                          fill={
+                            isCritical
+                              ? "#ef4444"
+                              : isWarning
+                              ? "#f97316"
+                              : "#3b82f6"
+                          }
+                          strokeWidth={isCritical ? 2 : 0}
+                          stroke="#991b1b"
+                        />
+                      );
+                    })}
                   </Scatter>
                 </ScatterChart>
               </ResponsiveContainer>

@@ -4,9 +4,11 @@
 import React, { use, useEffect, useState } from "react";
 import { X, MapPin } from "lucide-react";
 import LocationInput from "../ui/LocationInput";
+import { AlertCircle } from "lucide-react";
 
 const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
   const [weatherData, setWeatherData] = useState({});
+  const [error, setError] = useState("");
   const [formData, setFormData] = useState({
     processType: "initial_processing",
     processingLocation: "",
@@ -146,6 +148,11 @@ const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setError("");
+    if (!formData.latitude || !formData.longitude) {
+      setError("Longitude and latitude are required to start processing.");
+      return;
+    }
     setLoading(true);
 
     const submissionData = {
@@ -211,7 +218,7 @@ const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
           {/* Processing Type */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Processing Type *
+              Processing Type
             </label>
             <select
               name="processType"
@@ -231,7 +238,7 @@ const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
           {/* Location Section */}
           <div>
             <h4 className="text-sm font-semibold text-gray-900 mb-3">
-              Processing Location
+              Processing Location *
             </h4>
 
             <div className="space-y-4">
@@ -251,6 +258,12 @@ const ProcessingStartModal = ({ isOpen, onClose, batch, onSubmit }) => {
                   }
                 />
               </div>
+              {error && (
+                <div className="flex items-center gap-2 p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">
+                  <AlertCircle size={16} />
+                  <span>{error}</span>
+                </div>
+              )}
               {/* <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Location Name / Address

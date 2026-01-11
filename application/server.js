@@ -92,38 +92,78 @@ async function logBatchLocation(batchId, eventType, lat, lng, metadata = null) {
   }
 }
 
-async function getORSRoute(origin, destination) {
+async function getORSRoute(origin, destination, retryCount = 0) {
   const apiKey = process.env.ORS_API_KEY;
-
+  const MAX_RETRIES = 3;
+  await new Promise((resolve) => setTimeout(resolve, Math.random() * 3000));
   const url = `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${apiKey}&start=${origin.lng},${origin.lat}&end=${destination.lng},${destination.lat}`;
 
   try {
-    const response = await axios.get(url);
+    const response = await axios.get(url, { timeout: 8000 });
     const route = response.data.features[0];
 
     return {
       durationMinutes: Math.round(route.properties.summary.duration / 60),
       distanceKm: (route.properties.summary.distance / 1000).toFixed(2),
-
       geometry: JSON.stringify(route.geometry),
+      source: "ORS_API",
     };
   } catch (error) {
-    if (error.response) {
-      console.error("❌ ORS API ERROR:", error.response.data);
-      console.error("Sent Params:", { origin, destination });
-    } else {
-      console.error("❌ Network Error:", error.message);
+    if (error.response?.status === 429 && retryCount < MAX_RETRIES) {
+      const waitTime = Math.pow(2, retryCount) * 2000; // 2s, 4s, 8s...
+      console.warn(
+        `ORS Rate Limit hit. Retrying in ${waitTime}ms (Attempt ${
+          retryCount + 1
+        })...`
+      );
+      await new Promise((resolve) => setTimeout(resolve, waitTime));
+      return getORSRoute(origin, destination, retryCount + 1);
     }
-    return null;
+    console.error(
+      "Routing failed/throttled. Falling back to straight-line geometry."
+    );
+
+    const fallbackDist = calculateDirectDistance(
+      origin.lat,
+      origin.lng,
+      destination.lat,
+      destination.lng
+    );
+
+    return {
+      durationMinutes: Math.round(fallbackDist * 1.5), // Estimate: ~1.5 min per km
+      distanceKm: fallbackDist.toFixed(2),
+      geometry: JSON.stringify({
+        type: "LineString",
+        coordinates: [
+          [origin.lng, origin.lat],
+          [destination.lng, destination.lat],
+        ],
+      }),
+      source: "FALLBACK_DIRECT",
+    };
   }
+}
+function calculateDirectDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 }
 
 // ============================================================================
 // ML SERVICE INTEGRATION - Fraud Detection & Anomaly Detection
 // ============================================================================
 
-const ML_SERVICE_URL = process.env.ML_SERVICE_URL || 'http://localhost:5000';
-const ML_SERVICE_ENABLED = process.env.ML_SERVICE_ENABLED === 'true';
+const ML_SERVICE_URL = process.env.ML_SERVICE_URL || "http://localhost:5000";
+const ML_SERVICE_ENABLED = process.env.ML_SERVICE_ENABLED === "true";
 
 /**
  * Check if ML service is available
@@ -135,10 +175,12 @@ async function checkMLService() {
   }
 
   try {
-    const response = await axios.get(`${ML_SERVICE_URL}/health`, { timeout: 2000 });
-    return response.data.status === 'healthy';
+    const response = await axios.get(`${ML_SERVICE_URL}/health`, {
+      timeout: 2000,
+    });
+    return response.data.status === "healthy";
   } catch (error) {
-    console.warn('⚠️  ML Service not available:', error.message);
+    console.warn("⚠️  ML Service not available:", error.message);
     return false;
   }
 }
@@ -152,15 +194,15 @@ async function validateBatchWithML(batchData) {
   const mlAvailable = await checkMLService();
 
   if (!mlAvailable) {
-    console.log('ℹ️  ML validation skipped - service not available');
+    console.log("ℹ️  ML validation skipped - service not available");
     return null;
   }
 
   try {
-    console.log('🤖 Validating batch with ML fraud detection...');
+    console.log("🤖 Validating batch with ML fraud detection...");
 
     const mlPayload = {
-      batchId: batchData.batchId || 'UNKNOWN',
+      batchId: batchData.batchId || "UNKNOWN",
       crop: batchData.crop || batchData.productType,
       quantity: parseFloat(batchData.quantity) || 0,
       pricePerUnit: parseFloat(batchData.pricePerUnit) || 0,
@@ -169,8 +211,8 @@ async function validateBatchWithML(batchData) {
       temperature: parseFloat(batchData.temperature) || 28,
       humidity: parseFloat(batchData.humidity) || 75,
       moistureContent: parseFloat(batchData.moistureContent) || 12,
-      qualityGrade: batchData.qualityGrade || 'B',
-      weather_main: batchData.weather_main || 'Clear'
+      qualityGrade: batchData.qualityGrade || "B",
+      weather_main: batchData.weather_main || "Clear",
     };
 
     const response = await axios.post(
@@ -183,24 +225,23 @@ async function validateBatchWithML(batchData) {
 
     // Log ML validation result
     if (mlResult.isAnomaly) {
-      console.warn('⚠️  ML ANOMALY DETECTED:', {
+      console.warn("⚠️  ML ANOMALY DETECTED:", {
         batchId: mlPayload.batchId,
         score: mlResult.anomalyScore,
         risk: mlResult.riskLevel,
-        flags: mlResult.flags
+        flags: mlResult.flags,
       });
     } else {
-      console.log('✅ ML Validation passed:', {
+      console.log("✅ ML Validation passed:", {
         batchId: mlPayload.batchId,
         score: mlResult.anomalyScore,
-        risk: mlResult.riskLevel
+        risk: mlResult.riskLevel,
       });
     }
 
     return mlResult;
-
   } catch (error) {
-    console.error('❌ ML validation error:', error.message);
+    console.error("❌ ML validation error:", error.message);
     // Don't fail the request if ML service fails - graceful degradation
     return null;
   }
@@ -227,7 +268,7 @@ async function getFraudScore(batchData) {
 
     return response.data;
   } catch (error) {
-    console.error('❌ Fraud score calculation error:', error.message);
+    console.error("❌ Fraud score calculation error:", error.message);
     return null;
   }
 }
@@ -1541,36 +1582,51 @@ app.post(
             crop: crop,
             productType: crop,
             quantity: parseFloat(quantity),
-            pricePerUnit: additionalData.pricePerUnit ? parseFloat(additionalData.pricePerUnit) : 0,
+            pricePerUnit: additionalData.pricePerUnit
+              ? parseFloat(additionalData.pricePerUnit)
+              : 0,
             latitude: parseFloat(latitude) || 0,
             longitude: parseFloat(longitude) || 0,
             temperature: batch.farmLocation?.temperature || 28,
             humidity: batch.farmLocation?.humidity || 75,
-            moistureContent: additionalData.moistureContent ? parseFloat(additionalData.moistureContent) : 12,
-            qualityGrade: additionalData.qualityGrade || 'B',
-            weather_main: batch.farmLocation?.weather_main || 'Clear'
+            moistureContent: additionalData.moistureContent
+              ? parseFloat(additionalData.moistureContent)
+              : 12,
+            qualityGrade: additionalData.qualityGrade || "B",
+            weather_main: batch.farmLocation?.weather_main || "Clear",
           });
 
           // Log ML validation to notes field for transparency
           if (mlValidation) {
-            const mlNote = `\n\n🤖 ML Fraud Detection:\n` +
+            const mlNote =
+              `\n\n🤖 ML Fraud Detection:\n` +
               `- Risk Level: ${mlValidation.riskLevel}\n` +
-              `- Anomaly Score: ${(mlValidation.anomalyScore * 100).toFixed(1)}%\n` +
-              `- Status: ${mlValidation.isAnomaly ? '⚠️  FLAGGED FOR REVIEW' : '✅ PASSED'}\n` +
+              `- Anomaly Score: ${(mlValidation.anomalyScore * 100).toFixed(
+                1
+              )}%\n` +
+              `- Status: ${
+                mlValidation.isAnomaly ? "⚠️  FLAGGED FOR REVIEW" : "✅ PASSED"
+              }\n` +
               `- Recommendation: ${mlValidation.recommendation}` +
-              (mlValidation.flags && mlValidation.flags.length > 0 ?
-                `\n- Flags: ${mlValidation.flags.map(f => f.type).join(', ')}` : '');
+              (mlValidation.flags && mlValidation.flags.length > 0
+                ? `\n- Flags: ${mlValidation.flags
+                    .map((f) => f.type)
+                    .join(", ")}`
+                : "");
 
             // Update batch notes with ML validation
             await prisma.batch.update({
               where: { id: batch.id },
               data: {
-                notes: (batch.notes || '') + mlNote
-              }
+                notes: (batch.notes || "") + mlNote,
+              },
             });
           }
         } catch (mlError) {
-          console.error('⚠️  ML validation failed, continuing without it:', mlError.message);
+          console.error(
+            "⚠️  ML validation failed, continuing without it:",
+            mlError.message
+          );
         }
 
         // STEP 3: Submit critical data to blockchain with pricing and certifications
@@ -1598,13 +1654,15 @@ app.post(
                 }
               : null,
           // 🤖 ML Fraud Detection Results
-          mlValidation: mlValidation ? {
-            verified: !mlValidation.isAnomaly,
-            anomalyScore: mlValidation.anomalyScore,
-            riskLevel: mlValidation.riskLevel,
-            flags: mlValidation.flags || [],
-            timestamp: new Date().toISOString()
-          } : null
+          mlValidation: mlValidation
+            ? {
+                verified: !mlValidation.isAnomaly,
+                anomalyScore: mlValidation.anomalyScore,
+                riskLevel: mlValidation.riskLevel,
+                flags: mlValidation.flags || [],
+                timestamp: new Date().toISOString(),
+              }
+            : null,
         };
 
         const result = await blockchainService.submitTransactionWithRetry(
@@ -1741,18 +1799,20 @@ app.post(
             databaseHash: dataHash,
           },
           // 🤖 ML Fraud Detection Results
-          mlValidation: mlValidation ? {
-            isAnomaly: mlValidation.isAnomaly,
-            anomalyScore: mlValidation.anomalyScore,
-            riskLevel: mlValidation.riskLevel,
-            recommendation: mlValidation.recommendation,
-            flags: mlValidation.flags || [],
-            message: mlValidation.isAnomaly ?
-              '⚠️  Batch flagged by ML system for review' :
-              '✅  Batch verified by ML fraud detection'
-          } : {
-            message: 'ℹ️  ML validation not available'
-          }
+          mlValidation: mlValidation
+            ? {
+                isAnomaly: mlValidation.isAnomaly,
+                anomalyScore: mlValidation.anomalyScore,
+                riskLevel: mlValidation.riskLevel,
+                recommendation: mlValidation.recommendation,
+                flags: mlValidation.flags || [],
+                message: mlValidation.isAnomaly
+                  ? "⚠️  Batch flagged by ML system for review"
+                  : "✅  Batch verified by ML fraud detection",
+              }
+            : {
+                message: "ℹ️  ML validation not available",
+              },
         };
 
         console.log(`Successfully created batch: ${batchId}`);
@@ -2042,7 +2102,7 @@ app.get("/api/batch/:batchId", authenticate, async (req, res) => {
         qualityTests: true,
         transactions: true,
         parentBatch: {
-          select: { batchId: true, id: true }
+          select: { batchId: true, id: true },
         },
       },
     });
@@ -2065,14 +2125,18 @@ app.get("/api/batch/:batchId", authenticate, async (req, res) => {
 
     // For split batches: get parent's distribution records from BEFORE the split
     if (dbBatch?.parentBatch?.batchId && splitDate) {
-      const parentDistributionRecords = await prisma.distributionRecord.findMany({
-        where: {
-          batchId: dbBatch.parentBatch.batchId,
-          distributionDate: { lt: splitDate }
-        },
-        orderBy: { distributionDate: "desc" },
-      });
-      distributionRecords = [...parentDistributionRecords, ...distributionRecords];
+      const parentDistributionRecords =
+        await prisma.distributionRecord.findMany({
+          where: {
+            batchId: dbBatch.parentBatch.batchId,
+            distributionDate: { lt: splitDate },
+          },
+          orderBy: { distributionDate: "desc" },
+        });
+      distributionRecords = [
+        ...parentDistributionRecords,
+        ...distributionRecords,
+      ];
     }
 
     // For split batches, also fetch parent batch's processing records and transport routes
@@ -2083,7 +2147,7 @@ app.get("/api/batch/:batchId", authenticate, async (req, res) => {
       parentProcessingRecords = await prisma.processingRecord.findMany({
         where: {
           batchId: dbBatch.parentBatch.id,
-          processingDate: { lt: splitDate }
+          processingDate: { lt: splitDate },
         },
         include: {
           processor: {
@@ -2099,7 +2163,7 @@ app.get("/api/batch/:batchId", authenticate, async (req, res) => {
       parentTransportRoutes = await prisma.transportRoute.findMany({
         where: {
           batchId: dbBatch.parentBatch.id,
-          departureTime: { lt: splitDate }
+          departureTime: { lt: splitDate },
         },
         include: {
           distributor: {
@@ -2114,10 +2178,16 @@ app.get("/api/batch/:batchId", authenticate, async (req, res) => {
 
     // Merge parent records with current batch records (parent records first, chronologically)
     if (dbBatch && parentProcessingRecords.length > 0) {
-      dbBatch.processingRecords = [...parentProcessingRecords, ...dbBatch.processingRecords];
+      dbBatch.processingRecords = [
+        ...parentProcessingRecords,
+        ...dbBatch.processingRecords,
+      ];
     }
     if (dbBatch && parentTransportRoutes.length > 0) {
-      dbBatch.transportRoutes = [...parentTransportRoutes, ...dbBatch.transportRoutes];
+      dbBatch.transportRoutes = [
+        ...parentTransportRoutes,
+        ...dbBatch.transportRoutes,
+      ];
     }
 
     // Get transfer history for this batch
@@ -2132,35 +2202,46 @@ app.get("/api/batch/:batchId", authenticate, async (req, res) => {
     });
 
     // Enrich transfer history with actor usernames
-    const actorIds = [...new Set(transfers.flatMap(t => [t.fromActorId, t.toActorId]))];
+    const actorIds = [
+      ...new Set(transfers.flatMap((t) => [t.fromActorId, t.toActorId])),
+    ];
     const users = await prisma.user.findMany({
       where: { id: { in: actorIds } },
       select: {
         id: true,
         username: true,
-        farmerProfile: { select: { firstName: true, lastName: true, farmName: true } },
+        farmerProfile: {
+          select: { firstName: true, lastName: true, farmName: true },
+        },
         processorProfile: { select: { companyName: true } },
         distributorProfile: { select: { companyName: true } },
-        retailerProfile: { select: { businessName: true } }
-      }
+        retailerProfile: { select: { businessName: true } },
+      },
     });
 
     // Build user map with display names
-    const userMap = Object.fromEntries(users.map(u => {
-      let displayName = u.username;
-      if (u.farmerProfile) {
-        displayName = `${u.farmerProfile.firstName || ''} ${u.farmerProfile.lastName || ''}`.trim() || u.farmerProfile.farmName || u.username;
-      } else if (u.processorProfile?.companyName) {
-        displayName = u.processorProfile.companyName;
-      } else if (u.distributorProfile?.companyName) {
-        displayName = u.distributorProfile.companyName;
-      } else if (u.retailerProfile?.businessName) {
-        displayName = u.retailerProfile.businessName;
-      }
-      return [u.id, { username: u.username, displayName }];
-    }));
+    const userMap = Object.fromEntries(
+      users.map((u) => {
+        let displayName = u.username;
+        if (u.farmerProfile) {
+          displayName =
+            `${u.farmerProfile.firstName || ""} ${
+              u.farmerProfile.lastName || ""
+            }`.trim() ||
+            u.farmerProfile.farmName ||
+            u.username;
+        } else if (u.processorProfile?.companyName) {
+          displayName = u.processorProfile.companyName;
+        } else if (u.distributorProfile?.companyName) {
+          displayName = u.distributorProfile.companyName;
+        } else if (u.retailerProfile?.businessName) {
+          displayName = u.retailerProfile.businessName;
+        }
+        return [u.id, { username: u.username, displayName }];
+      })
+    );
 
-    const transferHistory = transfers.map(t => ({
+    const transferHistory = transfers.map((t) => ({
       ...t,
       fromActorUsername: userMap[t.fromActorId]?.username || null,
       fromActorName: userMap[t.fromActorId]?.displayName || null,
@@ -4504,7 +4585,12 @@ app.post(
   }
 );
 app.get("/api/batches/all-with-lineage", async (req, res) => {
+  let gateway = null;
   try {
+    const connection = await blockchainService.connectToNetwork();
+    gateway = connection?.gateway;
+    const contract = connection?.contract;
+
     const allBatches = await prisma.batch.findMany({
       include: {
         farmer: { select: { firstName: true, lastName: true, farmName: true } },
@@ -4540,6 +4626,54 @@ app.get("/api/batches/all-with-lineage", async (req, res) => {
               }),
             ]);
 
+          let blockchainHistory = [];
+          if (contract) {
+            try {
+              const historyResult = await contract.evaluateTransaction(
+                "getBatchHistory",
+                currentBatch.batchId
+              );
+              const historyData = JSON.parse(historyResult.toString());
+              blockchainHistory = historyData.statusHistory || [];
+            } catch (e) {
+              console.warn(
+                `Could not fetch blockchain history for ${currentBatch.batchId}`
+              );
+            }
+          }
+          const getBcVerification = (dbTimestamp, status) => {
+            const match = blockchainHistory.find((bh) => {
+              if (bh.status !== status) return false;
+
+              // Parse blockchain timestamp (handle both Unix and ISO formats)
+              let bcTimestamp;
+
+              // Check if it's a Unix timestamp (number as string with optional decimal)
+              if (/^\d+(\.\d+)?$/.test(bh.timestamp)) {
+                // Unix timestamp: "1736582400.123" → convert to milliseconds
+                bcTimestamp = parseFloat(bh.timestamp) * 1000;
+              } else {
+                // ISO string: "2026-01-11T10:30:00.000Z" → parse to milliseconds
+                bcTimestamp = new Date(bh.timestamp).getTime();
+              }
+
+              // Parse database timestamp
+              const dbTimestampMs = new Date(dbTimestamp).getTime();
+
+              // Check if timestamps match within 60 seconds (60000 ms)
+              const timeDiff = Math.abs(bcTimestamp - dbTimestampMs);
+              return timeDiff < 300000; // 5 minute tolerance in milliseconds
+            });
+
+            return match
+              ? {
+                  txId: match.txId,
+                  verifiedBy: match.updatedBy,
+                  isImmutable: true,
+                  blockchainTimestamp: match.timestamp, // Include for debugging
+                }
+              : null;
+          };
           const parentInfo = currentBatch.parentBatchId
             ? parentLookup.get(currentBatch.parentBatchId)
             : null;
@@ -4568,6 +4702,7 @@ app.get("/api/batches/all-with-lineage", async (req, res) => {
                   ? l.metadata.weather_desc
                   : null,
                 parentBatch: parentInfo ? parentInfo.batchId : null,
+                blockchain: getBcVerification(l.timestamp, l.eventType),
               },
             })),
             ...processing.map((p) => ({
@@ -4582,6 +4717,7 @@ app.get("/api/batches/all-with-lineage", async (req, res) => {
                 weather_main: p.weather_main,
                 weather_desc: p.weather_desc,
                 stage: "Processing",
+                blockchain: getBcVerification(p.processingDate, "PROCESSING"),
               },
             })),
             ...distribution.map((d) => ({
@@ -4596,6 +4732,10 @@ app.get("/api/batches/all-with-lineage", async (req, res) => {
                 weather_main: d.weather_main,
                 weather_desc: d.weather_desc,
                 stage: "Distribution",
+                blockchain: getBcVerification(
+                  d.distributionDate,
+                  "IN_DISTRIBUTION"
+                ),
               },
             })),
             ...transfers.map((t) => ({
@@ -4611,6 +4751,7 @@ app.get("/api/batches/all-with-lineage", async (req, res) => {
                 weather_main: t.weather_main,
                 weather_desc: t.weather_desc,
                 stage: "Retail",
+                blockchain: getBcVerification(t.transferDate, "RETAIL_READY"),
               },
             })),
           ];
@@ -5150,7 +5291,7 @@ app.post(
         where: { batchId: batchId },
         include: {
           farmer: {
-            select: { userId: true }
+            select: { userId: true },
           },
           farmLocation: true,
         },
@@ -5572,7 +5713,7 @@ app.put(
 
 app.get("/api/batches/active-locations", async (req, res) => {
   try {
-    // Find all batches that are currently active
+    // 1. Fetch all active batches in one query
     const activeBatches = await prisma.batch.findMany({
       where: {
         status: {
@@ -5588,357 +5729,129 @@ app.get("/api/batches/active-locations", async (req, res) => {
           ],
         },
       },
-      select: {
-        batchId: true,
-        status: true,
-        id: true,
-        createdAt: true,
-        farmLocationId: true,
-        cropType: true,
-        quantity: true,
-        productType: true,
-        parentBatchId: true, // Include parent batch ID for split batches
-        splitDate: true, // Include split date to filter inherited records
+      include: {
+        farmer: { select: { firstName: true, lastName: true, farmName: true } },
+        farmLocation: true,
       },
     });
 
     if (activeBatches.length === 0) {
-      return res.status(200).json({
-        success: true,
-        locations: [],
-        message: "No active batches found.",
-      });
+      return res.json({ success: true, batchesData: [] });
     }
 
-    const allLocations = [];
+    // 2. Extract IDs for bulk querying
+    const internalIds = activeBatches.map((b) => b.id);
+    const stringBatchIds = activeBatches.map((b) => b.batchId);
 
-    for (const batch of activeBatches) {
-      // 1. Get farm location
-      let farmLocation = null;
-      if (batch.farmLocationId) {
-        farmLocation = await prisma.farmLocation.findUnique({
-          where: { id: batch.farmLocationId },
-          select: {
-            latitude: true,
-            longitude: true,
-            location: true,
-            temperature: true,
-            humidity: true,
-            weather_main: true,
-            weather_desc: true,
+    // 3. Parallel Bulk Fetch: Execute all database hits at once
+    const [allProcessing, allRoutes, allDistribution, allTransfers] =
+      await Promise.all([
+        prisma.processingRecord.findMany({
+          where: { batchId: { in: internalIds } },
+          include: {
+            processor: { include: { user: { select: { username: true } } } },
           },
-        });
-      }
-
-      // 2. Get processing records (include parent batch records for split batches)
-      // For split batches: only inherit parent records created BEFORE the split
-      let parentBatchStringId = null;
-      const splitDate = batch.splitDate; // When this batch was split from parent
-
-      if (batch.parentBatchId) {
-        // Get parent batch's string batchId for distribution records query
-        const parentBatch = await prisma.batch.findUnique({
-          where: { id: batch.parentBatchId },
-          select: { batchId: true }
-        });
-        if (parentBatch) {
-          parentBatchStringId = parentBatch.batchId;
-        }
-      }
-
-      // Get this batch's own processing records
-      let processingRecords = await prisma.processingRecord.findMany({
-        where: { batchId: batch.id },
-        orderBy: { processingDate: "asc" },
-        select: {
-          latitude: true,
-          longitude: true,
-          processingLocation: true,
-          processingDate: true,
-          temperature: true,
-          humidity: true,
-          weather_main: true,
-          weather_desc: true,
-        },
-      });
-
-      // For split batches: also get parent's records that happened BEFORE the split
-      if (batch.parentBatchId && splitDate) {
-        const parentProcessingRecords = await prisma.processingRecord.findMany({
+        }),
+        prisma.transportRoute.findMany({
           where: {
-            batchId: batch.parentBatchId,
-            processingDate: { lt: splitDate } // Only records BEFORE split
+            OR: [
+              { batchId: { in: internalIds } },
+              { batchIdName: { in: stringBatchIds } },
+            ],
           },
-          orderBy: { processingDate: "asc" },
-          select: {
-            latitude: true,
-            longitude: true,
-            processingLocation: true,
-            processingDate: true,
-            temperature: true,
-            humidity: true,
-            weather_main: true,
-            weather_desc: true,
-          },
-        });
-        // Merge: parent records first (chronologically), then this batch's records
-        processingRecords = [...parentProcessingRecords, ...processingRecords];
-      }
+        }),
+        prisma.distributionRecord.findMany({
+          where: { batchId: { in: stringBatchIds } },
+        }),
+        prisma.batchTransfer.findMany({
+          where: { batchId: { in: stringBatchIds } },
+        }),
+      ]);
 
-      // 3. Get transport routes
-      let transportRoutes = await prisma.transportRoute.findMany({
-        where: { batchId: batch.id },
-        orderBy: { departureTime: "asc" },
-        select: {
-          originLat: true,
-          originLng: true,
-          destinationLat: true,
-          destinationLng: true,
-          departureTime: true,
-          arrivalTime: true,
-          status: true,
-          timestamp: true,
-        },
-      });
-
-      // For split batches: get parent's transport routes BEFORE the split
-      if (batch.parentBatchId && splitDate) {
-        const parentTransportRoutes = await prisma.transportRoute.findMany({
-          where: {
-            batchId: batch.parentBatchId,
-            departureTime: { lt: splitDate }
-          },
-          orderBy: { departureTime: "asc" },
-          select: {
-            originLat: true,
-            originLng: true,
-            destinationLat: true,
-            destinationLng: true,
-            departureTime: true,
-            arrivalTime: true,
-            status: true,
-          },
-        });
-        transportRoutes = [...parentTransportRoutes, ...transportRoutes];
-      }
-
-      // 4. Get distribution records
-      let distributionRecords = await prisma.distributionRecord.findMany({
-        where: { batchId: batch.batchId },
-        orderBy: { distributionDate: "asc" },
-        select: {
-          warehouseLat: true,
-          warehouseLng: true,
-          warehouseLocation: true,
-          distributionDate: true,
-          temperature: true,
-          humidity: true,
-          weather_main: true,
-          weather_desc: true,
-        },
-      });
-
-      // For split batches: get parent's distribution records BEFORE the split
-      if (parentBatchStringId && splitDate) {
-        const parentDistributionRecords = await prisma.distributionRecord.findMany({
-          where: {
-            batchId: parentBatchStringId,
-            distributionDate: { lt: splitDate }
-          },
-          orderBy: { distributionDate: "asc" },
-          select: {
-            warehouseLat: true,
-            warehouseLng: true,
-            warehouseLocation: true,
-            distributionDate: true,
-            temperature: true,
-            humidity: true,
-            weather_main: true,
-            weather_desc: true,
-          },
-        });
-        distributionRecords = [...parentDistributionRecords, ...distributionRecords];
-      }
-
-      // 5. Get retailer/transfer records
-      let retailerRecords = await prisma.batchTransfer.findMany({
-        where: { batchId: batch.batchId },
-        orderBy: { transferDate: "asc" },
-        select: {
-          transferLocation: true,
-          latitude: true,
-          longitude: true,
-          notes: true,
-          temperature: true,
-          humidity: true,
-          weather_main: true,
-          weather_desc: true,
-          transferDate: true,
-        },
-      });
-
-      // For split batches: get parent's transfers BEFORE the split
-      if (parentBatchStringId && splitDate) {
-        const parentRetailerRecords = await prisma.batchTransfer.findMany({
-          where: {
-            batchId: parentBatchStringId,
-            transferDate: { lt: splitDate }
-          },
-          orderBy: { transferDate: "asc" },
-          select: {
-            transferLocation: true,
-            latitude: true,
-            longitude: true,
-            notes: true,
-            temperature: true,
-            humidity: true,
-            weather_main: true,
-            weather_desc: true,
-            transferDate: true,
-          },
-        });
-        retailerRecords = [...parentRetailerRecords, ...retailerRecords];
-      }
-
-      // Build history points
+    // 4. In-Memory Mapping: Associate records with their parent batch
+    const batchesData = activeBatches.map((batch) => {
       const historyPoints = [];
-      // Farm registration
-      if (farmLocation) {
+
+      // Add Farm Point
+      if (batch.farmLocation) {
         historyPoints.push({
           eventType: "REGISTERED",
-          latitude: farmLocation.latitude,
-          longitude: farmLocation.longitude,
+          latitude: batch.farmLocation.latitude,
+          longitude: batch.farmLocation.longitude,
           timestamp: batch.createdAt,
           metadata: {
-            location: farmLocation.location,
-            temperature: farmLocation.temperature,
-            humidity: farmLocation.humidity,
-            weather_main: farmLocation.weather_main,
-            weather_desc: farmLocation.weather_desc,
+            location: batch.farmLocation.location,
             stage: "Farm",
+            temperature: batch.farmLocation.temperature,
+            humidity: batch.farmLocation.humidity,
           },
         });
       }
-      // Processing records
-      for (const record of processingRecords) {
+
+      // Filter and add Processing Points
+      const procRecords = allProcessing.filter((p) => p.batchId === batch.id);
+      procRecords.forEach((p) => {
         historyPoints.push({
           eventType: "PROCESSING",
-          latitude: record.latitude,
-          longitude: record.longitude,
-          timestamp: record.processingDate,
-          metadata: {
-            location: record.processingLocation,
-            temperature: record.temperature,
-            humidity: record.humidity,
-            weather_main: record.weather_main,
-            weather_desc: record.weather_desc,
-            stage: "Processing",
-          },
+          latitude: p.latitude,
+          longitude: p.longitude,
+          timestamp: p.processingDate,
+          metadata: { location: p.processingLocation, stage: "Processing" },
         });
-      }
-      // Transport routes
-      for (const route of transportRoutes) {
-        historyPoints.push({
-          eventType: "IN_TRANSIT_DEPARTURE",
-          latitude: route.originLat,
-          longitude: route.originLng,
-          timestamp: route.departureTime,
-          metadata: {
-            stage: "Transport",
-            status: route.status,
-          },
-        });
-        historyPoints.push({
-          eventType: "TRANSPORT_ARRIVAL",
-          latitude: route.destinationLat,
-          longitude: route.destinationLng,
-          timestamp: route.arrivalTime,
-          metadata: {
-            stage: "Transport",
-            status: route.status,
-          },
-        });
-      }
-      // Distribution records
-      for (const dist of distributionRecords) {
-        historyPoints.push({
-          eventType: "DISTRIBUTION_ARRIVAL",
-          latitude: dist.warehouseLat,
-          longitude: dist.warehouseLng,
-          timestamp: dist.distributionDate,
-          metadata: {
-            location: dist.warehouseLocation,
-            temperature: dist.temperature,
-            humidity: dist.humidity,
-            weather_main: dist.weather_main,
-            weather_desc: dist.weather_desc,
-            stage: "Distribution",
-          },
-        });
-      }
-      for (const retail of retailerRecords) {
-        if (retail.latitude && retail.longitude) {
-          historyPoints.push({
-            eventType: "RETAIL_READY", // Ensure this matches your frontend switch case
-            latitude: parseFloat(retail.latitude), // Ensure they are numbers
-            longitude: parseFloat(retail.longitude),
-            timestamp: batch.createdAt, // Or retail.transferDate if available
-            metadata: {
-              location: retail.transferLocation,
-              notes: retail.notes,
-              stage: "Retail",
-              temperature: retail.temperature || null,
-              humidity: retail.humidity || null,
-              weather_main: retail.weather_main || null,
-              weather_desc: retail.weather_desc || null,
-            },
-          });
-        }
-      }
-
-      // 6. Get active transport routes (for line segments)
-      // Note: We already have transportRoutes from above which includes parent's routes before split
-      const activeRoutes = await prisma.transportRoute.findMany({
-        where: { batchId: batch.id },
-        orderBy: { departureTime: "asc" },
-        select: {
-          batchId: true,
-          batchIdName: true,
-          routePolyline: true,
-          status: true,
-          originLat: true,
-          originLng: true,
-          destinationLat: true,
-          destinationLng: true,
-          distance: true,
-          estimatedTime: true,
-          timestamp: true,
-          TotalTime: true,
-        },
       });
 
-      allLocations.push({
+      // Filter and add Distribution Points
+      const distRecords = allDistribution.filter(
+        (d) => d.batchId === batch.batchId
+      );
+      distRecords.forEach((d) => {
+        historyPoints.push({
+          eventType: "DISTRIBUTION_ARRIVAL",
+          latitude: d.warehouseLat,
+          longitude: d.warehouseLng,
+          timestamp: d.distributionDate,
+          metadata: { location: d.warehouseLocation, stage: "Distribution" },
+        });
+      });
+
+      // Filter and add Retail Points
+      const retailRecords = allTransfers.filter(
+        (t) => t.batchId === batch.batchId
+      );
+      retailRecords.forEach((t) => {
+        if (t.latitude && t.longitude) {
+          historyPoints.push({
+            eventType: "RETAIL_READY",
+            latitude: parseFloat(t.latitude),
+            longitude: parseFloat(t.longitude),
+            timestamp: t.transferDate,
+            metadata: { location: t.transferLocation, stage: "Retail" },
+          });
+        }
+      });
+
+      // Sort history points chronologically for the map
+      historyPoints.sort(
+        (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
+      );
+
+      return {
         batchId: batch.batchId,
         status: batch.status,
         cropType: batch.cropType,
-        quantity: batch.quantity,
         productType: batch.productType,
-        historyPoints: historyPoints,
-        activeRoutes: activeRoutes,
-      });
-    }
+        quantity: batch.quantity,
+        historyPoints,
+        activeRoutes: allRoutes.filter(
+          (r) => r.batchId === batch.id || r.batchIdName === batch.batchId
+        ),
+      };
+    });
 
-    res.json({
-      success: true,
-      count: allLocations.length,
-      batchesData: allLocations,
-    });
+    res.json({ success: true, count: batchesData.length, batchesData });
   } catch (error) {
-    console.error("API error fetching all active batch locations:", error);
-    res.status(500).json({
-      success: false,
-      error: "Internal server error fetching collective location data",
-    });
+    console.error("Optimized fetch error:", error);
+    res.status(500).json({ success: false, error: "Internal server error" });
   }
 });
 
@@ -6131,10 +6044,10 @@ app.get("/api/pricing/history/:batchId", async (req, res) => {
       include: {
         farmer: {
           include: {
-            user: { select: { username: true } }
-          }
-        }
-      }
+            user: { select: { username: true } },
+          },
+        },
+      },
     });
 
     if (!batch) {
@@ -6161,19 +6074,26 @@ app.get("/api/pricing/history/:batchId", async (req, res) => {
       const farmerPriceRecord = {
         level: "FARMER",
         pricePerUnit: parseFloat(batch.pricePerUnit),
-        totalValue: parseFloat(batch.totalBatchValue) || (parseFloat(batch.pricePerUnit) * batch.quantity),
+        totalValue:
+          parseFloat(batch.totalBatchValue) ||
+          parseFloat(batch.pricePerUnit) * batch.quantity,
         currency: batch.currency || "MYR",
         unit: batch.unit || "kg",
         quantity: batch.quantity,
-        timestamp: Math.floor(new Date(batch.createdAt).getTime() / 1000).toString(),
+        timestamp: Math.floor(
+          new Date(batch.createdAt).getTime() / 1000
+        ).toString(),
         recordedBy: batch.farmer?.user?.username || "Farmer",
         notes: "Farm-gate price at harvest",
-        breakdown: {}
+        breakdown: {},
       };
 
       // Prepend farmer's price to the pricing history
       if (pricingHistory.pricingHistory) {
-        pricingHistory.pricingHistory = [farmerPriceRecord, ...pricingHistory.pricingHistory];
+        pricingHistory.pricingHistory = [
+          farmerPriceRecord,
+          ...pricingHistory.pricingHistory,
+        ];
       } else {
         pricingHistory.pricingHistory = [farmerPriceRecord];
       }
@@ -6186,8 +6106,10 @@ app.get("/api/pricing/history/:batchId", async (req, res) => {
         pricingHistory.currentPrice = {
           level: "FARMER",
           pricePerUnit: parseFloat(batch.pricePerUnit),
-          totalValue: parseFloat(batch.totalBatchValue) || (parseFloat(batch.pricePerUnit) * batch.quantity),
-          currency: batch.currency || "MYR"
+          totalValue:
+            parseFloat(batch.totalBatchValue) ||
+            parseFloat(batch.pricePerUnit) * batch.quantity,
+          currency: batch.currency || "MYR",
         };
       }
     }
@@ -6207,10 +6129,10 @@ app.get("/api/pricing/history/:batchId", async (req, res) => {
         include: {
           farmer: {
             include: {
-              user: { select: { username: true } }
-            }
-          }
-        }
+              user: { select: { username: true } },
+            },
+          },
+        },
       });
 
       const responseData = {
@@ -6226,14 +6148,18 @@ app.get("/api/pricing/history/:batchId", async (req, res) => {
         const farmerPriceRecord = {
           level: "FARMER",
           pricePerUnit: parseFloat(batch.pricePerUnit),
-          totalValue: parseFloat(batch.totalBatchValue) || (parseFloat(batch.pricePerUnit) * batch.quantity),
+          totalValue:
+            parseFloat(batch.totalBatchValue) ||
+            parseFloat(batch.pricePerUnit) * batch.quantity,
           currency: batch.currency || "MYR",
           unit: batch.unit || "kg",
           quantity: batch.quantity,
-          timestamp: Math.floor(new Date(batch.createdAt).getTime() / 1000).toString(),
+          timestamp: Math.floor(
+            new Date(batch.createdAt).getTime() / 1000
+          ).toString(),
           recordedBy: batch.farmer?.user?.username || "Farmer",
           notes: "Farm-gate price at harvest",
-          breakdown: {}
+          breakdown: {},
         };
 
         responseData.pricingHistory = [farmerPriceRecord];
@@ -6241,8 +6167,10 @@ app.get("/api/pricing/history/:batchId", async (req, res) => {
         responseData.currentPrice = {
           level: "FARMER",
           pricePerUnit: parseFloat(batch.pricePerUnit),
-          totalValue: parseFloat(batch.totalBatchValue) || (parseFloat(batch.pricePerUnit) * batch.quantity),
-          currency: batch.currency || "MYR"
+          totalValue:
+            parseFloat(batch.totalBatchValue) ||
+            parseFloat(batch.pricePerUnit) * batch.quantity,
+          currency: batch.currency || "MYR",
         };
       }
 
@@ -6277,7 +6205,9 @@ app.get("/api/pricing/markup/:batchId", async (req, res) => {
       });
     }
 
-    const farmerPrice = batch.pricePerUnit ? parseFloat(batch.pricePerUnit) : null;
+    const farmerPrice = batch.pricePerUnit
+      ? parseFloat(batch.pricePerUnit)
+      : null;
 
     // Query blockchain for markup calculation
     const { gateway, contract } = await blockchainService.connectToNetwork();
@@ -6293,12 +6223,17 @@ app.get("/api/pricing/markup/:batchId", async (req, res) => {
 
     // If we have farmer's price, add FARMER → first level markup (FT-05)
     if (farmerPrice && markupData.markups && markupData.markups.length > 0) {
-      const firstLevelPrice = markupData.markups[0]?.previousPrice || markupData.markups[0]?.currentPrice;
+      const firstLevelPrice =
+        markupData.markups[0]?.previousPrice ||
+        markupData.markups[0]?.currentPrice;
 
       // Check if first markup is already from FARMER
-      if (markupData.markups[0]?.fromLevel !== 'FARMER' && firstLevelPrice) {
+      if (markupData.markups[0]?.fromLevel !== "FARMER" && firstLevelPrice) {
         const farmerToFirstMarkup = firstLevelPrice - farmerPrice;
-        const farmerToFirstPercentage = ((farmerToFirstMarkup / farmerPrice) * 100).toFixed(2);
+        const farmerToFirstPercentage = (
+          (farmerToFirstMarkup / farmerPrice) *
+          100
+        ).toFixed(2);
 
         const farmerMarkupEntry = {
           fromLevel: "FARMER",
@@ -6306,22 +6241,34 @@ app.get("/api/pricing/markup/:batchId", async (req, res) => {
           previousPrice: farmerPrice,
           currentPrice: firstLevelPrice,
           markup: farmerToFirstMarkup,
-          markupPercentage: farmerToFirstPercentage
+          markupPercentage: farmerToFirstPercentage,
         };
 
         // Prepend farmer markup
         markupData.markups = [farmerMarkupEntry, ...markupData.markups];
 
         // Recalculate totals
-        const totalMarkup = markupData.markups.reduce((sum, m) => sum + (m.markup || 0), 0);
-        const avgPercentage = markupData.markups.length > 0
-          ? (markupData.markups.reduce((sum, m) => sum + parseFloat(m.markupPercentage || 0), 0) / markupData.markups.length).toFixed(2)
-          : "0.00";
+        const totalMarkup = markupData.markups.reduce(
+          (sum, m) => sum + (m.markup || 0),
+          0
+        );
+        const avgPercentage =
+          markupData.markups.length > 0
+            ? (
+                markupData.markups.reduce(
+                  (sum, m) => sum + parseFloat(m.markupPercentage || 0),
+                  0
+                ) / markupData.markups.length
+              ).toFixed(2)
+            : "0.00";
 
         markupData.totalMarkup = totalMarkup;
         markupData.averageMarkupPercentage = avgPercentage;
       }
-    } else if (farmerPrice && (!markupData.markups || markupData.markups.length === 0)) {
+    } else if (
+      farmerPrice &&
+      (!markupData.markups || markupData.markups.length === 0)
+    ) {
       // No blockchain markups but we have farmer price - initialize empty structure
       markupData.markups = [];
       markupData.totalMarkup = 0;
@@ -6353,13 +6300,20 @@ app.get("/api/pricing/markup/:batchId", async (req, res) => {
       if (batch?.pricePerUnit) {
         // Check if there's any pricing record in blockchain by querying pricing history
         try {
-          const { gateway: gw, contract: ct } = await blockchainService.connectToNetwork();
-          const pricingResult = await ct.evaluateTransaction("getPricingHistory", req.params.batchId);
+          const { gateway: gw, contract: ct } =
+            await blockchainService.connectToNetwork();
+          const pricingResult = await ct.evaluateTransaction(
+            "getPricingHistory",
+            req.params.batchId
+          );
           await gw.disconnect();
 
           const pricingHistory = JSON.parse(pricingResult.toString());
 
-          if (pricingHistory.pricingHistory && pricingHistory.pricingHistory.length > 0) {
+          if (
+            pricingHistory.pricingHistory &&
+            pricingHistory.pricingHistory.length > 0
+          ) {
             const farmerPrice = parseFloat(batch.pricePerUnit);
             const firstRecord = pricingHistory.pricingHistory[0];
             const firstPrice = firstRecord.pricePerUnit;
@@ -6367,14 +6321,16 @@ app.get("/api/pricing/markup/:batchId", async (req, res) => {
             const markup = firstPrice - farmerPrice;
             const markupPercentage = ((markup / farmerPrice) * 100).toFixed(2);
 
-            responseData.markups = [{
-              fromLevel: "FARMER",
-              toLevel: firstRecord.level,
-              previousPrice: farmerPrice,
-              currentPrice: firstPrice,
-              markup: markup,
-              markupPercentage: markupPercentage
-            }];
+            responseData.markups = [
+              {
+                fromLevel: "FARMER",
+                toLevel: firstRecord.level,
+                previousPrice: farmerPrice,
+                currentPrice: firstPrice,
+                markup: markup,
+                markupPercentage: markupPercentage,
+              },
+            ];
             responseData.totalMarkup = markup;
             responseData.averageMarkupPercentage = markupPercentage;
           }
@@ -6784,26 +6740,27 @@ app.post(
         testingLab,
         testResults,
         passFailStatus,
-        certificateUrl
+        certificateUrl,
       } = req.body;
 
       // Validate required fields
       if (!testType || !testingLab || !passFailStatus) {
         return res.status(400).json({
           success: false,
-          error: "Missing required fields: testType, testingLab, passFailStatus"
+          error:
+            "Missing required fields: testType, testingLab, passFailStatus",
         });
       }
 
       // Find the batch by batchId string
       const batch = await prisma.batch.findUnique({
-        where: { batchId: batchId }
+        where: { batchId: batchId },
       });
 
       if (!batch) {
         return res.status(404).json({
           success: false,
-          error: "Batch not found"
+          error: "Batch not found",
         });
       }
 
@@ -6818,16 +6775,16 @@ app.post(
         testedBy: req.user.username,
         testedByRole: req.user.role,
         batchId: batchId,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       };
 
       // Generate SHA-256 hash for data integrity verification
       // This hash can be used to verify the quality test data hasn't been tampered with
-      const crypto = require('crypto');
+      const crypto = require("crypto");
       const dataHash = crypto
-        .createHash('sha256')
+        .createHash("sha256")
         .update(JSON.stringify(qualityData))
-        .digest('hex');
+        .digest("hex");
 
       // Create the quality test record in database
       const qualityTest = await prisma.qualityTest.create({
@@ -6839,8 +6796,8 @@ app.post(
           testResults: testResults || {},
           passFailStatus,
           certificateUrl: certificateUrl || null,
-          blockchainHash: dataHash // Store integrity hash
-        }
+          blockchainHash: dataHash, // Store integrity hash
+        },
       });
 
       // Log activity
@@ -6855,23 +6812,23 @@ app.post(
             testId: qualityTest.id,
             testType,
             passFailStatus,
-            integrityHash: dataHash
-          }
-        }
+            integrityHash: dataHash,
+          },
+        },
       });
 
       res.status(201).json({
         success: true,
         message: "Quality test added successfully",
         data: qualityTest,
-        integrityHash: dataHash
+        integrityHash: dataHash,
       });
     } catch (error) {
       console.error("Add quality test error:", error);
       res.status(500).json({
         success: false,
         error: "Failed to add quality test",
-        details: error.message
+        details: error.message,
       });
     }
   }
@@ -6884,32 +6841,32 @@ app.get("/api/quality-tests/:batchId", authenticate, async (req, res) => {
 
     // Find the batch by batchId string
     const batch = await prisma.batch.findUnique({
-      where: { batchId: batchId }
+      where: { batchId: batchId },
     });
 
     if (!batch) {
       return res.status(404).json({
         success: false,
-        error: "Batch not found"
+        error: "Batch not found",
       });
     }
 
     const qualityTests = await prisma.qualityTest.findMany({
       where: { batchId: batch.id },
-      orderBy: { testDate: "desc" }
+      orderBy: { testDate: "desc" },
     });
 
     res.json({
       success: true,
       data: qualityTests,
-      count: qualityTests.length
+      count: qualityTests.length,
     });
   } catch (error) {
     console.error("Get quality tests error:", error);
     res.status(500).json({
       success: false,
       error: "Failed to get quality tests",
-      details: error.message
+      details: error.message,
     });
   }
 });
@@ -6936,38 +6893,39 @@ app.post(
         distance,
         fuelConsumption,
         transportCost,
-        status
+        status,
       } = req.body;
 
       // Validate required fields
       if (!originLat || !originLng || !destinationLat || !destinationLng) {
         return res.status(400).json({
           success: false,
-          error: "Missing required coordinates: originLat, originLng, destinationLat, destinationLng"
+          error:
+            "Missing required coordinates: originLat, originLng, destinationLat, destinationLng",
         });
       }
 
       // Find the batch by batchId string
       const batch = await prisma.batch.findUnique({
-        where: { batchId: batchId }
+        where: { batchId: batchId },
       });
 
       if (!batch) {
         return res.status(404).json({
           success: false,
-          error: "Batch not found"
+          error: "Batch not found",
         });
       }
 
       // Get distributor profile
       const distributorProfile = await prisma.distributorProfile.findUnique({
-        where: { userId: req.user.id }
+        where: { userId: req.user.id },
       });
 
       if (!distributorProfile) {
         return res.status(400).json({
           success: false,
-          error: "Distributor profile not found"
+          error: "Distributor profile not found",
         });
       }
 
@@ -6975,9 +6933,15 @@ app.post(
       const blockchainTransportData = {
         transportId: `TRANS${Date.now()}`,
         origin: `${originLat}, ${originLng}`,
-        originCoordinates: { lat: parseFloat(originLat), lng: parseFloat(originLng) },
+        originCoordinates: {
+          lat: parseFloat(originLat),
+          lng: parseFloat(originLng),
+        },
         destination: `${destinationLat}, ${destinationLng}`,
-        destinationCoordinates: { lat: parseFloat(destinationLat), lng: parseFloat(destinationLng) },
+        destinationCoordinates: {
+          lat: parseFloat(destinationLat),
+          lng: parseFloat(destinationLng),
+        },
         vehicleId: vehicleId || null,
         departureTime: departureTime || null,
         estimatedArrival: arrivalTime || null,
@@ -6986,13 +6950,14 @@ app.post(
         currency: "MYR",
         carrier: distributorProfile.companyName || req.user.username,
         currentStatus: status || "PLANNED",
-        updateStatus: false // Don't change batch status
+        updateStatus: false, // Don't change batch status
       };
 
       // Record on blockchain
       let blockchainTxId = null;
       try {
-        const { gateway, contract } = await blockchainService.connectToNetwork();
+        const { gateway, contract } =
+          await blockchainService.connectToNetwork();
         const result = await contract.submitTransaction(
           "addTransportRecord",
           batchId,
@@ -7002,7 +6967,10 @@ app.post(
         blockchainTxId = blockchainResult.txId;
         await gateway.disconnect();
       } catch (blockchainError) {
-        console.warn("Blockchain recording failed (continuing with database):", blockchainError.message);
+        console.warn(
+          "Blockchain recording failed (continuing with database):",
+          blockchainError.message
+        );
       }
 
       // Create the transport route record in database
@@ -7022,8 +6990,8 @@ app.post(
           fuelConsumption: fuelConsumption ? parseFloat(fuelConsumption) : null,
           transportCost: transportCost ? parseFloat(transportCost) : null,
           status: status || "PLANNED",
-          blockchainHash: blockchainTxId
-        }
+          blockchainHash: blockchainTxId,
+        },
       });
 
       // Log activity
@@ -7038,23 +7006,23 @@ app.post(
             routeId: transportRoute.id,
             vehicleId,
             status: status || "PLANNED",
-            blockchainTxId
-          }
-        }
+            blockchainTxId,
+          },
+        },
       });
 
       res.status(201).json({
         success: true,
         message: "Transport route added successfully",
         data: transportRoute,
-        blockchainTxId
+        blockchainTxId,
       });
     } catch (error) {
       console.error("Add transport route error:", error);
       res.status(500).json({
         success: false,
         error: "Failed to add transport route",
-        details: error.message
+        details: error.message,
       });
     }
   }
@@ -7067,13 +7035,13 @@ app.get("/api/transport-routes/:batchId", authenticate, async (req, res) => {
 
     // Find the batch by batchId string
     const batch = await prisma.batch.findUnique({
-      where: { batchId: batchId }
+      where: { batchId: batchId },
     });
 
     if (!batch) {
       return res.status(404).json({
         success: false,
-        error: "Batch not found"
+        error: "Batch not found",
       });
     }
 
@@ -7083,24 +7051,24 @@ app.get("/api/transport-routes/:batchId", authenticate, async (req, res) => {
         distributor: {
           select: {
             companyName: true,
-            contactPerson: true
-          }
-        }
+            contactPerson: true,
+          },
+        },
       },
-      orderBy: { departureTime: "desc" }
+      orderBy: { departureTime: "desc" },
     });
 
     res.json({
       success: true,
       data: transportRoutes,
-      count: transportRoutes.length
+      count: transportRoutes.length,
     });
   } catch (error) {
     console.error("Get transport routes error:", error);
     res.status(500).json({
       success: false,
       error: "Failed to get transport routes",
-      details: error.message
+      details: error.message,
     });
   }
 });
@@ -7212,15 +7180,17 @@ app.post(
 
       // Convert fromActorId from username to user ID if needed (blockchain stores username)
       let fromActorDbId = fromActorId;
-      if (fromActorId && !fromActorId.startsWith('cm')) {
+      if (fromActorId && !fromActorId.startsWith("cm")) {
         // Looks like a username, not a cuid - look up the user
         const fromUser = await prisma.user.findUnique({
           where: { username: fromActorId },
-          select: { id: true }
+          select: { id: true },
         });
         if (fromUser) {
           fromActorDbId = fromUser.id;
-          console.log(`🔄 Converted username "${fromActorId}" to user ID "${fromActorDbId}"`);
+          console.log(
+            `🔄 Converted username "${fromActorId}" to user ID "${fromActorDbId}"`
+          );
         }
       }
 
@@ -7796,41 +7766,49 @@ app.post(
       let retailerDbId = toRetailerId;
 
       // Check if it's already a valid user ID (starts with 'cm' for cuid)
-      if (!toRetailerId.startsWith('cm')) {
+      if (!toRetailerId.startsWith("cm")) {
         // Try to find retailer by username
         const retailerUser = await prisma.user.findUnique({
           where: { username: toRetailerId },
-          select: { id: true, role: true }
+          select: { id: true, role: true },
         });
 
         if (retailerUser) {
           retailerDbId = retailerUser.id;
-          console.log(`🔄 Converted retailer username "${toRetailerId}" to user ID "${retailerDbId}"`);
+          console.log(
+            `🔄 Converted retailer username "${toRetailerId}" to user ID "${retailerDbId}"`
+          );
         } else {
           // Try to find by email as fallback
           const retailerByEmail = await prisma.user.findUnique({
             where: { email: toRetailerId },
-            select: { id: true, role: true }
+            select: { id: true, role: true },
           });
 
           if (retailerByEmail) {
             retailerDbId = retailerByEmail.id;
-            console.log(`🔄 Converted retailer email "${toRetailerId}" to user ID "${retailerDbId}"`);
+            console.log(
+              `🔄 Converted retailer email "${toRetailerId}" to user ID "${retailerDbId}"`
+            );
           } else {
             // Retailer not found in system - allow transfer anyway with entered value
             // This supports cases where retailers aren't registered yet
-            console.log(`⚠️ Retailer "${toRetailerId}" not found in database, using entered value`);
+            console.log(
+              `⚠️ Retailer "${toRetailerId}" not found in database, using entered value`
+            );
           }
         }
       } else {
         // Verify the ID exists (optional - just log if not found)
         const retailerExists = await prisma.user.findUnique({
           where: { id: toRetailerId },
-          select: { id: true }
+          select: { id: true },
         });
 
         if (!retailerExists) {
-          console.log(`⚠️ Retailer ID "${toRetailerId}" not found in database, using entered value`);
+          console.log(
+            `⚠️ Retailer ID "${toRetailerId}" not found in database, using entered value`
+          );
         }
       }
 
@@ -8377,39 +8355,44 @@ const geocodeAddress = async (address, state, country) => {
 /**
  * Get batches flagged by ML fraud detection
  */
-app.get("/api/ml/flagged-batches", authenticate, authorize(["ADMIN", "REGULATOR"]), async (req, res) => {
-  try {
-    const flaggedBatches = await prisma.batch.findMany({
-      where: {
-        notes: {
-          contains: '⚠️  FLAGGED FOR REVIEW'
-        }
-      },
-      include: {
-        farmer: {
-          include: {
-            user: { select: { username: true, email: true } }
-          }
+app.get(
+  "/api/ml/flagged-batches",
+  authenticate,
+  authorize(["ADMIN", "REGULATOR"]),
+  async (req, res) => {
+    try {
+      const flaggedBatches = await prisma.batch.findMany({
+        where: {
+          notes: {
+            contains: "⚠️  FLAGGED FOR REVIEW",
+          },
         },
-        farmLocation: true
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 50
-    });
+        include: {
+          farmer: {
+            include: {
+              user: { select: { username: true, email: true } },
+            },
+          },
+          farmLocation: true,
+        },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      });
 
-    res.json({
-      success: true,
-      count: flaggedBatches.length,
-      batches: flaggedBatches
-    });
-  } catch (error) {
-    console.error('Error fetching flagged batches:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch flagged batches'
-    });
+      res.json({
+        success: true,
+        count: flaggedBatches.length,
+        batches: flaggedBatches,
+      });
+    } catch (error) {
+      console.error("Error fetching flagged batches:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to fetch flagged batches",
+      });
+    }
   }
-});
+);
 
 /**
  * Get ML service statistics
@@ -8422,21 +8405,23 @@ app.get("/api/ml/stats", authenticate, async (req, res) => {
       return res.json({
         success: true,
         mlServiceAvailable: false,
-        message: 'ML service is not currently available'
+        message: "ML service is not currently available",
       });
     }
 
-    const response = await axios.get(`${ML_SERVICE_URL}/api/ml/batch-stats`, { timeout: 3000 });
+    const response = await axios.get(`${ML_SERVICE_URL}/api/ml/batch-stats`, {
+      timeout: 3000,
+    });
 
     res.json({
       success: true,
       mlServiceAvailable: true,
-      stats: response.data
+      stats: response.data,
     });
   } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
     });
   }
 });
