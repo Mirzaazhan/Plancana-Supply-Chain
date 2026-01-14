@@ -46,7 +46,7 @@ const Layout = ({ children }) => {
   const currentNavItems = navigationItems[user?.role] || [];
   const getProfileImage = () => {
     let imagePath;
-  
+
     switch (user?.role) {
       case "FARMER":
         imagePath = user?.farmerProfile?.profileImage;
@@ -60,7 +60,7 @@ const Layout = ({ children }) => {
       default:
         return null;
     }
-  
+
     // Return full URL if imagePath exists
     return imagePath
       ? imagePath.startsWith("http")
@@ -68,7 +68,7 @@ const Layout = ({ children }) => {
         : `http://localhost:3000${imagePath}` // Replace with your backend URL
       : null;
   };
-  
+
   const getDisplayName = () => {
     switch (user?.role) {
       case "FARMER":
@@ -353,10 +353,7 @@ const Layout = ({ children }) => {
 
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black bg-opacity-25 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
     </div>
   );

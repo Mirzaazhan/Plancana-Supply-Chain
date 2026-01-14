@@ -351,7 +351,17 @@ async function retryOnMVCCConflict(fn, maxRetries = 3, delayMs = 500) {
 }
 
 // Middleware
-app.use(cors());
+app.use(
+  cors({
+    origin: "*", // For testing, allow all. For production, use your specific ngrok URL
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "ngrok-skip-browser-warning",
+    ],
+  })
+);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static("public"));
@@ -2597,7 +2607,7 @@ app.get("/api/verify/:batchId", async (req, res) => {
         dataIntegrity: integrityCheck,
       },
 
-      // Supply chain summary
+      // Supply chain summary with full stage details
       supplyChainSummary: dbBatch
         ? {
             totalStages: [
@@ -5882,6 +5892,26 @@ app.get("/api/analytics/weather-quality-correlation", async (req, res) => {
       where: { batchId: { in: batchIds } },
     });
 
+    const moistureContentEMC = (temp, humidity) => {
+      if (temp == null || humidity == null) return null;
+
+      const H = humidity / 100;
+
+      const W = 330 + 0.452 * temp + 0.00415 * temp * temp;
+      const K = 0.791 + 0.000463 * temp - 0.000000844 * temp * temp;
+      const K1 = 6.34 + 0.000775 * temp - 0.0000935 * temp * temp;
+      const K2 = 1.09 + 0.0284 * temp - 0.0000904 * temp * temp;
+
+      const term1 = (K * H) / (1 - K * H);
+      const term2 =
+        (K1 * K * H + 2 * K1 * K2 * K * K * H * H) /
+        (1 + K1 * K * H + K1 * K2 * K * K * H * H);
+
+      const emc = (1800 / W) * (term1 + term2);
+
+      return Number(emc.toFixed(2)); // % moisture
+    };
+
     const correlationData = [];
 
     batches.forEach((batch) => {
@@ -5901,6 +5931,11 @@ app.get("/api/analytics/weather-quality-correlation", async (req, res) => {
       procLogs.forEach((p) => {
         correlationData.push({
           batchId: batch.batchId,
+          moisture:
+            moistureContentEMC(
+              parseFloat(p.temperature),
+              parseFloat(p.humidity)
+            ) || 0,
           moisture: batch.moistureContent || 0,
           quality: p.qualityTests?.grade || "N/A",
           stage: "processing",

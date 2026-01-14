@@ -120,7 +120,9 @@ const BatchRegistration = () => {
       farmer: user?.username || "",
       customBatchId: generatedBatchId,
     }));
-  }, [user]);
+
+    console.log("formData:", formData);
+  }, [user, formData.cropType]);
 
   const handleInputChange = (field, value) => {
     if (formData[field] === value) {
@@ -155,6 +157,7 @@ const BatchRegistration = () => {
         crop: "",
         variety: "",
       }));
+      console.log("value:", value);
       setAvailableVarieties([]);
     }
 
@@ -281,7 +284,9 @@ const BatchRegistration = () => {
 
   useEffect(() => {
     if (formData.latitude && formData.longitude) {
-      fetch(`/api/weather?lat=${formData.latitude}&lon=${formData.longitude}`)
+      fetch(
+        `/api/api/weather?lat=${formData.latitude}&lon=${formData.longitude}`
+      )
         .then((response) => response.json())
         .then((data) => {
           setFormData((prev) => ({
@@ -452,7 +457,7 @@ const BatchRegistration = () => {
                     onLongitudeChange={(value) =>
                       handleInputChange("longitude", value)
                     }
-                    required={true}
+                    required={false}
                   />
                 </div>
               </div>
@@ -1579,17 +1584,17 @@ const BatchRegistration = () => {
                 </span>
               </nav>
 
-              <h1 className="text-2xl font-bold text-gray-900">
+              <h1 className="max-[431px]:text-xl text-2xl font-bold text-gray-900">
                 Register New Batch
               </h1>
-              <p className="text-gray-600 mt-1">
+              <p className="max-[431px]:text-md text-gray-600 mt-1">
                 Enter agricultural batch details for blockchain registration
               </p>
             </div>
           </div>
 
           {currentStep < 3 && (
-            <div className="text-sm text-gray-500">
+            <div className="max-[431px]:hidden text-sm text-gray-500">
               Step {currentStep + 1} of {steps.length}
             </div>
           )}
@@ -1598,7 +1603,7 @@ const BatchRegistration = () => {
 
       {/* Progress Steps */}
       <div className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="flex items-center justify-center">
+        <div className="hidden min-[431px]:flex items-center justify-center">
           {steps.map((step, index) => (
             <div key={index} className="flex items-center">
               <div
@@ -1646,6 +1651,29 @@ const BatchRegistration = () => {
             </div>
           ))}
         </div>
+        <div className="min-[431px]:hidden flex items-center justify-between">
+          <div className="flex flex-col">
+            <span className="text-xs font-semibold text-blue-600 uppercase tracking-wider">
+              Step {currentStep + 1} of {steps.length}
+            </span>
+            <span className="text-lg font-bold text-gray-900">
+              {steps[currentStep].title}
+            </span>
+            <div className="flex flex-row gap-3 mt-2">
+              {steps.map((_, index) => (
+                <div
+                  key={index}
+                  className={`h-1.5 w-6 rounded-full ${
+                    index <= currentStep ? "bg-blue-600" : "bg-gray-200"
+                  }`}
+                />
+              ))}
+            </div>
+            <div className="text-sm text-gray-500 mt-2">
+              {steps[currentStep].description}
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Main Content */}
@@ -1658,7 +1686,7 @@ const BatchRegistration = () => {
             <button
               onClick={prevStep}
               disabled={currentStep === 0}
-              className={`px-6 py-2 rounded-md font-medium transition-colors duration-200 ${
+              className={`max-[431px]:text-sm px-6 py-2 rounded-md font-medium transition-colors duration-200 ${
                 currentStep === 0
                   ? "text-gray-400 cursor-not-allowed"
                   : "text-gray-700 hover:bg-gray-50 border border-gray-300"
@@ -1676,7 +1704,7 @@ const BatchRegistration = () => {
                 {loading && (
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                 )}
-                <span>
+                <span className="max-[431px]:text-sm">
                   {loading ? "Registering..." : "Register Batch on Blockchain"}
                 </span>
               </button>
@@ -1684,7 +1712,7 @@ const BatchRegistration = () => {
               <button
                 onClick={nextStep}
                 disabled={!validateStep(currentStep)}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-2 rounded-md font-medium transition-colors duration-200"
+                className="max-[431px]:text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-2 rounded-md font-medium transition-colors duration-200"
               >
                 Next
               </button>

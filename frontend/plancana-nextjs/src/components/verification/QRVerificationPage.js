@@ -219,7 +219,7 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
       <nav className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-4 max-[431px]:space-x-2">
               <button
                 onClick={() => router.push("/")}
                 className="text-gray-500 hover:text-gray-700"
@@ -239,9 +239,11 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
                 </svg>
               </button>
               <span className="text-gray-400">→</span>
-              <span className="text-sm text-gray-500">Scan Results</span>
+              <span className="text-sm text-gray-500 max-[431px]:text-xs">
+                Scan Results
+              </span>
               <span className="text-gray-400">→</span>
-              <span className="text-sm font-medium text-gray-900">
+              <span className="text-sm font-medium text-gray-900 max-[431px]:text-xs">
                 Batch #{batchId}
               </span>
             </div>
@@ -262,22 +264,24 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
                     d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                   />
                 </svg>
-                <span className="text-sm font-medium text-green-700">
+                <span className="text-sm font-medium text-green-700 max-[431px]:text-xs">
                   Scan Complete
                 </span>
               </div>
-              <span className="text-xs text-green-600">QR Code verified</span>
+              <span className="text-xs text-green-600 max-[431px]:text-xs">
+                QR Code verified
+              </span>
             </div>
           </div>
         </div>
       </nav>
 
       {/* Hero Section */}
-      <div className="relative bg-gradient-to-r from-green-50 to-blue-50 py-12">
+      <div className="relative bg-gradient-to-r from-green-50 to-blue-50 py-12 max-[431px]:py-8 mb-6">
         <div className="absolute inset-0 bg-white bg-opacity-50"></div>
         <div className="relative w-full px-8 lg:px-16">
           <div className="text-center">
-            <h1 className="text-4xl font-bold text-gray-900 mb-4">
+            <h1 className="text-4xl font-bold text-gray-900 mb-4 max-[431px]:text-3xl">
               Batch #{batchId}
             </h1>
             <div className="flex items-center justify-center space-x-2 mb-4">
@@ -294,11 +298,11 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
                   d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
                 />
               </svg>
-              <span className="text-lg font-medium text-green-700">
+              <span className="text-lg font-medium text-green-700 max-[431px]:text-sm">
                 Verified Product
               </span>
             </div>
-            <p className="text-gray-600 max-w-3xl mx-auto">
+            <p className="text-gray-600 max-w-3xl mx-auto mb-6 max-[431px]:text-sm">
               This product has been verified through our blockchain-powered
               supply chain tracking system. All information below is authentic
               and tamper-proof.
@@ -703,10 +707,11 @@ const QRVerificationPage = ({ batchId: propBatchId }) => {
                 <ArcGISMap
                   webMapId="a24b5bc059d2478e843f4c1968e47860"
                   dragable={false}
-                  height="70vh"
+                  height="75vh"
                   zoom={6}
                   heatmap={false}
                   initialBatchId={batchId}
+                  weatherwidget={true}
                 />
               </div>
             </div>

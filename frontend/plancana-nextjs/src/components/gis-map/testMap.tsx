@@ -25,6 +25,7 @@ interface MapProps {
   zoom?: number;
   heatmap?: boolean;
   initialBatchId?: string;
+  weatherwidget?: boolean;
 }
 function getRole(eventType: string): string {
   switch (eventType) {
@@ -111,6 +112,7 @@ const TestMap = ({
   height,
   zoom,
   heatmap,
+  weatherwidget,
   initialBatchId,
 }: MapProps) => {
   const mapRef = useRef<HTMLDivElement>(null);
@@ -238,7 +240,7 @@ const TestMap = ({
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-      const res = await fetch("/api/refresh-token", {
+      const res = await fetch("/api/api/refresh-token", {
         signal: controller.signal,
       });
 
@@ -345,14 +347,16 @@ const TestMap = ({
           esriConfig,
         ]: any[]) => {
           if (!isMounted) return;
+          const orgUrl = "https://plancana.maps.arcgis.com";
+          esriConfig.portalUrl = orgUrl;
 
           // Configure ArcGIS with token
           try {
             IdentityManager.registerToken({
-              server: "https://www.arcgis.com/sharing/rest",
+              server: `${orgUrl}/sharing/rest`,
               token: token,
+              expires: Date.now() + 55 * 60 * 1000,
             });
-
             // Also set the API key if available
             if (process.env.NEXT_PUBLIC_ARCGIS_API_KEY) {
               esriConfig.apiKey = process.env.NEXT_PUBLIC_ARCGIS_API_KEY;
@@ -366,9 +370,7 @@ const TestMap = ({
             return;
           }
 
-          const WebMap = WebMapModule;
           const Graphic = GraphicModule;
-          const GraphicsLayer = GraphicsLayerModule;
           const FeatureLayer = FeatureLayerModule;
           const UniqueValueRenderer = UniqueValueRendererModule;
 
@@ -432,6 +434,7 @@ const TestMap = ({
             title: "Batch Locations",
             source: [],
             objectIdField: "ObjectID",
+            spatialReference: { wkid: 4324 },
             fields: [
               { name: "ObjectID", type: "oid" },
               { name: "role", type: "string" },
@@ -543,21 +546,28 @@ const TestMap = ({
           const routesGraphicsLayer = new GraphicsLayerModule({
             title: "Route Lines",
           });
-
+          IdentityManager.useSignInPage = false;
           // Create WebMap with error handling
           const map = new WebMapModule({
             portalItem: {
-              id: webMapId,
+              id: "a24b5bc059d2478e843f4c1968e47860", // Your ID from the screenshot
+              portal: {
+                url: orgUrl,
+              },
             },
             layers: [routesGraphicsLayer, locationsLayer],
           });
 
           locationsLayerRef.current = locationsLayer;
           routesLayerRef.current = routesGraphicsLayer;
+          locationsLayerRef.current.spatialReference = { wkid: 4326 };
 
           // Handle map load errors
           map.load().catch((error: any) => {
             console.error("WebMap load error:", error);
+            console.error("DEBUG - Full Error Object:", error);
+            console.error("DEBUG - Error Name:", error.name);
+            console.error("DEBUG - Error Details:", error.details);
             if (!isMounted) return;
 
             if (
@@ -603,11 +613,11 @@ const TestMap = ({
                   layerInfos: [
                     {
                       layer: locationsLayer,
-                      title: "Batch Locations",
+                      title: " ", // Empty title saves space on mobile
                       hideLayers: false,
                     },
                   ],
-                  style: "card",
+                  style: "stacked", // Changed from "card" to "stacked"
                   respectLayerVisibility: true,
                 });
                 view.ui.add(legend, "top-right");
@@ -620,7 +630,7 @@ const TestMap = ({
               ]).then(() => {
                 if (!isMounted) return;
 
-                fetch("/api/batches/active-locations")
+                fetch("/api/api/batches/active-locations")
                   .then((res) => {
                     if (!res.ok) throw new Error(`HTTP ${res.status}`);
                     return res.json();
@@ -881,56 +891,106 @@ const TestMap = ({
     }
   }, [isHeatmapEnabled]);
 
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.innerHTML = `
+    /* 1. LAYER PRIORITY: Bring ArcGIS UI components to the absolute front */
+    .esri-ui, 
+    .esri-ui-corner, 
+    .esri-ui-inner-container, 
+    .esri-view-user-interface {
+      z-index: 50 !important;
+    }
+
+    /* 2. POPUP PRIORITY: Ensure the waypoint info box is always on top */
+    .esri-popup, 
+    .esri-popup__main-container {
+      z-index: 100 !important;
+    }
+
+    /* 3. MOBILE LEGEND SIZING (431px and below) */
+    @media (max-width: 431px) {
+      .esri-ui-top-right .esri-component.esri-legend {
+        width: 130px !important;
+        min-width: 130px !important;
+        z-index: 60 !important; 
+      }
+      .esri-legend__service-label { font-size: 10px !important; padding: 4px !important; }
+      .esri-legend__symbol { width: 12px !important; height: 12px !important; }
+      .esri-legend__label { font-size: 9px !important; line-height: 1.2 !important; }
+      .esri-legend__layer-table { margin-bottom: 2px !important; }
+    }
+  `;
+    document.head.appendChild(style);
+    return () => {
+      document.head.removeChild(style);
+    };
+  }, []);
+
   const WeatherLegend = () => (
-    <div className="absolute bottom-10 left-4 z-10 bg-white/90 backdrop-blur-sm p-4 rounded-lg shadow-2xl border border-gray-200 max-w-xs">
-      <div className="flex items-center gap-2 mb-3 border-b pb-2">
-        <AlertCircle size={18} className="text-blue-600" />
-        <h3 className="font-bold text-sm text-gray-800">Quality Risk Legend</h3>
+    <div
+      className="absolute bottom-10 left-4 z-[10] bg-white/95 backdrop-blur-sm 
+    p-5 max-[431px]:p-3 
+    rounded-lg shadow-2xl border border-gray-200 
+    max-w-[220px] max-[431px]:w-48"
+    >
+      <div className="flex items-center gap-2.5 max-[431px]:gap-2 mb-4 max-[431px]:mb-3 border-b pb-2.5 max-[431px]:pb-2">
+        <AlertCircle
+          size={22}
+          className="text-blue-600 max-[431px]:w-4 max-[431px]:h-4"
+        />
+        <h3 className="font-bold text-base text-gray-800 max-[431px]:text-[12px]">
+          Quality Risk Legend
+        </h3>
       </div>
-      <div className="space-y-3">
-        <div className="flex items-start gap-3">
-          <div className="w-6 h-1 mt-2 bg-[#ef4444] border-t-2 border-dashed border-red-800"></div>
-          <div>
-            <p className="text-xs font-bold text-red-700">High Spoilage Risk</p>
-            <p className="text-[10px] text-gray-600">
-              {">"}85% Hum / {">"}30°C | EMC {">"}17%
-            </p>
+
+      <div className="space-y-4 max-[431px]:space-y-2">
+        {[
+          {
+            color: "#ef4444",
+            label: "High Spoilage",
+            detail: ">85% H / >30°C | EMC >17",
+          },
+          {
+            color: "#f97316",
+            label: "High Risk",
+            detail: "75-85% H / 25-30°C | EMC 15-17%",
+          },
+          {
+            color: "#22c55e",
+            label: "Optimal",
+            detail: "65-72% H / <25°C | EMC 13-14.5%",
+          },
+          {
+            color: "#eab308",
+            label: "Warning",
+            detail: "55-60% H / <25°C | EMC ~12%",
+          },
+        ].map((item) => (
+          <div
+            key={item.label}
+            className="flex items-start gap-4 max-[431px]:gap-3"
+          >
+            <div
+              className="w-10 h-1.5 mt-2 max-[431px]:w-5 max-[431px]:h-1.5 max-[431px]:mt-1.5 rounded-sm"
+              style={{ backgroundColor: item.color }}
+            ></div>
+            <div>
+              <p className="text-sm font-bold text-gray-800 max-[431px]:text-[11px] leading-tight">
+                {item.label}
+              </p>
+              <p className="text-xs text-gray-500 max-[431px]:text-[9px] leading-tight mt-0.5">
+                {item.detail}
+              </p>
+            </div>
           </div>
-        </div>
-        <div className="flex items-start gap-3">
-          <div className="w-6 h-1 mt-2 bg-[#f97316]"></div>
-          <div>
-            <p className="text-xs font-bold text-orange-600">High Risk</p>
-            <p className="text-[10px] text-gray-600">
-              75-85% Hum / 25-30°C | EMC 15-17%
-            </p>
-          </div>
-        </div>
-        <div className="flex items-start gap-3">
-          <div className="w-6 h-1 mt-2 bg-[#22c55e]"></div>
-          <div>
-            <p className="text-xs font-bold text-green-700">Optimal</p>
-            <p className="text-[10px] text-gray-600">
-              65-72% Hum / &lt;25°C | EMC 13-14.5%
-            </p>
-          </div>
-        </div>
-        <div className="flex items-start gap-3">
-          <div className="w-6 h-1 mt-2 bg-[#eab308]"></div>
-          <div>
-            <p className="text-xs font-bold text-yellow-700">Warning</p>
-            <p className="text-[10px] text-gray-600">
-              55-60% Hum / &lt;25°C | EMC ~12%
-            </p>
-          </div>
-        </div>
+        ))}
       </div>
-      <p className="mt-3 text-[9px] text-gray-400 italic">
-        *Based on Equilibrium Moisture Content (EMC) standard D245.
+      <p className="mt-4 max-[431px]:mt-2 text-[10px] max-[431px]:text-[8px] text-gray-400 italic">
+        *EMC standard D245.
       </p>
     </div>
   );
-
   return (
     <>
       <div className="relative w-full" style={{ height: height }}>
@@ -1076,7 +1136,7 @@ const TestMap = ({
             )}
           </div>
         )}
-        {!isLoading && !mapError && <WeatherLegend />}
+        {!isLoading && !mapError && weatherwidget && <WeatherLegend />}
         {/* Map Container */}
         <div
           ref={mapRef}

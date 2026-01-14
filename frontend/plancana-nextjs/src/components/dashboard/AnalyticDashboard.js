@@ -292,7 +292,7 @@ const IntelligenceBoard = () => {
       {/* MAIN HEADER - FR-24 */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4  mt-7">
         <div className="">
-          <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+          <h1 className="text-3xl font-bold text-gray-900 flex items-center gap-2 ">
             {/* <BarChart3 className="h-7 w-7 text-green-600" /> */}
             Quality Analytics & Insights
           </h1>
@@ -321,7 +321,7 @@ const IntelligenceBoard = () => {
       </div>
 
       {/* 1. TOP LEVEL: THE CORRELATION SCORECARD */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 max-[431px]:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border-3 border-blue-400 ">
           <div className="flex justify-between items-start">
             <p className="text-xs font-bold text-gray-700 uppercase tracking-wider">
@@ -352,7 +352,7 @@ const IntelligenceBoard = () => {
               : "Moderate"}{" "}
             Correlation
           </div>
-          <p className="text-xs text-gray-700 mt-3 leading-relaxed">
+          <p className="text-xs text-gray-700 mt-3 leading-relaxed max-[431px]:text-sm">
             {selectedStage.toUpperCase()} Stage:{" "}
             {Math.abs(dynamicStats.humidityMoistureCorr) > 0.5
               ? "Environmental humidity is significantly impacting product moisture levels."
@@ -387,7 +387,7 @@ const IntelligenceBoard = () => {
               ? "Relevant Correlation"
               : "Weak Correlation"}
           </div>
-          <p className="text-xs text-gray-700 mt-3 leading-relaxed">
+          <p className="text-xs text-gray-700 mt-3 leading-relaxed max-[431px]:text-sm">
             {selectedStage.toUpperCase()} Stage: As temperature increases at
             this stage, the overall quality grade tends to
             {dynamicStats.tempQualityCorr < 0
@@ -531,9 +531,10 @@ const IntelligenceBoard = () => {
                   <Scatter name="Batches" data={correlationChangeData}>
                     {correlationChangeData.map((entry, index) => {
                       const isCritical =
-                        entry.moisture > 17 && entry.humidity > 85;
+                        entry.moisture > 17 || entry.humidity > 85;
                       const isWarning =
-                        entry.moisture > 14.5 && entry.humidity > 75;
+                        entry.moisture > 14.5 || entry.humidity >= 75;
+                      const isSafe = !isCritical && !isWarning;
 
                       return (
                         <Cell
@@ -543,7 +544,9 @@ const IntelligenceBoard = () => {
                               ? "#ef4444"
                               : isWarning
                               ? "#f97316"
-                              : "#3b82f6"
+                              : isSafe
+                              ? "#3b82f6"
+                              : "#9ca3af"
                           }
                           strokeWidth={isCritical ? 2 : 0}
                           stroke="#991b1b"
@@ -557,6 +560,10 @@ const IntelligenceBoard = () => {
                 <span className="flex items-center gap-1">
                   <div className="w-2 h-2 rounded-full bg-blue-500" /> Safe
                   Range
+                </span>
+                <span className="flex items-center gap-1">
+                  <div className="w-2 h-2 rounded-full bg-orange-500" /> High
+                  Risk
                 </span>
                 <span className="flex items-center gap-1">
                   <div className="w-2 h-2 rounded-full bg-red-500" /> High
@@ -632,7 +639,7 @@ const IntelligenceBoard = () => {
                       <Cell
                         key={`cell-${index}`}
                         // Color logic: Higher temperatures often correlate with lower grades
-                        fill={entry.avgTemp > 28 ? "#ef4444" : "#f59e0b"}
+                        fill={entry.avgTemp > 30 ? "#ef4444" : "#f59e0b"}
                       />
                     ))}
                   </Bar>

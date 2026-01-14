@@ -29,6 +29,7 @@ const page = () => {
                   height="100%"
                   webMapId={process.env.NEXT_PUBLIC_ARCGIS_TOKEN_ID_WEBMAP}
                   dragable={false}
+                  weatherwidget={true}
                 />
               </div>
             </div>

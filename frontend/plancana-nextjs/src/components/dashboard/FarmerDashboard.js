@@ -185,7 +185,7 @@ const FarmerDashboard = () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
 
-      const response = await fetch(`/api/weather?lat=${lat}&lon=${lon}`, {
+      const response = await fetch(`/api/api/weather?lat=${lat}&lon=${lon}`, {
         signal: controller.signal,
       });
 
@@ -408,7 +408,7 @@ const FarmerDashboard = () => {
       </div>
 
       {/* Stats Cards with Icons */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 max-[431px]:grid-cols-2">
         <div className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between mb-4">
             <div className="p-3 bg-blue-100 rounded-lg">
@@ -477,7 +477,7 @@ const FarmerDashboard = () => {
       </div>
 
       {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 ">
         {/* Batch Registration Trends */}
         <div className="bg-white rounded-xl shadow-sm p-6">
           <div className="flex items-center justify-between mb-6">
@@ -565,7 +565,7 @@ const FarmerDashboard = () => {
         <h3 className="text-lg font-semibold text-gray-900 mb-4">
           Quick Actions
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 max-[431px]:grid-cols-2">
           <button
             onClick={handleCreateBatch}
             className="bg-green-600 hover:bg-green-700 text-white p-6 rounded-xl transition-all transform hover:scale-105 flex flex-col items-center justify-center space-y-3"
@@ -622,7 +622,7 @@ const FarmerDashboard = () => {
             </p>
           </div>
 
-          <div className="grid grid-cols-5 gap-4">
+          <div className="grid grid-cols-5 max-[550px]:grid-cols-2 gap-4">
             <div className="flex flex-col items-center space-y-3">
               <div className="w-16 h-16 rounded-full bg-green-100 border-4 border-green-200 flex items-center justify-center">
                 <Activity className="h-8 w-8 text-green-600" />
@@ -811,6 +811,7 @@ const FarmerDashboard = () => {
                 dragable={false}
                 height="70vh"
                 zoom={5}
+                weatherwidget={false}
               />
             </div>
 
