@@ -1,0 +1,281 @@
+// Test data for Supply Chain Flowchart
+// Demonstrates quantity tracking, price changes, wastage, and batch splits
+
+export const testBatchWithSplits = {
+  batchId: 'BAT-2025-TEST-001',
+  stages: [
+    {
+      stageName: 'Harvest',
+      quantity: 1000,
+      unit: 'kg',
+      price: 2.50,
+      currency: 'MYR',
+      date: '2025-01-01',
+      actor: 'Green Valley Farm',
+      location: 'Cameron Highlands, Pahang',
+      notes: 'Premium quality rice harvested during optimal season',
+      qualityGrade: 'A',
+      temperature: 28,
+    },
+    {
+      stageName: 'Initial Processing',
+      quantity: 950, // 50kg wastage (husks, debris)
+      unit: 'kg',
+      price: 3.00,
+      currency: 'MYR',
+      date: '2025-01-02',
+      actor: 'Cameron Processing Plant',
+      location: 'Cameron Highlands, Pahang',
+      notes: 'Cleaning and initial milling. 5% wastage from husks and impurities.',
+      wastage: 50,
+      qualityGrade: 'A',
+      temperature: 25,
+    },
+    {
+      stageName: 'Quality Testing',
+      quantity: 950, // No wastage
+      unit: 'kg',
+      price: 3.20,
+      currency: 'MYR',
+      date: '2025-01-03',
+      actor: 'Quality Assurance Lab',
+      location: 'Cameron Highlands, Pahang',
+      notes: 'Moisture content, protein analysis, and pesticide residue testing. All tests passed.',
+      qualityGrade: 'A+',
+    },
+    {
+      stageName: 'Storage & Packaging',
+      quantity: 940, // 10kg wastage (moisture loss during storage)
+      unit: 'kg',
+      price: 3.50,
+      currency: 'MYR',
+      date: '2025-01-05',
+      actor: 'Cameron Warehouse Co.',
+      location: 'Cameron Highlands, Pahang',
+      notes: 'Temperature-controlled storage. Minor moisture loss during drying.',
+      wastage: 10,
+      temperature: 18,
+      // This stage has splits
+      splits: [
+        {
+          quantity: 600,
+          unit: 'kg',
+          price: 3.80,
+          currency: 'MYR',
+          date: '2025-01-06',
+          actor: 'KL Distributor Sdn Bhd',
+          destination: 'Kuala Lumpur',
+          notes: 'Bulk order for KL retail chains',
+        },
+        {
+          quantity: 340,
+          unit: 'kg',
+          price: 4.00,
+          currency: 'MYR',
+          date: '2025-01-06',
+          actor: 'Penang Foods Distributor',
+          destination: 'Penang',
+          notes: 'Premium packaging for Penang market',
+        },
+      ],
+    },
+    {
+      stageName: 'Distribution Center',
+      quantity: 600, // Following first split
+      unit: 'kg',
+      price: 4.20,
+      currency: 'MYR',
+      date: '2025-01-08',
+      actor: 'KL Central Distribution',
+      location: 'Kuala Lumpur',
+      notes: 'Distribution to various retail outlets in KL',
+    },
+    {
+      stageName: 'Retail Store',
+      quantity: 595, // 5kg wastage (damaged packaging)
+      unit: 'kg',
+      price: 5.50,
+      currency: 'MYR',
+      date: '2025-01-10',
+      actor: 'FreshMart Supermarket',
+      location: 'KLCC, Kuala Lumpur',
+      notes: 'Ready for consumer purchase. Minor damage during transport.',
+      wastage: 5,
+    },
+  ],
+};
+
+export const simpleBatchNoSplits = {
+  batchId: 'BAT-2025-TEST-002',
+  stages: [
+    {
+      stageName: 'Harvest',
+      quantity: 500,
+      unit: 'kg',
+      price: 3.00,
+      currency: 'MYR',
+      date: '2025-01-05',
+      actor: 'Sungai Buloh Farm',
+      location: 'Sungai Buloh, Selangor',
+      notes: 'Organic vegetables harvested fresh',
+      qualityGrade: 'A',
+    },
+    {
+      stageName: 'Washing & Sorting',
+      quantity: 480, // 20kg wastage (damaged produce)
+      unit: 'kg',
+      price: 3.50,
+      currency: 'MYR',
+      date: '2025-01-05',
+      actor: 'Sungai Buloh Processing',
+      location: 'Sungai Buloh, Selangor',
+      notes: 'Removed damaged and undersized produce',
+      wastage: 20,
+      qualityGrade: 'A',
+    },
+    {
+      stageName: 'Packaging',
+      quantity: 480,
+      unit: 'kg',
+      price: 4.00,
+      currency: 'MYR',
+      date: '2025-01-06',
+      actor: 'Fresh Pack Solutions',
+      location: 'Shah Alam, Selangor',
+      notes: 'Vacuum-sealed packaging in 1kg units',
+    },
+    {
+      stageName: 'Cold Storage',
+      quantity: 478, // 2kg wastage (spoilage)
+      unit: 'kg',
+      price: 4.20,
+      currency: 'MYR',
+      date: '2025-01-07',
+      actor: 'ColdChain Logistics',
+      location: 'Subang, Selangor',
+      notes: 'Temperature maintained at 4°C. Minimal spoilage.',
+      wastage: 2,
+      temperature: 4,
+    },
+    {
+      stageName: 'Retail Distribution',
+      quantity: 478,
+      unit: 'kg',
+      price: 6.00,
+      currency: 'MYR',
+      date: '2025-01-09',
+      actor: 'Village Grocer',
+      location: 'Multiple locations, Klang Valley',
+      notes: 'Distributed to premium grocery stores',
+    },
+  ],
+};
+
+export const complexBatchMultipleSplits = {
+  batchId: 'BAT-2025-TEST-003',
+  stages: [
+    {
+      stageName: 'Harvest',
+      quantity: 2000,
+      unit: 'kg',
+      price: 2.00,
+      currency: 'MYR',
+      date: '2025-01-01',
+      actor: 'Johor Plantation Estate',
+      location: 'Johor Bahru, Johor',
+      notes: 'Large-scale palm oil fruit harvest',
+      qualityGrade: 'B+',
+    },
+    {
+      stageName: 'Milling & Extraction',
+      quantity: 1600, // 400kg wastage (shells, fibers)
+      unit: 'kg',
+      price: 3.50,
+      currency: 'MYR',
+      date: '2025-01-02',
+      actor: 'Johor Palm Oil Mill',
+      location: 'Johor Bahru, Johor',
+      notes: 'Oil extraction. 20% wastage from shells and fibers (standard).',
+      wastage: 400,
+      qualityGrade: 'A',
+    },
+    {
+      stageName: 'Refining',
+      quantity: 1550, // 50kg wastage (impurities)
+      unit: 'kg',
+      price: 4.00,
+      currency: 'MYR',
+      date: '2025-01-04',
+      actor: 'Premium Refinery Sdn Bhd',
+      location: 'Pasir Gudang, Johor',
+      notes: 'Refined and purified palm oil. Removed impurities.',
+      wastage: 50,
+      qualityGrade: 'A+',
+      // First split point
+      splits: [
+        {
+          quantity: 1000,
+          unit: 'kg',
+          price: 4.50,
+          currency: 'MYR',
+          date: '2025-01-05',
+          actor: 'Industrial Distributor',
+          destination: 'Shah Alam, Selangor',
+          notes: 'Bulk industrial use - food manufacturing',
+        },
+        {
+          quantity: 300,
+          unit: 'kg',
+          price: 5.50,
+          currency: 'MYR',
+          date: '2025-01-05',
+          actor: 'Premium Retail Packager',
+          destination: 'Kuala Lumpur',
+          notes: 'Premium retail bottling',
+        },
+        {
+          quantity: 250,
+          unit: 'kg',
+          price: 5.00,
+          currency: 'MYR',
+          date: '2025-01-05',
+          actor: 'Export Logistics',
+          destination: 'Singapore',
+          notes: 'International export',
+        },
+      ],
+    },
+    {
+      stageName: 'Bottling & Labeling',
+      quantity: 295, // Following second split, 5kg wastage
+      unit: 'kg',
+      price: 6.50,
+      currency: 'MYR',
+      date: '2025-01-07',
+      actor: 'Premium Bottling Co.',
+      location: 'Kuala Lumpur',
+      notes: 'Bottled in 1L glass bottles with premium branding',
+      wastage: 5,
+    },
+    {
+      stageName: 'Retail Distribution',
+      quantity: 295,
+      unit: 'kg',
+      price: 8.50,
+      currency: 'MYR',
+      date: '2025-01-09',
+      actor: 'Premium Supermarkets',
+      location: 'Kuala Lumpur, Selangor',
+      notes: 'High-end retail outlets',
+    },
+  ],
+};
+
+// Export test scenarios
+export const testScenarios = {
+  withSplits: testBatchWithSplits,
+  simple: simpleBatchNoSplits,
+  complex: complexBatchMultipleSplits,
+};
+
+export default testBatchWithSplits;

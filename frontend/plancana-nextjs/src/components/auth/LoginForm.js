@@ -55,10 +55,14 @@ const LoginForm = ({ returnUrl = null }) => {
       } else {
         console.error('❌ Login failed:', result.error);
         toast.error(result.error);
+        // Clear only password on error, keep email for better UX
+        setFormData(prev => ({ ...prev, password: '' }));
       }
     } catch (error) {
       console.error('❌ Login error caught:', error);
       toast.error('An unexpected error occurred during login');
+      // Clear only password on error, keep email for better UX
+      setFormData(prev => ({ ...prev, password: '' }));
     }
   };
 

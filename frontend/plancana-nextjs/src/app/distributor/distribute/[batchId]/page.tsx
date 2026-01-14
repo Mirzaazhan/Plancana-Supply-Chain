@@ -24,6 +24,7 @@ export default function DistributorDistributePage() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
   const [formData, setFormData] = useState({
     distributionType: 'warehouse',
@@ -86,13 +87,82 @@ export default function DistributorDistributePage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+
+    // Clear validation error for this field
+    if (validationErrors[name]) {
+      setValidationErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[name];
+        return newErrors;
+      });
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.warehouseLocation) {
-      toast.error('Please enter warehouse location');
+    // Detailed validation
+    const errors: Record<string, string> = {};
+
+    if (!formData.warehouseLocation || formData.warehouseLocation.trim() === '') {
+      errors.warehouseLocation = 'Warehouse location is required';
+    }
+
+    // Quantity received validation (if provided)
+    if (formData.quantityReceived && formData.quantityReceived !== '') {
+      const qty = parseFloat(formData.quantityReceived);
+      if (isNaN(qty)) {
+        errors.quantityReceived = 'Quantity received must be a valid number';
+      } else if (qty < 0) {
+        errors.quantityReceived = 'Quantity cannot be negative';
+      }
+    }
+
+    // Quantity distributed validation (if provided)
+    if (formData.quantityDistributed && formData.quantityDistributed !== '') {
+      const qty = parseFloat(formData.quantityDistributed);
+      if (isNaN(qty)) {
+        errors.quantityDistributed = 'Quantity distributed must be a valid number';
+      } else if (qty < 0) {
+        errors.quantityDistributed = 'Quantity cannot be negative';
+      }
+    }
+
+    // Cost validations (if provided)
+    if (formData.distributionCost && formData.distributionCost !== '') {
+      const cost = parseFloat(formData.distributionCost);
+      if (isNaN(cost) || cost < 0) {
+        errors.distributionCost = 'Distribution cost must be a positive number';
+      }
+    }
+
+    if (formData.storageCost && formData.storageCost !== '') {
+      const cost = parseFloat(formData.storageCost);
+      if (isNaN(cost) || cost < 0) {
+        errors.storageCost = 'Storage cost must be a positive number';
+      }
+    }
+
+    if (formData.handlingCost && formData.handlingCost !== '') {
+      const cost = parseFloat(formData.handlingCost);
+      if (isNaN(cost) || cost < 0) {
+        errors.handlingCost = 'Handling cost must be a positive number';
+      }
+    }
+
+    // Humidity validation (if provided)
+    if (formData.humidity && formData.humidity !== '') {
+      const humidity = parseFloat(formData.humidity);
+      if (isNaN(humidity)) {
+        errors.humidity = 'Humidity must be a number';
+      } else if (humidity < 0 || humidity > 100) {
+        errors.humidity = 'Humidity must be between 0 and 100%';
+      }
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      toast.error('Please fix the errors before submitting');
       return;
     }
 
@@ -298,9 +368,19 @@ export default function DistributorDistributePage() {
               value={formData.warehouseLocation}
               onChange={handleChange}
               placeholder="e.g., Warehouse A, Kuala Lumpur"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
+              className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base ${
+                validationErrors.warehouseLocation
+                  ? 'border-red-500 bg-red-50'
+                  : 'border-gray-300'
+              }`}
               required
             />
+            {validationErrors.warehouseLocation && (
+              <p className="mt-1 text-sm text-red-600 flex items-center">
+                <AlertCircle className="h-4 w-4 mr-1" />
+                {validationErrors.warehouseLocation}
+              </p>
+            )}
           </div>
 
           {/* Storage Conditions */}

@@ -26,6 +26,7 @@ export default function ProcessorProcessPage() {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [gpsLoading, setGpsLoading] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
   const [formData, setFormData] = useState({
     processType: 'cleaning',
@@ -106,24 +107,119 @@ export default function ProcessorProcessPage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+
+    // Clear validation error for this field
+    if (validationErrors[name]) {
+      setValidationErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[name];
+        return newErrors;
+      });
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validation
+    // Detailed validation
+    const errors: Record<string, string> = {};
+
     if (!formData.processType) {
-      toast.error('Please select a processing type');
-      return;
+      errors.processType = 'Processing type is required';
     }
 
-    if (!formData.inputQuantity || parseFloat(formData.inputQuantity) <= 0) {
-      toast.error('Please enter valid input quantity');
-      return;
+    if (!formData.processingLocation || formData.processingLocation.trim() === '') {
+      errors.processingLocation = 'Processing location is required';
     }
 
-    if (!formData.outputQuantity || parseFloat(formData.outputQuantity) <= 0) {
-      toast.error('Please enter valid output quantity');
+    // Input quantity validation
+    if (!formData.inputQuantity || formData.inputQuantity === '') {
+      errors.inputQuantity = 'Input quantity is required';
+    } else {
+      const input = parseFloat(formData.inputQuantity);
+      if (isNaN(input)) {
+        errors.inputQuantity = 'Input quantity must be a valid number';
+      } else if (input <= 0) {
+        errors.inputQuantity = 'Input quantity must be greater than 0';
+      } else if (input > 1000000) {
+        errors.inputQuantity = 'Input quantity seems too large';
+      }
+    }
+
+    // Output quantity validation
+    if (!formData.outputQuantity || formData.outputQuantity === '') {
+      errors.outputQuantity = 'Output quantity is required';
+    } else {
+      const output = parseFloat(formData.outputQuantity);
+      if (isNaN(output)) {
+        errors.outputQuantity = 'Output quantity must be a valid number';
+      } else if (output <= 0) {
+        errors.outputQuantity = 'Output quantity must be greater than 0';
+      } else if (output > 1000000) {
+        errors.outputQuantity = 'Output quantity seems too large';
+      }
+    }
+
+    // Waste quantity validation (if provided)
+    if (formData.wasteQuantity && formData.wasteQuantity !== '') {
+      const waste = parseFloat(formData.wasteQuantity);
+      if (isNaN(waste)) {
+        errors.wasteQuantity = 'Waste quantity must be a valid number';
+      } else if (waste < 0) {
+        errors.wasteQuantity = 'Waste quantity cannot be negative';
+      }
+    }
+
+    // Processing time validation (if provided)
+    if (formData.processingTime && formData.processingTime !== '') {
+      const time = parseInt(formData.processingTime);
+      if (isNaN(time) || time < 0) {
+        errors.processingTime = 'Processing time must be a positive number';
+      }
+    }
+
+    // Energy usage validation (if provided)
+    if (formData.energyUsage && formData.energyUsage !== '') {
+      const energy = parseFloat(formData.energyUsage);
+      if (isNaN(energy) || energy < 0) {
+        errors.energyUsage = 'Energy usage must be a positive number';
+      }
+    }
+
+    // Water usage validation (if provided)
+    if (formData.waterUsage && formData.waterUsage !== '') {
+      const water = parseFloat(formData.waterUsage);
+      if (isNaN(water) || water < 0) {
+        errors.waterUsage = 'Water usage must be a positive number';
+      }
+    }
+
+    // GPS Coordinates validation (REQUIRED for traceability)
+    if (!formData.latitude || formData.latitude === '') {
+      errors.latitude = 'Latitude is required for location tracking';
+    } else {
+      const lat = parseFloat(formData.latitude);
+      if (isNaN(lat)) {
+        errors.latitude = 'Latitude must be a valid number';
+      } else if (lat < -90 || lat > 90) {
+        errors.latitude = 'Latitude must be between -90 and 90';
+      }
+    }
+
+    if (!formData.longitude || formData.longitude === '') {
+      errors.longitude = 'Longitude is required for location tracking';
+    } else {
+      const lon = parseFloat(formData.longitude);
+      if (isNaN(lon)) {
+        errors.longitude = 'Longitude must be a valid number';
+      } else if (lon < -180 || lon > 180) {
+        errors.longitude = 'Longitude must be between -180 and 180';
+      }
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      toast.error('Please fix the errors before submitting');
       return;
     }
 
@@ -320,7 +416,7 @@ export default function ProcessorProcessPage() {
           {/* Location */}
           <div className="bg-white rounded-lg shadow-sm p-4">
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Processing Location
+              Processing Location <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
@@ -328,21 +424,31 @@ export default function ProcessorProcessPage() {
               value={formData.processingLocation}
               onChange={handleChange}
               placeholder="e.g., Processing Facility A"
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
+              className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base ${
+                validationErrors.processingLocation
+                  ? 'border-red-500 bg-red-50'
+                  : 'border-gray-300'
+              }`}
             />
+            {validationErrors.processingLocation && (
+              <p className="mt-1 text-sm text-red-600 flex items-center">
+                <AlertCircle className="h-4 w-4 mr-1" />
+                {validationErrors.processingLocation}
+              </p>
+            )}
           </div>
 
           {/* GPS Coordinates */}
           <div className="bg-white rounded-lg shadow-sm p-4">
             <div className="flex items-center justify-between mb-2">
               <label className="block text-sm font-medium text-gray-700">
-                GPS Coordinates
+                GPS Coordinates <span className="text-red-500">*</span>
               </label>
               <button
                 type="button"
                 onClick={getCurrentLocation}
                 disabled={gpsLoading}
-                className="flex items-center space-x-1 text-blue-600 hover:text-blue-700 text-sm font-medium"
+                className="flex items-center space-x-1 text-blue-600 hover:text-blue-700 text-sm font-medium disabled:opacity-50"
               >
                 {gpsLoading ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -353,28 +459,56 @@ export default function ProcessorProcessPage() {
               </button>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <input
-                type="text"
-                name="latitude"
-                value={formData.latitude}
-                onChange={handleChange}
-                placeholder="Latitude"
-                className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
-              />
-              <input
-                type="text"
-                name="longitude"
-                value={formData.longitude}
-                onChange={handleChange}
-                placeholder="Longitude"
-                className="px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
-              />
+              <div>
+                <input
+                  type="text"
+                  name="latitude"
+                  value={formData.latitude}
+                  onChange={handleChange}
+                  placeholder="Latitude"
+                  className={`px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base w-full ${
+                    validationErrors.latitude
+                      ? 'border-red-500 bg-red-50'
+                      : 'border-gray-300'
+                  }`}
+                />
+                {validationErrors.latitude && (
+                  <p className="mt-1 text-sm text-red-600 flex items-center">
+                    <AlertCircle className="h-4 w-4 mr-1" />
+                    {validationErrors.latitude}
+                  </p>
+                )}
+              </div>
+              <div>
+                <input
+                  type="text"
+                  name="longitude"
+                  value={formData.longitude}
+                  onChange={handleChange}
+                  placeholder="Longitude"
+                  className={`px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base w-full ${
+                    validationErrors.longitude
+                      ? 'border-red-500 bg-red-50'
+                      : 'border-gray-300'
+                  }`}
+                />
+                {validationErrors.longitude && (
+                  <p className="mt-1 text-sm text-red-600 flex items-center">
+                    <AlertCircle className="h-4 w-4 mr-1" />
+                    {validationErrors.longitude}
+                  </p>
+                )}
+              </div>
             </div>
-            {formData.latitude && formData.longitude && (
+            {formData.latitude && formData.longitude && !validationErrors.latitude && !validationErrors.longitude ? (
               <div className="mt-2 flex items-center text-xs text-green-600">
                 <MapPin className="w-3 h-3 mr-1" />
                 Location captured
               </div>
+            ) : (
+              <p className="mt-2 text-xs text-gray-500">
+                Click "Get Location" button to automatically capture GPS coordinates
+              </p>
             )}
           </div>
 
@@ -393,9 +527,19 @@ export default function ProcessorProcessPage() {
                   onChange={handleChange}
                   step="0.01"
                   placeholder="0.00"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base ${
+                    validationErrors.inputQuantity
+                      ? 'border-red-500 bg-red-50'
+                      : 'border-gray-300'
+                  }`}
                   required
                 />
+                {validationErrors.inputQuantity && (
+                  <p className="mt-1 text-sm text-red-600 flex items-center">
+                    <AlertCircle className="h-4 w-4 mr-1" />
+                    {validationErrors.inputQuantity}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm text-gray-600 mb-1">
@@ -408,9 +552,19 @@ export default function ProcessorProcessPage() {
                   onChange={handleChange}
                   step="0.01"
                   placeholder="0.00"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
+                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base ${
+                    validationErrors.outputQuantity
+                      ? 'border-red-500 bg-red-50'
+                      : 'border-gray-300'
+                  }`}
                   required
                 />
+                {validationErrors.outputQuantity && (
+                  <p className="mt-1 text-sm text-red-600 flex items-center">
+                    <AlertCircle className="h-4 w-4 mr-1" />
+                    {validationErrors.outputQuantity}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm text-gray-600 mb-1">

@@ -9,41 +9,26 @@ import { useRouter } from "next/navigation";
 import BatchManagement from "../batch/BatchManagement";
 import BatchDetails from "../batch/BatchDetails";
 import {
-  TrendingUp,
-  TrendingDown,
   Package,
-  Truck,
-  DollarSign,
   Leaf,
   Plus,
-  Upload,
-  FileText,
-  BarChart3,
-  ArrowUpRight,
-  Search,
-  Layers,
-  Maximize2,
   MapPin,
   Sun,
   Droplets,
   Wind,
   CloudRain,
-  Factory,
-  Store,
-  CheckCircle,
+  ArrowUpRight,
   Activity,
+  CheckCircle,
+  Map,
 } from "lucide-react";
 import {
-  Area,
-  AreaChart,
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
+  PieChart,
+  Pie,
+  Cell,
   ResponsiveContainer,
+  Legend,
   Tooltip,
-  XAxis,
-  YAxis,
 } from "recharts";
 import ArcGISMap from "@/components/gis-map/testMap";
 
@@ -57,7 +42,6 @@ const FarmerDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [currentView, setCurrentView] = useState("dashboard");
   const [selectedBatchId, setSelectedBatchId] = useState(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
   const [showRecallModal, setShowRecallModal] = useState(false);
   const [selectedBatchForRecall, setSelectedBatchForRecall] = useState(null);
 
@@ -75,52 +59,6 @@ const FarmerDashboard = () => {
 
   const [currentLatitude, setCurrentLatitude] = useState(null);
   const [currentLongitude, setCurrentLongitude] = useState(null);
-
-  // Mock data for charts
-  const batchTrendsData = [
-    { month: "Jan", batches: 12 },
-    { month: "Feb", batches: 14 },
-    { month: "Mar", batches: 16 },
-    { month: "Apr", batches: 19 },
-    { month: "May", batches: 17 },
-    { month: "Jun", batches: 21 },
-  ];
-
-  const shipmentStatusData = [
-    { month: "Jan", delivered: 240, inTransit: 40, pending: 20 },
-    { month: "Feb", delivered: 280, inTransit: 50, pending: 30 },
-    { month: "Mar", delivered: 300, inTransit: 60, pending: 25 },
-    { month: "Apr", delivered: 260, inTransit: 45, pending: 30 },
-    { month: "May", delivered: 290, inTransit: 55, pending: 28 },
-    { month: "Jun", delivered: 310, inTransit: 65, pending: 22 },
-  ];
-
-  const recentTransactions = [
-    {
-      id: 1,
-      batch: "Wheat Batch #142",
-      amount: "+$12,450",
-      weight: "500 kg - US",
-      time: "2 hours ago",
-      type: "income",
-    },
-    {
-      id: 2,
-      batch: "Corn Shipment",
-      amount: "+$8,920",
-      weight: "850 kg - CA",
-      time: "5 hours ago",
-      type: "income",
-    },
-    {
-      id: 3,
-      batch: "Equipment Purchase",
-      amount: "-$3,200",
-      weight: "",
-      time: "1 day ago",
-      type: "expense",
-    },
-  ];
 
   // Optimized geolocation with timeout and fallback
   const getBrowserLocation = useCallback(() => {
@@ -171,7 +109,7 @@ const FarmerDashboard = () => {
       if (cached) {
         const { data, timestamp } = JSON.parse(cached);
         if (Date.now() - timestamp < CACHE_DURATION) {
-          setWeatherData((prev) => ({ ...data, loading: false }));
+          setWeatherData({ ...data, loading: false });
           return;
         }
       }
@@ -334,11 +272,6 @@ const FarmerDashboard = () => {
     setSelectedBatchId(null);
   }, []);
 
-  const handleBackToBatches = useCallback(() => {
-    setCurrentView("batches");
-    setSelectedBatchId(null);
-  }, []);
-
   const handleCreateBatch = useCallback(() => {
     router.push("/farmer/batch-registration");
   }, [router]);
@@ -360,6 +293,33 @@ const FarmerDashboard = () => {
     },
     [loadBatches]
   );
+
+  // Calculate batch status distribution for pie chart
+  const getStatusDistribution = useCallback(() => {
+    const statusCounts = batches.reduce((acc, batch) => {
+      const status = batch.status || "UNKNOWN";
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+
+    const statusColors = {
+      REGISTERED: "#22c55e",
+      PROCESSING: "#3b82f6",
+      PROCESSED: "#8b5cf6",
+      IN_TRANSIT: "#f59e0b",
+      DELIVERED: "#14b8a6",
+      SOLD: "#06b6d4",
+      RECALLED: "#ef4444",
+    };
+
+    return Object.entries(statusCounts).map(([status, count]) => ({
+      name: status.replace(/_/g, " "),
+      value: count,
+      color: statusColors[status] || "#6b7280",
+    }));
+  }, [batches]);
+
+  const statusData = getStatusDistribution();
 
   // Loading state
   if (loading && !dashboardData) {
@@ -395,515 +355,354 @@ const FarmerDashboard = () => {
 
   // Render Dashboard View (default)
   return (
-    <div className="space-y-6 p-6 bg-gray-50 min-h-screen">
+    <div className="space-y-6 p-6 bg-gray-50 dark:bg-gray-900 min-h-screen">
       {/* Welcome Banner with Gradient */}
-      <div className="bg-gradient-to-r from-green-600 to-green-500 rounded-xl shadow-lg p-8 text-white">
+      <div className="bg-gradient-to-r from-green-600 to-green-500 dark:from-green-700 dark:to-green-600 rounded-xl shadow-lg p-8 text-white">
         <h1 className="text-3xl font-bold mb-2 flex items-center gap-2">
           Welcome back, {dashboardData?.farmerInfo?.farmName || user?.username}!
         </h1>
-        <p className="text-green-50 text-lg">
+        <p className="text-green-50 dark:text-green-100 text-lg">
           Manage your crops and track your agricultural products through the
           supply chain.
         </p>
       </div>
 
       {/* Stats Cards with Icons */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 max-[431px]:grid-cols-2">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <div className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow">
           <div className="flex items-center justify-between mb-4">
             <div className="p-3 bg-blue-100 rounded-lg">
               <Package className="h-6 w-6 text-blue-600" />
             </div>
-            <div className="flex items-center text-green-600 text-sm font-medium">
-              <TrendingUp className="h-4 w-4 mr-1" />
-              +12%
-            </div>
-          </div>
-          <p className="text-gray-600 text-sm font-medium">
-            Total Active Batches
-          </p>
-          <p className="text-3xl font-bold text-gray-900 mt-1">
-            {dashboardData?.statistics?.totalBatches || "24"}
-          </p>
-          <p className="text-xs text-gray-500 mt-1">this month</p>
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 bg-orange-100 rounded-lg">
-              <Truck className="h-6 w-6 text-orange-600" />
-            </div>
-            <div className="flex items-center text-green-600 text-sm font-medium">
-              <TrendingUp className="h-4 w-4 mr-1" />
-              +8.2%
-            </div>
-          </div>
-          <p className="text-gray-600 text-sm font-medium">Current Shipments</p>
-          <p className="text-3xl font-bold text-gray-900 mt-1">328</p>
-          <p className="text-xs text-gray-500 mt-1">Active now</p>
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 bg-green-100 rounded-lg">
-              <DollarSign className="h-6 w-6 text-green-600" />
-            </div>
-            <div className="flex items-center text-green-600 text-sm font-medium">
-              <TrendingUp className="h-4 w-4 mr-1" />
-              +2.4%
-            </div>
-          </div>
-          <p className="text-gray-600 text-sm font-medium">
-            Average Farm Price
-          </p>
-          <p className="text-3xl font-bold text-gray-900 mt-1">$4.28/kg</p>
-          <p className="text-xs text-gray-500 mt-1">vs last week</p>
-        </div>
-
-        <div className="bg-white rounded-xl shadow-sm p-6 hover:shadow-md transition-shadow">
-          <div className="flex items-center justify-between mb-4">
-            <div className="p-3 bg-green-100 rounded-lg">
-              <Leaf className="h-6 w-6 text-green-600" />
-            </div>
-            <div className="flex items-center text-red-600 text-sm font-medium">
-              <TrendingDown className="h-4 w-4 mr-1" />
-              -3.1%
-            </div>
-          </div>
-          <p className="text-gray-600 text-sm font-medium">Crop Yield</p>
-          <p className="text-3xl font-bold text-gray-900 mt-1">8,542 kg</p>
-          <p className="text-xs text-gray-500 mt-1">this season</p>
-        </div>
-      </div>
-
-      {/* Charts Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 ">
-        {/* Batch Registration Trends */}
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <div className="flex items-center justify-between mb-6">
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">
-                Batch Registration Trends
-              </h3>
-              <p className="text-sm text-gray-500 mt-1">
-                Monthly batch creation and activity
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Total Batches
+              </p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                {dashboardData?.statistics?.totalBatches || batches.length || 0}
               </p>
             </div>
-            <div className="flex items-center text-green-600 text-sm font-medium">
-              <TrendingUp className="h-4 w-4 mr-1" />
-              +12% this month
-            </div>
           </div>
-          <ResponsiveContainer width="100%" height={250}>
-            <AreaChart data={batchTrendsData}>
-              <defs>
-                <linearGradient id="colorBatches" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" stroke="#9ca3af" />
-              <YAxis stroke="#9ca3af" />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "white",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "8px",
-                }}
-              />
-              <Area
-                type="monotone"
-                dataKey="batches"
-                stroke="#10b981"
-                strokeWidth={2}
-                fill="url(#colorBatches)"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
         </div>
 
-        {/* Shipment Status Overview */}
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <div className="flex items-center justify-between mb-6">
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:shadow-md transition-shadow">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
+              <Activity className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+            </div>
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">
-                Shipment Status Overview
-              </h3>
-              <p className="text-sm text-gray-500 mt-1">
-                Track your supply chain performance
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Active Batches
               </p>
-            </div>
-            <div className="text-orange-600 text-sm font-medium flex items-center">
-              <Package className="h-4 w-4 mr-1" />
-              328 active
+              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                {dashboardData?.statistics?.activeBatches ||
+                  batches.filter((b) =>
+                    ["REGISTERED", "PROCESSING", "IN_TRANSIT"].includes(
+                      b.status
+                    )
+                  ).length ||
+                  0}
+              </p>
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={shipmentStatusData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="month" stroke="#9ca3af" />
-              <YAxis stroke="#9ca3af" />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "white",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: "8px",
-                }}
-              />
-              <Legend />
-              <Bar dataKey="delivered" fill="#10b981" radius={[8, 8, 0, 0]} />
-              <Bar dataKey="inTransit" fill="#f59e0b" radius={[8, 8, 0, 0]} />
-              <Bar dataKey="pending" fill="#9ca3af" radius={[8, 8, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:shadow-md transition-shadow">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
+              <CheckCircle className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Completed
+              </p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                {dashboardData?.statistics?.completedBatches ||
+                  batches.filter((b) =>
+                    ["DELIVERED", "SOLD"].includes(b.status)
+                  ).length ||
+                  0}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 hover:shadow-md transition-shadow">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-gray-100 dark:bg-gray-700 rounded-lg">
+              <Map className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Farm Locations
+              </p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                {dashboardData?.statistics?.farmLocations || 1}
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Quick Actions */}
-      <div className="bg-white rounded-xl shadow-sm p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">
-          Quick Actions
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 max-[431px]:grid-cols-2">
-          <button
-            onClick={handleCreateBatch}
-            className="bg-green-600 hover:bg-green-700 text-white p-6 rounded-xl transition-all transform hover:scale-105 flex flex-col items-center justify-center space-y-3"
-          >
-            <Plus className="h-8 w-8" />
-            <div className="text-center">
-              <p className="font-semibold">Create New Batch</p>
-              <p className="text-xs text-green-100 mt-1">
-                Register a new crop batch
-              </p>
-            </div>
-          </button>
-
-          <button className="bg-blue-600 hover:bg-blue-700 text-white p-6 rounded-xl transition-all transform hover:scale-105 flex flex-col items-center justify-center space-y-3">
-            <Upload className="h-8 w-8" />
-            <div className="text-center">
-              <p className="font-semibold">Upload Documents</p>
-              <p className="text-xs text-blue-100 mt-1">
-                Add compliance certificates
-              </p>
-            </div>
-          </button>
-
-          <button className="bg-purple-600 hover:bg-purple-700 text-white p-6 rounded-xl transition-all transform hover:scale-105 flex flex-col items-center justify-center space-y-3">
-            <FileText className="h-8 w-8" />
-            <div className="text-center">
-              <p className="font-semibold">View Reports</p>
-              <p className="text-xs text-purple-100 mt-1">
-                Access detailed analytics
-              </p>
-            </div>
-          </button>
-
-          <button className="bg-orange-600 hover:bg-orange-700 text-white p-6 rounded-xl transition-all transform hover:scale-105 flex flex-col items-center justify-center space-y-3">
-            <BarChart3 className="h-8 w-8" />
-            <div className="text-center">
-              <p className="font-semibold">Track Shipments</p>
-              <p className="text-xs text-orange-100 mt-1">Monitor deliveries</p>
-            </div>
-          </button>
-        </div>
-      </div>
-
-      {/* Supply Chain Overview + Weather */}
+      {/* Charts + Quick Actions Row */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Supply Chain Overview - Takes 2 columns */}
-        <div className="lg:col-span-2 bg-white rounded-xl shadow-sm p-6">
-          <div className="mb-6">
-            <h3 className="text-lg font-semibold text-gray-900">
-              Supply Chain Overview
-            </h3>
-            <p className="text-sm text-gray-500 mt-1">
-              Track your products across the entire supply chain
-            </p>
-          </div>
-
-          <div className="grid grid-cols-5 max-[550px]:grid-cols-2 gap-4">
-            <div className="flex flex-col items-center space-y-3">
-              <div className="w-16 h-16 rounded-full bg-green-100 border-4 border-green-200 flex items-center justify-center">
-                <Activity className="h-8 w-8 text-green-600" />
-              </div>
-              <div className="text-center">
-                <p className="font-semibold text-gray-900">Farm</p>
-                <p className="text-sm text-gray-600">
-                  {dashboardData?.statistics?.totalBatches || "24"} Batches
-                </p>
-                <span className="inline-block px-2 py-1 text-xs bg-green-100 text-green-700 rounded-full mt-1">
-                  Active
-                </span>
-              </div>
-            </div>
-
-            <div className="flex flex-col items-center space-y-3">
-              <div className="w-16 h-16 rounded-full bg-blue-100 border-4 border-blue-200 flex items-center justify-center">
-                <Factory className="h-8 w-8 text-blue-600" />
-              </div>
-              <div className="text-center">
-                <p className="font-semibold text-gray-900">Processing</p>
-                <p className="text-sm text-gray-600">18 Units</p>
-                <span className="inline-block px-2 py-1 text-xs bg-blue-100 text-blue-700 rounded-full mt-1">
-                  Active
-                </span>
-              </div>
-            </div>
-
-            <div className="flex flex-col items-center space-y-3">
-              <div className="w-16 h-16 rounded-full bg-orange-100 border-4 border-orange-200 flex items-center justify-center">
-                <Truck className="h-8 w-8 text-orange-600" />
-              </div>
-              <div className="text-center">
-                <p className="font-semibold text-gray-900">Distribution</p>
-                <p className="text-sm text-gray-600">328 Shipments</p>
-                <span className="inline-block px-2 py-1 text-xs bg-orange-100 text-orange-700 rounded-full mt-1">
-                  Active
-                </span>
-              </div>
-            </div>
-
-            <div className="flex flex-col items-center space-y-3">
-              <div className="w-16 h-16 rounded-full bg-purple-100 border-4 border-purple-200 flex items-center justify-center">
-                <Store className="h-8 w-8 text-purple-600" />
-              </div>
-              <div className="text-center">
-                <p className="font-semibold text-gray-900">Retail</p>
-                <p className="text-sm text-gray-600">156 Stores</p>
-                <span className="inline-block px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded-full mt-1">
-                  Active
-                </span>
-              </div>
-            </div>
-
-            <div className="flex flex-col items-center space-y-3">
-              <div className="w-16 h-16 rounded-full bg-teal-100 border-4 border-teal-200 flex items-center justify-center">
-                <CheckCircle className="h-8 w-8 text-teal-600" />
-              </div>
-              <div className="text-center">
-                <p className="font-semibold text-gray-900">Delivered</p>
-                <p className="text-sm text-gray-600">892 Orders</p>
-                <span className="inline-block px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded-full mt-1">
-                  Complete
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Weather Conditions */}
-        <div className="bg-gradient-to-r from-green-600 to-green-500 rounded-xl shadow-lg p-8 text-white">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-semibold">Weather Conditions</h3>
-            <Sun className="h-6 w-6" />
-          </div>
-
-          {weatherData.loading ? (
-            <div className="flex items-center justify-center h-48">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
-            </div>
-          ) : weatherData.error ? (
-            <div className="text-center py-8">
-              <CloudRain className="h-12 w-12 mx-auto mb-4 opacity-50" />
-              <p className="text-blue-100">Weather data unavailable</p>
-              <button
-                onClick={() =>
-                  fetchWeatherData(currentLatitude, currentLongitude)
-                }
-                className="mt-4 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm transition-colors"
-              >
-                Retry
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="mb-6">
-                <div className="text-5xl font-bold mb-2">
-                  {weatherData.temperature}
-                </div>
-                <div className="flex items-center text-blue-100">
-                  <MapPin className="h-4 w-4 mr-1" />
-                  <span>{weatherData.location}</span>
-                </div>
-              </div>
-
-              <div className="space-y-3 mb-6">
-                <div className="flex items-center justify-between py-2 border-b border-blue-400">
-                  <div className="flex items-center">
-                    <Droplets className="h-5 w-5 mr-2" />
-                    <span>Humidity</span>
-                  </div>
-                  <span className="font-semibold">{weatherData.humidity}</span>
-                </div>
-
-                <div className="flex items-center justify-between py-2 border-b border-blue-400">
-                  <div className="flex items-center">
-                    <Wind className="h-5 w-5 mr-2" />
-                    <span>Wind Speed</span>
-                  </div>
-                  <span className="font-semibold">{weatherData.windSpeed}</span>
-                </div>
-
-                {/* <div className="flex items-center justify-between py-2">
-              <div className="flex items-center">
-                <CloudRain className="h-5 w-5 mr-2" />
-                <span>Precipitation</span>
-              </div>
-              <span className="font-semibold">{weatherData.precipitation}</span>
-            </div> */}
-              </div>
-
-              <div>
-                <p className="text-sm text-blue-100 mb-3">5-Day Forecast</p>
-                <div className="grid grid-cols-5 gap-2">
-                  {weatherData.forecast.map((day, index) => (
-                    <div key={index} className="text-center">
-                      <p className="text-xs mb-1">{day.day}</p>
-                      <Sun className="h-5 w-5 mx-auto mb-1" />
-                      <p className="text-sm font-semibold">{day.temp}</p>
-                      <p className="text-xs">{day.description}</p>
-                    </div>
+        {/* Batch Status Chart */}
+        <div className="lg:col-span-2 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+            Batch Status Distribution
+          </h3>
+          {statusData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={280}>
+              <PieChart>
+                <Pie
+                  data={statusData}
+                  cx="50%"
+                  cy="45%"
+                  innerRadius={50}
+                  outerRadius={80}
+                  paddingAngle={2}
+                  dataKey="value"
+                >
+                  {statusData.map((entry, index) => (
+                    <Cell key={`cell-${index}`} fill={entry.color} />
                   ))}
-                </div>
+                </Pie>
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "white",
+                    border: "1px solid #e5e7eb",
+                    borderRadius: "8px",
+                  }}
+                  formatter={(value, name) => [`${value} batches`, name]}
+                />
+                <Legend
+                  layout="horizontal"
+                  verticalAlign="bottom"
+                  align="center"
+                  wrapperStyle={{ paddingTop: "20px" }}
+                />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex items-center justify-center h-64 text-gray-500 dark:text-gray-400">
+              <div className="text-center">
+                <Package className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                <p>No batch data available</p>
               </div>
-            </>
+            </div>
           )}
         </div>
-      </div>
 
-      {/* GIS Map + Recent Transactions */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* GIS Map Overview - Takes 2 columns */}
-        <div className="lg:col-span-2 bg-white rounded-xl shadow-sm p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-lg font-semibold text-gray-900">
-                GIS Map Overview
-              </h3>
-              <p className="text-sm text-gray-500 mt-1">
-                Real-time farm and shipment tracking
-              </p>
-            </div>
-            <div className="flex items-center space-x-2">
-              <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-                <Search className="h-5 w-5 text-gray-400" />
+        {/* Quick Actions + Farm Info */}
+        <div className="space-y-4">
+          {/* Quick Actions */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+              Quick Actions
+            </h3>
+            <div className="space-y-3">
+              <button
+                onClick={handleCreateBatch}
+                className="w-full bg-green-600 hover:bg-green-700 text-white p-3 rounded-lg transition-colors flex items-center justify-center space-x-2"
+              >
+                <Plus className="h-5 w-5" />
+                <span className="font-medium">Create New Batch</span>
               </button>
-              <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-                <Layers className="h-5 w-5 text-gray-400" />
-              </button>
-              <button className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
-                <Maximize2 className="h-5 w-5 text-gray-400" />
+              <button
+                onClick={() => setCurrentView("batches")}
+                className="w-full bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100 p-3 rounded-lg transition-colors flex items-center justify-center space-x-2"
+              >
+                <Package className="h-5 w-5" />
+                <span className="font-medium">View All Batches</span>
               </button>
             </div>
           </div>
 
-          <div className="relative">
-            <div
-              className="h-80 rounded-xl mb-4 overflow-hidden cursor-pointer"
-              onClick={() => router.push("/gis")}
-            >
-              <ArcGISMap
-                webMapId={
-                  process.env.NEXT_PUBLIC_ARCGIS_TOKEN_ID_WEBMAP ||
-                  "a24b5bc059d2478e843f4c1968e47860"
-                }
-                dragable={false}
-                height="70vh"
-                zoom={5}
-                weatherwidget={false}
-              />
-            </div>
-
-            <div className="flex items-center space-x-6 text-sm">
-              <div className="flex items-center space-x-2">
-                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-                <span className="text-gray-600">Active Farms (12)</span>
+          {/* Farm Info */}
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+              Farm Information
+            </h3>
+            <div className="space-y-3">
+              <div className="flex items-center space-x-3">
+                <Leaf className="h-5 w-5 text-green-600 dark:text-green-400" />
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Farm Name
+                  </p>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                    {dashboardData?.farmerInfo?.farmName ||
+                      user?.username ||
+                      "My Farm"}
+                  </p>
+                </div>
               </div>
-              <div className="flex items-center space-x-2">
-                <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
-                <span className="text-gray-600">In Transit (8)</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
-                <span className="text-gray-600">Warehouses (4)</span>
-              </div>
+              {dashboardData?.farmerInfo?.farmSize && (
+                <div className="flex items-center space-x-3">
+                  <Map className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Farm Size
+                    </p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {dashboardData.farmerInfo.farmSize} hectares
+                    </p>
+                  </div>
+                </div>
+              )}
+              {dashboardData?.farmerInfo?.primaryCrops && (
+                <div className="flex items-center space-x-3">
+                  <Package className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Primary Crops
+                    </p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {dashboardData.farmerInfo.primaryCrops}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Recent Transactions */}
-        <div className="bg-white rounded-xl shadow-sm p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">
-              Recent Transactions
-            </h3>
-            <button className="text-sm text-green-600 hover:text-green-700 font-medium flex items-center">
-              View All
-              <ArrowUpRight className="h-4 w-4 ml-1" />
+      {/* Weather Card */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+            Weather Conditions
+          </h3>
+          <Sun className="h-5 w-5 text-yellow-500" />
+        </div>
+
+        {weatherData.loading ? (
+          <div className="flex items-center justify-center h-32">
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-green-500"></div>
+          </div>
+        ) : weatherData.error ? (
+          <div className="text-center py-6">
+            <CloudRain className="h-10 w-10 mx-auto mb-3 text-gray-400" />
+            <p className="text-gray-500 dark:text-gray-400 text-sm">
+              Weather data unavailable
+            </p>
+            <button
+              onClick={() =>
+                fetchWeatherData(currentLatitude, currentLongitude)
+              }
+              className="mt-3 px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg text-sm transition-colors"
+            >
+              Retry
             </button>
           </div>
-
-          <div className="space-y-4">
-            {recentTransactions.map((transaction) => (
-              <div
-                key={transaction.id}
-                className="flex items-start space-x-3 p-3 hover:bg-gray-50 rounded-lg transition-colors"
-              >
-                <div
-                  className={`p-2 rounded-lg ${
-                    transaction.type === "income"
-                      ? "bg-green-100"
-                      : "bg-red-100"
-                  }`}
-                >
-                  <ArrowUpRight
-                    className={`h-5 w-5 ${
-                      transaction.type === "income"
-                        ? "text-green-600"
-                        : "text-red-600 rotate-180"
-                    }`}
-                  />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">
-                    {transaction.batch}
-                  </p>
-                  <p className="text-xs text-gray-500">{transaction.weight}</p>
-                  <p className="text-xs text-gray-400 mt-1">
-                    {transaction.time}
-                  </p>
-                </div>
-                <div
-                  className={`text-sm font-bold ${
-                    transaction.type === "income"
-                      ? "text-green-600"
-                      : "text-red-600"
-                  }`}
-                >
-                  {transaction.amount}
-                </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {/* Current Weather */}
+            <div className="md:col-span-1">
+              <div className="text-4xl font-bold text-gray-900 dark:text-gray-100">
+                {weatherData.temperature}
               </div>
-            ))}
+              <div className="flex items-center text-gray-500 dark:text-gray-400 text-sm mt-1">
+                <MapPin className="h-4 w-4 mr-1" />
+                <span>{weatherData.location}</span>
+              </div>
+            </div>
+
+            {/* Humidity & Wind */}
+            <div className="md:col-span-1 flex flex-col gap-2">
+              <div className="bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg">
+                <div className="flex items-center text-gray-500 dark:text-gray-400 text-xs mb-1">
+                  <Droplets className="h-4 w-4 mr-1" />
+                  Humidity
+                </div>
+                <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  {weatherData.humidity}
+                </p>
+              </div>
+              <div className="bg-gray-50 dark:bg-gray-700/50 p-3 rounded-lg">
+                <div className="flex items-center text-gray-500 dark:text-gray-400 text-xs mb-1">
+                  <Wind className="h-4 w-4 mr-1" />
+                  Wind
+                </div>
+                <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                  {weatherData.windSpeed}
+                </p>
+              </div>
+            </div>
+
+            {/* 5-Day Forecast */}
+            <div className="md:col-span-2">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                5-Day Forecast
+              </p>
+              <div className="grid grid-cols-5 gap-2">
+                {weatherData.forecast.map((day, index) => (
+                  <div
+                    key={index}
+                    className="text-center p-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg"
+                  >
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {day.day}
+                    </p>
+                    <Sun className="h-4 w-4 mx-auto my-1 text-yellow-500" />
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                      {day.temp}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
+        )}
+      </div>
+
+      {/* GIS Map Overview - Full Width */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+              GIS Map Overview
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Real-time farm and shipment tracking - Click to view full map
+            </p>
+          </div>
+          <Map className="h-5 w-5 text-gray-400" />
+        </div>
+
+        <div
+          className="h-80 rounded-lg overflow-hidden cursor-pointer hover:opacity-95 transition-opacity"
+          onClick={() => router.push("/gis")}
+        >
+          <ArcGISMap
+            webMapId={
+              process.env.NEXT_PUBLIC_ARCGIS_TOKEN_ID_WEBMAP ||
+              "a24b5bc059d2478e843f4c1968e47860"
+            }
+            dragable={false}
+            height="100%"
+            zoom={5}
+            weatherwidget={false}
+          />
         </div>
       </div>
 
       {/* Recent Batches Section */}
       {batches.length > 0 && (
-        <div className="bg-white rounded-xl shadow-sm">
-          <div className="px-6 py-4 border-b border-gray-200">
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+          <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                 Recent Batches
               </h2>
               <div className="flex items-center space-x-4">
-                <span className="text-sm text-gray-500">
+                <span className="text-sm text-gray-500 dark:text-gray-400">
                   {batches.length} total batches
                 </span>
                 <button
                   onClick={() => setCurrentView("batches")}
-                  className="text-sm text-green-600 hover:text-green-700 font-medium flex items-center"
+                  className="text-sm text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300 font-medium flex items-center"
                 >
                   View All
                   <ArrowUpRight className="h-4 w-4 ml-1" />
@@ -936,20 +735,20 @@ const FarmerDashboard = () => {
 
       {/* No batches state */}
       {batches.length === 0 && !loading && (
-        <div className="bg-white rounded-xl shadow-sm p-12 text-center">
-          <div className="mx-auto h-16 w-16 text-gray-400 mb-4">
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-12 text-center">
+          <div className="mx-auto h-16 w-16 text-gray-400 dark:text-gray-600 mb-4">
             <Package className="h-full w-full" />
           </div>
-          <h3 className="text-xl font-semibold text-gray-900 mb-2">
+          <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">
             No Batches Yet
           </h3>
-          <p className="text-gray-600 mb-6 max-w-md mx-auto">
+          <p className="text-gray-600 dark:text-gray-400 mb-6 max-w-md mx-auto">
             Start by creating your first agricultural batch to track through the
             supply chain.
           </p>
           <button
             onClick={handleCreateBatch}
-            className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-xl font-medium transition-colors inline-flex items-center space-x-2"
+            className="bg-green-600 hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700 text-white px-8 py-3 rounded-xl font-medium transition-colors inline-flex items-center space-x-2"
           >
             <Plus className="h-5 w-5" />
             <span>Create Your First Batch</span>

@@ -68,7 +68,7 @@ public/uploads/
 */public/uploads/
 
 # Prisma
-prisma/migrations/*/migration.sql
+
 
 # React build
 frontend/*/build/

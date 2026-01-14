@@ -2525,6 +2525,179 @@ app.get("/api/verify/:batchId", async (req, res) => {
       };
     }
 
+    // ========== FETCH BLOCKCHAIN PRICING DATA EARLY ==========
+    let blockchainPricing = {};
+    if (dbBatch) {
+      try {
+        const { gateway: pricingGateway, contract: pricingContract } = await blockchainService.connectToNetwork();
+        const pricingResult = await pricingContract.evaluateTransaction('getPricingHistory', batchId);
+        const pricingData = JSON.parse(pricingResult.toString());
+        await pricingGateway.disconnect();
+
+        // Map pricing by level for easy lookup
+        if (pricingData.pricingHistory && Array.isArray(pricingData.pricingHistory)) {
+          pricingData.pricingHistory.forEach(priceRecord => {
+            blockchainPricing[priceRecord.level] = {
+              pricePerUnit: parseFloat(priceRecord.pricePerUnit),
+              totalValue: parseFloat(priceRecord.totalValue),
+              currency: priceRecord.currency || 'MYR',
+              breakdown: priceRecord.breakdown || {}
+            };
+          });
+          console.log('💰 Blockchain Pricing Loaded:', Object.keys(blockchainPricing));
+        }
+      } catch (pricingError) {
+        console.log('⚠️ Could not fetch blockchain pricing:', pricingError.message);
+        // Continue without pricing data
+      }
+    }
+    // ========== END FETCH BLOCKCHAIN PRICING ==========
+
+    // Get ownership transfer history from BatchTransfer
+    let ownershipHistory = [];
+    console.log('🔍 Starting ownership history lookup for batch:', dbBatch?.batchId, 'UUID:', dbBatch?.id, 'Status:', dbBatch?.status);
+
+    if (dbBatch) {
+      try {
+        // Try both batchId (string) and id (UUID) to be safe
+        const transfers = await prisma.batchTransfer.findMany({
+          where: {
+            OR: [
+              { batchId: dbBatch.id },
+              { batchId: dbBatch.batchId }
+            ]
+          },
+          orderBy: { transferDate: 'asc' }
+        });
+
+        console.log('📦 Batch Transfers Found:', transfers.length, 'for batch:', dbBatch.batchId);
+        if (transfers.length > 0) {
+          console.log('📦 Transfer Details:', JSON.stringify(transfers, null, 2));
+        }
+
+        // Get transactions for pricing (Transaction.batchId is a foreign key to Batch.id, so use UUID only)
+        const transactions = await prisma.transaction.findMany({
+          where: {
+            batchId: dbBatch.id  // Must use UUID, not human-readable batchId
+          },
+          orderBy: { id: 'asc' }
+        });
+
+        console.log('💰 Transactions Found:', transactions.length);
+        if (transactions.length > 0) {
+          console.log('💰 Transaction Details:', JSON.stringify(transactions.map(t => ({
+            id: t.id,
+            fromPartyId: t.fromPartyId,
+            toPartyId: t.toPartyId,
+            totalAmount: t.totalAmount
+          })), null, 2));
+        }
+
+        // Helper function to get actor name
+        const getActorName = async (actorId, role) => {
+          try {
+            if (role === 'FARMER') {
+              const farmer = await prisma.farmerProfile.findUnique({
+                where: { id: actorId },
+                select: { farmName: true }
+              });
+              return farmer?.farmName || 'Farmer';
+            } else if (role === 'PROCESSOR') {
+              const processor = await prisma.processorProfile.findUnique({
+                where: { id: actorId },
+                select: { facilityName: true }
+              });
+              return processor?.facilityName || 'Processor';
+            } else if (role === 'DISTRIBUTOR') {
+              const distributor = await prisma.distributorProfile.findUnique({
+                where: { id: actorId },
+                select: { companyName: true }
+              });
+              return distributor?.companyName || 'Distributor';
+            } else if (role === 'RETAILER') {
+              const retailer = await prisma.retailerProfile.findUnique({
+                where: { id: actorId },
+                select: { storeName: true }
+              });
+              return retailer?.storeName || 'Retailer';
+            }
+          } catch (e) {
+            console.log('Error getting actor name:', e.message);
+          }
+          return 'Unknown';
+        };
+
+        // Build ownership history with actor names and prices
+        ownershipHistory = await Promise.all(
+          transfers.map(async (transfer) => {
+            const fromName = await getActorName(transfer.fromActorId, transfer.fromActorRole);
+            const toName = await getActorName(transfer.toActorId, transfer.toActorRole);
+
+            // Find matching transaction for pricing
+            const matchingTx = transactions.find(tx =>
+              tx.fromPartyId === transfer.fromActorId &&
+              tx.toPartyId === transfer.toActorId
+            );
+
+            // Get pricing from blockchain based on the recipient's role
+            const rolePricing = blockchainPricing[transfer.toRole] || {};
+            const blockchainPrice = rolePricing.pricePerUnit;
+
+            // Prefer blockchain pricing, fall back to transaction pricing
+            const pricePerUnit = blockchainPrice || (matchingTx ? matchingTx.totalAmount / dbBatch.quantity : null);
+
+            return {
+              from: fromName,
+              to: toName,
+              fromRole: transfer.fromActorRole,
+              toRole: transfer.toActorRole,
+              transferDate: transfer.transferDate,
+              timestamp: transfer.transferDate,
+              location: transfer.transferLocation,
+              quantity: dbBatch.quantity, // BatchTransfer doesn't have quantity, use batch quantity
+              pricePerUnit: pricePerUnit,
+              totalValue: pricePerUnit ? pricePerUnit * dbBatch.quantity : matchingTx?.totalAmount,
+              notes: transfer.notes,
+              status: transfer.status
+            };
+          })
+        );
+
+        console.log('📊 Ownership History Built:', ownershipHistory.length, 'entries');
+        if (ownershipHistory.length > 0) {
+          console.log('📊 Ownership History Details:', JSON.stringify(ownershipHistory, null, 2));
+        }
+
+        // If no transfer history found but batch is SOLD/DELIVERED/IN_RETAIL, create synthetic history
+        if (ownershipHistory.length === 0 && (dbBatch.status === 'SOLD' || dbBatch.status === 'DELIVERED' || dbBatch.status === 'IN_RETAIL')) {
+          console.log('⚠️ No transfer history found for', dbBatch.status, 'batch, creating synthetic history');
+
+          // Create a synthetic sale record
+          ownershipHistory.push({
+            from: dbBatch.farmer?.farmName || 'Farmer',
+            to: 'Customer',
+            fromRole: 'FARMER',
+            toRole: 'RETAILER',
+            transferDate: dbBatch.updatedAt,
+            timestamp: dbBatch.updatedAt,
+            location: 'Market',
+            quantity: dbBatch.quantity,
+            pricePerUnit: dbBatch.pricePerUnit,
+            totalValue: dbBatch.pricePerUnit * dbBatch.quantity,
+            notes: `Direct sale - Status: ${dbBatch.status}`,
+            status: 'COMPLETED'
+          });
+
+          console.log('📊 Synthetic Ownership History created:', JSON.stringify(ownershipHistory, null, 2));
+        }
+      } catch (err) {
+        console.error('❌ BatchTransfer table error:', err);
+        console.error('❌ Error stack:', err.stack);
+      }
+    } else {
+      console.log('⚠️ dbBatch is null, cannot retrieve ownership history');
+    }
+
     // Get batch lineage (parent/child relationships)
     let lineageInfo = null;
     if (dbBatch) {
@@ -2578,16 +2751,37 @@ app.get("/api/verify/:batchId", async (req, res) => {
       verificationTime: new Date().toISOString(),
 
       // Basic batch info (public)
-      batchInfo: {
-        productType: dbBatch?.productType || blockchainVerification?.crop,
-        quantity: dbBatch?.quantity || blockchainVerification?.quantity,
-        harvestDate:
-          dbBatch?.harvestDate || blockchainVerification?.createdDate,
-        status: dbBatch?.status || blockchainVerification?.status,
-        farmer:
-          dbBatch?.farmer?.user?.username || blockchainVerification?.farmer,
-        location:
-          dbBatch?.farmLocation?.farmName || blockchainVerification?.location,
+      batchInfo: dbBatch ? {
+        productType: dbBatch.productType,
+        quantity: dbBatch.quantity,
+        unit: dbBatch.unit || 'kg',
+        harvestDate: dbBatch.harvestDate,
+        status: dbBatch.status,
+        pricePerUnit: dbBatch.pricePerUnit,
+        currency: 'MYR',
+        farmer: {
+          farmName: dbBatch.farmer?.farmName,
+          user: dbBatch.farmer?.user,
+          bio: dbBatch.farmer?.bio,
+        },
+        farmLocation: dbBatch.farmLocation,
+        location: dbBatch.farmLocation?.location || dbBatch.farmLocation?.farmName,
+        certifications: dbBatch.certifications,
+        notes: dbBatch.notes,
+        // Additional fields
+        crop: dbBatch.productType,
+        variety: dbBatch.variety,
+        cropType: dbBatch.cropType,
+        qualityGrade: dbBatch.qualityGrade,
+        moistureContent: dbBatch.moistureContent,
+        proteinContent: dbBatch.proteinContent,
+      } : {
+        productType: blockchainVerification?.crop,
+        quantity: blockchainVerification?.quantity,
+        harvestDate: blockchainVerification?.createdDate,
+        status: blockchainVerification?.status,
+        farmer: blockchainVerification?.farmer,
+        location: blockchainVerification?.location,
       },
 
       // Verification details
@@ -2616,6 +2810,83 @@ app.get("/api/verify/:batchId", async (req, res) => {
               ...(dbBatch.status === "DELIVERED" ? ["DELIVERY"] : []),
             ],
             currentStage: dbBatch.status,
+
+            // Processing stages with details
+            processingStages: dbBatch.processingRecords?.map(record => {
+              // Get pricing from blockchain if available
+              const processorPricing = blockchainPricing['PROCESSOR'] || {};
+              return {
+                processor: record.processor?.user?.username || 'Processor',
+                processorName: record.processor?.facilityName || 'Processing Facility',
+                facility: record.processor?.facilityName,
+                location: record.processor?.location,
+                timestamp: record.processingDate,
+                date: record.processingDate,
+                inputQuantity: record.inputQuantity,
+                outputQuantity: record.outputQuantity,
+                quantity: record.outputQuantity,
+                unit: dbBatch.unit,
+                pricePerUnit: processorPricing.pricePerUnit || dbBatch.pricePerUnit,
+                currency: processorPricing.currency || 'MYR',
+                notes: record.notes || `Processed: ${record.inputQuantity} ${dbBatch.unit} → ${record.outputQuantity} ${dbBatch.unit}`,
+              };
+            }) || [],
+
+            // Distribution/Transfer stages from ownership history (ONLY DISTRIBUTOR)
+            distributionStages: (() => {
+              const stages = ownershipHistory
+                .filter(transfer => transfer.toRole === 'DISTRIBUTOR')
+                .map((transfer, idx) => {
+                  // Get pricing from blockchain based on the role
+                  const rolePricing = blockchainPricing[transfer.toRole] || {};
+
+                  return {
+                    distributor: transfer.to,
+                    distributorName: transfer.to,
+                    warehouse: transfer.location || 'Distribution Center',
+                    location: transfer.location,
+                    timestamp: transfer.transferDate,
+                    date: transfer.transferDate,
+                    quantity: transfer.quantity,
+                    unit: dbBatch.unit,
+                    pricePerUnit: rolePricing.pricePerUnit || transfer.pricePerUnit || null,
+                    currency: rolePricing.currency || 'MYR',
+                    notes: transfer.notes || `Transferred to ${transfer.to}`,
+                  };
+                });
+              console.log('🚚 Distribution Stages:', stages.length, stages);
+              return stages;
+            })(),
+
+            // Retail stages from ownership history (ONLY RETAILER)
+            retailStages: (() => {
+              const stages = ownershipHistory
+                .filter(transfer => transfer.toRole === 'RETAILER')
+                .map((transfer, idx) => {
+                  // Get pricing from blockchain based on the role
+                  const rolePricing = blockchainPricing[transfer.toRole] || {};
+
+                  return {
+                    retailer: transfer.to,
+                    retailerName: transfer.to,
+                    store: transfer.location || 'Retail Store',
+                    location: transfer.location,
+                    timestamp: transfer.transferDate,
+                    date: transfer.transferDate,
+                    quantity: transfer.quantity,
+                    unit: dbBatch.unit,
+                    pricePerUnit: rolePricing.pricePerUnit || transfer.pricePerUnit || null,
+                    currency: rolePricing.currency || 'MYR',
+                    notes: transfer.notes || `Transferred to ${transfer.to}`,
+                  };
+                });
+              console.log('🏪 Retail Stages:', stages.length, stages);
+              return stages;
+            })(),
+
+            // Full ownership history
+            ownershipHistory: ownershipHistory,
+
             qualityAssurance: {
               testsPerformed: dbBatch.qualityTests?.length || 0,
               latestTest: dbBatch.qualityTests?.[0]
@@ -2623,6 +2894,8 @@ app.get("/api/verify/:batchId", async (req, res) => {
                     testType: dbBatch.qualityTests[0].testType,
                     result: dbBatch.qualityTests[0].passFailStatus,
                     date: dbBatch.qualityTests[0].testDate,
+                    inspector: 'Quality Inspector',
+                    facility: 'Quality Lab',
                   }
                 : null,
             },
@@ -2634,6 +2907,15 @@ app.get("/api/verify/:batchId", async (req, res) => {
 
       message: "Batch verified successfully",
     };
+
+    console.log('✅ Verification Response Summary:', {
+      batchId: verificationResponse.batchId,
+      batchStatus: dbBatch?.status,
+      hasOwnershipHistory: verificationResponse.supplyChainSummary?.ownershipHistory?.length || 0,
+      processingStages: verificationResponse.supplyChainSummary?.processingStages?.length || 0,
+      distributionStages: verificationResponse.supplyChainSummary?.distributionStages?.length || 0,
+      ownershipHistoryData: verificationResponse.supplyChainSummary?.ownershipHistory,
+    });
 
     res.json(verificationResponse);
   } catch (error) {
@@ -5386,6 +5668,35 @@ app.post(
         });
       }
 
+      // ========== HASH PROCESSING DATA FOR INTEGRITY ==========
+      // Prepare critical processing data for cryptographic hashing
+      const processingDataForHash = {
+        batchId: batch.batchId, // Use string ID, not database ID
+        processorId: processorProfile.id,
+        facilityId: facility.id,
+        processingType: processType || "initial_processing",
+        inputQuantity: inputQuantity
+          ? parseFloat(inputQuantity)
+          : batch.quantity,
+        outputQuantity: outputQuantity
+          ? parseFloat(outputQuantity)
+          : batch.quantity,
+        wasteQuantity: wasteQuantity ? parseFloat(wasteQuantity) : null,
+        processingTime: processingTime ? parseInt(processingTime) : null,
+        energyUsage: energyUsage ? parseFloat(energyUsage) : null,
+        waterUsage: waterUsage ? parseFloat(waterUsage) : null,
+        operatorName: req.user.username,
+        processingLocation: processingLocation || null,
+        timestamp: new Date().toISOString(),
+      };
+
+      // Generate SHA-256 hash for data integrity verification
+      const processingHash = crypto
+        .createHash("sha256")
+        .update(JSON.stringify(processingDataForHash))
+        .digest("hex");
+      // ========== END HASH CALCULATION ==========
+
       // Create processing record with location tracking
       const processingRecord = await prisma.processingRecord.create({
         data: {
@@ -5417,6 +5728,7 @@ app.post(
             : null,
           weather_main: additionalData.weather_main || null,
           weather_desc: additionalData.weather_description || null,
+          blockchainHash: processingHash, // ← INTEGRITY HASH
         },
       });
 
@@ -6467,6 +6779,31 @@ app.post(
 
       const transferRecord = JSON.parse(result.toString());
 
+      // ========== HASH OWNERSHIP TRANSFER DATA FOR INTEGRITY ==========
+      // Prepare critical ownership transfer data for cryptographic hashing
+      const ownershipDataForHash = {
+        batchId: batchId, // Use string batchId
+        fromActorId: fromActorId,
+        fromActorRole: fromActorRole,
+        toActorId: toActorId,
+        toActorRole: toActorRole,
+        transferType: "OWNERSHIP_TRANSFER",
+        transferLocation: transferLocation || null,
+        latitude: latitude || null,
+        longitude: longitude || null,
+        signature: signature || null,
+        statusBefore: batch.status || "REGISTERED",
+        statusAfter: transferRecord.statusAfter || batch.status,
+        timestamp: new Date().toISOString(),
+      };
+
+      // Generate SHA-256 hash for data integrity verification
+      const ownershipHash = crypto
+        .createHash("sha256")
+        .update(JSON.stringify(ownershipDataForHash))
+        .digest("hex");
+      // ========== END HASH CALCULATION ==========
+
       // Store in database
       const dbTransfer = await prisma.batchTransfer.create({
         data: {
@@ -6487,7 +6824,7 @@ app.post(
           statusBefore: batch.status || "REGISTERED",
           statusAfter: transferRecord.statusAfter || batch.status,
           blockchainTxId: transferRecord.txId || null,
-          blockchainHash: null, // You can add hash calculation if needed
+          blockchainHash: ownershipHash, // ← INTEGRITY HASH
         },
       });
 
@@ -6615,6 +6952,37 @@ app.post(
 
       const transportRecord = JSON.parse(result.toString());
 
+      // ========== HASH TRANSPORT DATA FOR INTEGRITY ==========
+      // Prepare critical transport data for cryptographic hashing
+      const transportDataForHash = {
+        batchId: batchId, // Use string batchId
+        origin: origin || null,
+        destination: destination || null,
+        carrier: carrier || null,
+        vehicleType: vehicleType || null,
+        vehicleId: vehicleId || null,
+        driverName: driverName || null,
+        departureTime: departureTime || null,
+        estimatedArrival: estimatedArrival || null,
+        transportCost: transportCost ? parseFloat(transportCost) : null,
+        currency: currency || "MYR",
+        fuelCost: fuelCost ? parseFloat(fuelCost) : null,
+        tollFees: tollFees ? parseFloat(tollFees) : null,
+        waybillNumber: waybillNumber || null,
+        originLat: originCoordinates?.latitude || null,
+        originLng: originCoordinates?.longitude || null,
+        destinationLat: destinationCoordinates?.latitude || null,
+        destinationLng: destinationCoordinates?.longitude || null,
+        timestamp: new Date().toISOString(),
+      };
+
+      // Generate SHA-256 hash for data integrity verification
+      const transportHash = crypto
+        .createHash("sha256")
+        .update(JSON.stringify(transportDataForHash))
+        .digest("hex");
+      // ========== END HASH CALCULATION ==========
+
       // Store in database (TransportRoute table)
       const dbTransport = await prisma.transportRoute.create({
         data: {
@@ -6629,7 +6997,7 @@ app.post(
           estimatedTime: estimatedArrival ? new Date(estimatedArrival) : null,
           transportCost: transportCost ? parseFloat(transportCost) : null,
           status: updateStatus ? "IN_TRANSIT" : "PLANNED",
-          blockchainHash: transportRecord.txId || null,
+          blockchainHash: transportHash, // ← INTEGRITY HASH (changed from txId)
         },
       });
 
@@ -7648,6 +8016,42 @@ app.post(
         return JSON.parse(result.toString());
       });
 
+      // ========== HASH DISTRIBUTION DATA FOR INTEGRITY ==========
+      // Prepare critical distribution data for cryptographic hashing
+      const distributionDataForHash = {
+        batchId: batchId, // Use string batchId
+        distributorId: distributorId,
+        distributionType: distributionType || null,
+        warehouseLocation: warehouseLocation || null,
+        warehouseLat: warehouseCoordinates?.latitude || null,
+        warehouseLng: warehouseCoordinates?.longitude || null,
+        storageConditions: storageConditions || null,
+        temperatureControl: temperatureControl || null,
+        humidity: humidity ? parseFloat(humidity) : null,
+        quantityReceived: quantityReceived
+          ? parseFloat(quantityReceived)
+          : null,
+        quantityDistributed: quantityDistributed
+          ? parseFloat(quantityDistributed)
+          : null,
+        distributionCost: distributionCost
+          ? parseFloat(distributionCost)
+          : null,
+        storageCost: storageCost ? parseFloat(storageCost) : null,
+        handlingCost: handlingCost ? parseFloat(handlingCost) : null,
+        currency: currency || "MYR",
+        destinationType: destinationType || null,
+        destination: destination || null,
+        timestamp: new Date().toISOString(),
+      };
+
+      // Generate SHA-256 hash for data integrity verification
+      const distributionHash = crypto
+        .createHash("sha256")
+        .update(JSON.stringify(distributionDataForHash))
+        .digest("hex");
+      // ========== END HASH CALCULATION ==========
+
       // DATABASE: Store distribution record
       const dbDistribution = await prisma.distributionRecord.create({
         data: {
@@ -7684,12 +8088,62 @@ app.post(
           destinationType: destinationType || null,
           destination: destination || null,
           blockchainTxId: distributionRecord.txId || null,
-          blockchainHash: null,
+          blockchainHash: distributionHash, // ← INTEGRITY HASH
           temperature: temperature ? parseFloat(temperature) : null,
           weather_desc: weather_desc || null,
           weather_main: weather_main || null,
         },
       });
+
+      // ========== ADD PRICING RECORD TO BLOCKCHAIN ==========
+      // Calculate total cost and price per unit for distributor stage
+      const totalCost = (distributionCost ? parseFloat(distributionCost) : 0) +
+                       (storageCost ? parseFloat(storageCost) : 0) +
+                       (handlingCost ? parseFloat(handlingCost) : 0);
+
+      // Get previous price (from batch or calculate from costs)
+      let distributorPricePerUnit = 0;
+      let distributorTotalValue = 0;
+      const quantity = parseFloat(quantityReceived || batch.quantity);
+
+      if (totalCost > 0 && quantity > 0) {
+        // Get the current batch price (what they paid to receive it)
+        const currentBatchPrice = parseFloat(batch.pricePerUnit || 0);
+
+        // Calculate new price = previous price + (total costs / quantity)
+        distributorPricePerUnit = currentBatchPrice + (totalCost / quantity);
+        distributorTotalValue = distributorPricePerUnit * quantity;
+
+        // Add pricing record to blockchain
+        try {
+          const pricingData = {
+            level: "DISTRIBUTOR",
+            pricePerUnit: distributorPricePerUnit,
+            totalValue: distributorTotalValue,
+            breakdown: {
+              basePrice: currentBatchPrice,
+              distributionCost: distributionCost ? parseFloat(distributionCost) : 0,
+              storageCost: storageCost ? parseFloat(storageCost) : 0,
+              handlingCost: handlingCost ? parseFloat(handlingCost) : 0,
+            },
+            notes: notes || "Distribution pricing",
+          };
+
+          await retryOnMVCCConflict(async () => {
+            return await contract.submitTransaction(
+              "addPricingRecord",
+              batchId,
+              JSON.stringify(pricingData)
+            );
+          });
+
+          console.log(`💰 Pricing record added to blockchain for distributor - Price: MYR ${distributorPricePerUnit.toFixed(2)}/unit`);
+        } catch (pricingError) {
+          console.error("⚠️ Failed to add pricing record to blockchain:", pricingError.message);
+          // Don't fail the whole request if pricing fails
+        }
+      }
+      // ========== END PRICING RECORD ==========
 
       const distributionTime = dbDistribution.distributionDate;
       const startTime = latestProcessing.processingDate.getTime();
@@ -8457,6 +8911,93 @@ app.get("/api/ml/stats", authenticate, async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message,
+    });
+  }
+});
+
+// ArcGIS Token Refresh Endpoint
+app.get("/api/refresh-token", async (req, res) => {
+  const ARCGIS_TOKEN_URL = "https://www.arcgis.com/sharing/rest/oauth2/token";
+
+  // Validate environment variables
+  if (!process.env.ARCGIS_CLIENT_ID || !process.env.ARCGIS_CLIENT_SECRET || !process.env.ARCGIS_REFRESH_TOKEN) {
+    console.error("Missing ArcGIS Environment Variables.");
+    return res.status(500).json({
+      error: "Server Configuration Error: Missing credentials.",
+    });
+  }
+
+  try {
+    const params = new URLSearchParams({
+      client_id: process.env.ARCGIS_CLIENT_ID,
+      client_secret: process.env.ARCGIS_CLIENT_SECRET,
+      grant_type: "refresh_token",
+      refresh_token: process.env.ARCGIS_REFRESH_TOKEN,
+    });
+
+    const response = await axios.post(ARCGIS_TOKEN_URL, params.toString(), {
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+    });
+
+    if (response.status !== 200) {
+      return res.status(response.status).json({
+        error: response.data.error_description || response.data.error || "ArcGIS token refresh failed.",
+      });
+    }
+
+    res.json({
+      access_token: response.data.access_token,
+      expires_in: response.data.expires_in,
+    });
+  } catch (error) {
+    console.error("Internal Server Error during token refresh:", error.message);
+    res.status(500).json({
+      error: "Internal Server Error during token refresh.",
+    });
+  }
+});
+
+// OpenWeather API Proxy Endpoint
+app.get("/api/weather", async (req, res) => {
+  const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY;
+  const lat = req.query.lat;
+  const lon = req.query.lon;
+
+  if (!lat || !lon) {
+    return res.status(400).json({
+      error: "Missing lat or lon parameter",
+    });
+  }
+
+  if (!OPENWEATHER_API_KEY) {
+    console.error("Missing OPENWEATHER_API_KEY environment variable.");
+    return res.status(500).json({
+      error: "Server Configuration Error: Missing weather API key.",
+    });
+  }
+
+  try {
+    const [weatherResponse, forecastResponse] = await Promise.all([
+      axios.get(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${OPENWEATHER_API_KEY}&units=metric`),
+      axios.get(`https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${OPENWEATHER_API_KEY}&units=metric`)
+    ]);
+
+    console.log("Successfully fetched weather and forecast data");
+
+    res.json({
+      weather: weatherResponse.data,
+      forecast: forecastResponse.data,
+    });
+  } catch (error) {
+    console.error("Weather API proxy error:", error.message);
+
+    const status = error.response?.status || 500;
+    res.status(status).json({
+      success: false,
+      error: "Failed to connect to Weather API",
+      details: error.message,
     });
   }
 });
