@@ -4,11 +4,12 @@
  */
 
 import React from 'react';
+import { getMLRiskColorClasses } from '@/utils/themeUtils';
 
 const MLValidationBadge = ({ mlValidation }) => {
   if (!mlValidation) {
     return (
-      <div className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-gray-100 text-gray-600">
+      <div className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">
         <span className="mr-1">ℹ️</span>
         ML validation not available
       </div>
@@ -19,13 +20,7 @@ const MLValidationBadge = ({ mlValidation }) => {
 
   // Determine color scheme based on risk level
   const getColorClasses = () => {
-    if (isAnomaly || riskLevel === 'HIGH') {
-      return 'bg-red-100 text-red-800 border-red-300';
-    } else if (riskLevel === 'MEDIUM') {
-      return 'bg-yellow-100 text-yellow-800 border-yellow-300';
-    } else {
-      return 'bg-green-100 text-green-800 border-green-300';
-    }
+    return getMLRiskColorClasses(riskLevel, isAnomaly);
   };
 
   const getIcon = () => {
@@ -43,9 +38,9 @@ const MLValidationBadge = ({ mlValidation }) => {
             {isAnomaly ? 'Flagged by ML' : 'ML Verified'}
           </span>
           <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-            riskLevel === 'HIGH' ? 'bg-red-200' :
-            riskLevel === 'MEDIUM' ? 'bg-yellow-200' :
-            'bg-green-200'
+            riskLevel === 'HIGH' ? 'bg-red-200 dark:bg-red-900/50 text-red-900 dark:text-red-100' :
+            riskLevel === 'MEDIUM' ? 'bg-yellow-200 dark:bg-yellow-900/50 text-yellow-900 dark:text-yellow-100' :
+            'bg-green-200 dark:bg-green-900/50 text-green-900 dark:text-green-100'
           }`}>
             {riskLevel}
           </span>

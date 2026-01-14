@@ -24,6 +24,7 @@ export default function RetailerPricePage() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
   const [formData, setFormData] = useState({
     pricePerUnit: '',
@@ -84,6 +85,15 @@ export default function RetailerPricePage() {
       setFormData(prev => ({ ...prev, [name]: value }));
     }
 
+    // Clear validation error for this field
+    if (validationErrors[name]) {
+      setValidationErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[name];
+        return newErrors;
+      });
+    }
+
     // Auto-calculate total value when price per unit changes
     if (name === 'pricePerUnit' && batch && batch.quantity) {
       const price = parseFloat(value);
@@ -97,13 +107,40 @@ export default function RetailerPricePage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!formData.pricePerUnit || parseFloat(formData.pricePerUnit) <= 0) {
-      toast.error('Please enter valid price per unit');
-      return;
+    // Detailed validation
+    const errors: Record<string, string> = {};
+
+    // Price per unit validation
+    if (!formData.pricePerUnit || formData.pricePerUnit === '') {
+      errors.pricePerUnit = 'Price per unit is required';
+    } else {
+      const price = parseFloat(formData.pricePerUnit);
+      if (isNaN(price)) {
+        errors.pricePerUnit = 'Price must be a valid number';
+      } else if (price <= 0) {
+        errors.pricePerUnit = 'Price must be greater than 0';
+      } else if (price < 0) {
+        errors.pricePerUnit = 'Price cannot be negative';
+      }
     }
 
-    if (!formData.totalValue || parseFloat(formData.totalValue) <= 0) {
-      toast.error('Please enter valid total value');
+    // Total value validation
+    if (!formData.totalValue || formData.totalValue === '') {
+      errors.totalValue = 'Total value is required';
+    } else {
+      const total = parseFloat(formData.totalValue);
+      if (isNaN(total)) {
+        errors.totalValue = 'Total value must be a valid number';
+      } else if (total <= 0) {
+        errors.totalValue = 'Total value must be greater than 0';
+      } else if (total < 0) {
+        errors.totalValue = 'Total value cannot be negative';
+      }
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setValidationErrors(errors);
+      toast.error('Please fix the errors before submitting');
       return;
     }
 
@@ -321,10 +358,20 @@ export default function RetailerPricePage() {
                 onChange={handleChange}
                 step="0.01"
                 placeholder="0.00"
-                className="w-full pl-16 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
+                className={`w-full pl-16 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base ${
+                  validationErrors.pricePerUnit
+                    ? 'border-red-500 bg-red-50'
+                    : 'border-gray-300'
+                }`}
                 required
               />
             </div>
+            {validationErrors.pricePerUnit && (
+              <p className="mt-1 text-sm text-red-600 flex items-center">
+                <AlertCircle className="h-4 w-4 mr-1" />
+                {validationErrors.pricePerUnit}
+              </p>
+            )}
           </div>
 
           {/* Total Value */}
@@ -343,12 +390,22 @@ export default function RetailerPricePage() {
                 onChange={handleChange}
                 step="0.01"
                 placeholder="0.00"
-                className="w-full pl-16 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base bg-gray-50"
+                className={`w-full pl-16 pr-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base bg-gray-50 ${
+                  validationErrors.totalValue
+                    ? 'border-red-500'
+                    : 'border-gray-300'
+                }`}
                 required
                 readOnly
               />
             </div>
-            {batch && batch.quantity && formData.pricePerUnit && (
+            {validationErrors.totalValue && (
+              <p className="mt-1 text-sm text-red-600 flex items-center">
+                <AlertCircle className="h-4 w-4 mr-1" />
+                {validationErrors.totalValue}
+              </p>
+            )}
+            {batch && batch.quantity && formData.pricePerUnit && !validationErrors.totalValue && (
               <p className="text-xs text-gray-500 mt-2">
                 Calculated: {formData.pricePerUnit} × {batch.quantity} kg = {formData.totalValue}
               </p>

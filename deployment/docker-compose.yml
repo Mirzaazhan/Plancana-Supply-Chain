@@ -1,0 +1,294 @@
+version: '3.8'
+
+networks:
+  agri-network:
+    name: agri-network
+    driver: bridge
+
+volumes:
+  postgres_data:
+  orderer_data:
+  peer0_data:
+  couchdb_data:
+
+services:
+  # ===========================================
+  # DATABASE - PostgreSQL with PostGIS
+  # ===========================================
+  postgres:
+    image: postgis/postgis:15-3.3-alpine
+    container_name: agri-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-securepassword123}
+      POSTGRES_DB: agricultural_supply_chain
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - agri-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ===========================================
+  # BACKEND - Node.js API Server
+  # ===========================================
+  backend:
+    build:
+      context: ../application
+      dockerfile: ../deployment/Dockerfile.backend
+    container_name: agri-backend
+    restart: unless-stopped
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:${DB_PASSWORD:-securepassword123}@postgres:5432/agricultural_supply_chain
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-this}
+      JWT_EXPIRES_IN: 7d
+      BCRYPT_ROUNDS: 12
+      BLOCKCHAIN_NETWORK: mychannel
+      CHAINCODE_NAME: agricultural-contract
+      ORGANIZATION: Org1MSP
+      USER_ID: appUser
+      WALLET_PATH: /app/wallet
+      CONNECTION_PROFILE_PATH: /app/config/connection-profile-docker.json
+      ML_SERVICE_URL: http://ml-service:5000
+      ML_SERVICE_ENABLED: "true"
+      OPENWEATHER_API_KEY: ${OPENWEATHER_API_KEY}
+      ORS_API_KEY: ${ORS_API_KEY}
+      ARCGIS_CLIENT_ID: ${ARCGIS_CLIENT_ID}
+      ARCGIS_CLIENT_SECRET: ${ARCGIS_CLIENT_SECRET}
+      GMAIL_USER: ${GMAIL_USER}
+      GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD}
+      FRONTEND_URL: http://${SERVER_IP:-localhost}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      peer0.org1.example.com:
+        condition: service_started
+    volumes:
+      - ./config/connection-profile-docker.json:/app/config/connection-profile-docker.json:ro
+      - ./fabric-network/organizations:/app/fabric-organizations:ro
+    networks:
+      - agri-network
+
+  # ===========================================
+  # FRONTEND - Next.js Application
+  # ===========================================
+  frontend:
+    build:
+      context: ../frontend/plancana-nextjs
+      dockerfile: ../../deployment/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://${SERVER_IP:-localhost}:3000/api
+        NEXT_PUBLIC_ARCGIS_API_KEY: ${ARCGIS_API_KEY}
+    container_name: agri-frontend
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://${SERVER_IP:-localhost}:3000/api
+    depends_on:
+      - backend
+    networks:
+      - agri-network
+
+  # ===========================================
+  # ML SERVICE - Python Flask
+  # ===========================================
+  ml-service:
+    build:
+      context: ../ml-service
+      dockerfile: ../deployment/Dockerfile.ml
+    container_name: agri-ml-service
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      FLASK_ENV: production
+    networks:
+      - agri-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================
+  # HYPERLEDGER FABRIC - Minimal Setup
+  # ===========================================
+
+  # Fabric CA for Org1
+  ca.org1.example.com:
+    image: hyperledger/fabric-ca:1.5
+    container_name: ca.org1.example.com
+    restart: unless-stopped
+    environment:
+      - FABRIC_CA_HOME=/etc/hyperledger/fabric-ca-server
+      - FABRIC_CA_SERVER_CA_NAME=ca-org1
+      - FABRIC_CA_SERVER_TLS_ENABLED=true
+      - FABRIC_CA_SERVER_PORT=7054
+      - FABRIC_CA_SERVER_OPERATIONS_LISTENADDRESS=0.0.0.0:17054
+    ports:
+      - "7054:7054"
+      - "17054:17054"
+    command: sh -c 'fabric-ca-server start -b admin:adminpw -d'
+    volumes:
+      - ./fabric-network/organizations/fabric-ca/org1:/etc/hyperledger/fabric-ca-server
+    networks:
+      - agri-network
+
+  # Orderer
+  orderer.example.com:
+    image: hyperledger/fabric-orderer:2.5
+    container_name: orderer.example.com
+    restart: unless-stopped
+    environment:
+      - FABRIC_LOGGING_SPEC=INFO
+      - ORDERER_GENERAL_LISTENADDRESS=0.0.0.0
+      - ORDERER_GENERAL_LISTENPORT=7050
+      - ORDERER_GENERAL_LOCALMSPID=OrdererMSP
+      - ORDERER_GENERAL_LOCALMSPDIR=/var/hyperledger/orderer/msp
+      - ORDERER_GENERAL_TLS_ENABLED=true
+      - ORDERER_GENERAL_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_GENERAL_CLUSTER_CLIENTCERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_GENERAL_CLUSTER_CLIENTPRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_GENERAL_CLUSTER_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_GENERAL_BOOTSTRAPMETHOD=none
+      - ORDERER_CHANNELPARTICIPATION_ENABLED=true
+      - ORDERER_ADMIN_TLS_ENABLED=true
+      - ORDERER_ADMIN_TLS_CERTIFICATE=/var/hyperledger/orderer/tls/server.crt
+      - ORDERER_ADMIN_TLS_PRIVATEKEY=/var/hyperledger/orderer/tls/server.key
+      - ORDERER_ADMIN_TLS_ROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_ADMIN_TLS_CLIENTROOTCAS=[/var/hyperledger/orderer/tls/ca.crt]
+      - ORDERER_ADMIN_LISTENADDRESS=0.0.0.0:7053
+      - ORDERER_OPERATIONS_LISTENADDRESS=orderer.example.com:9443
+      - ORDERER_METRICS_PROVIDER=prometheus
+    working_dir: /root
+    command: orderer
+    ports:
+      - "7050:7050"
+      - "7053:7053"
+      - "9443:9443"
+    volumes:
+      - ./fabric-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp:/var/hyperledger/orderer/msp
+      - ./fabric-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls:/var/hyperledger/orderer/tls
+      - orderer_data:/var/hyperledger/production/orderer
+    networks:
+      - agri-network
+
+  # CouchDB for Peer state
+  couchdb0:
+    image: couchdb:3.3
+    container_name: couchdb0
+    restart: unless-stopped
+    environment:
+      - COUCHDB_USER=admin
+      - COUCHDB_PASSWORD=adminpw
+    ports:
+      - "5984:5984"
+    volumes:
+      - couchdb_data:/opt/couchdb/data
+    networks:
+      - agri-network
+
+  # Peer0 Org1
+  peer0.org1.example.com:
+    image: hyperledger/fabric-peer:2.5
+    container_name: peer0.org1.example.com
+    restart: unless-stopped
+    environment:
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_VM_ENDPOINT=unix:///host/var/run/docker.sock
+      - CORE_VM_DOCKER_HOSTCONFIG_NETWORKMODE=agri-network
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_PROFILE_ENABLED=false
+      - CORE_PEER_TLS_CERT_FILE=/etc/hyperledger/fabric/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/etc/hyperledger/fabric/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/etc/hyperledger/fabric/tls/ca.crt
+      - CORE_PEER_ID=peer0.org1.example.com
+      - CORE_PEER_ADDRESS=peer0.org1.example.com:7051
+      - CORE_PEER_LISTENADDRESS=0.0.0.0:7051
+      - CORE_PEER_CHAINCODEADDRESS=peer0.org1.example.com:7052
+      - CORE_PEER_CHAINCODELISTENADDRESS=0.0.0.0:7052
+      - CORE_PEER_GOSSIP_BOOTSTRAP=peer0.org1.example.com:7051
+      - CORE_PEER_GOSSIP_EXTERNALENDPOINT=peer0.org1.example.com:7051
+      - CORE_PEER_LOCALMSPID=Org1MSP
+      - CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/msp
+      - CORE_OPERATIONS_LISTENADDRESS=peer0.org1.example.com:9444
+      - CORE_METRICS_PROVIDER=prometheus
+      - CORE_LEDGER_STATE_STATEDATABASE=CouchDB
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS=couchdb0:5984
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME=admin
+      - CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD=adminpw
+      - CORE_CHAINCODE_EXECUTETIMEOUT=300s
+    working_dir: /root
+    command: peer node start
+    ports:
+      - "7051:7051"
+      - "9444:9444"
+    volumes:
+      - /var/run/docker.sock:/host/var/run/docker.sock
+      - ./fabric-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com:/etc/hyperledger/fabric
+      - peer0_data:/var/hyperledger/production
+    depends_on:
+      - couchdb0
+      - orderer.example.com
+    networks:
+      - agri-network
+
+  # Fabric Tools container for chaincode operations
+  cli:
+    image: hyperledger/fabric-tools:2.5
+    container_name: fabric-cli
+    tty: true
+    stdin_open: true
+    environment:
+      - GOPATH=/opt/gopath
+      - FABRIC_LOGGING_SPEC=INFO
+      - CORE_PEER_ID=cli
+      - CORE_PEER_ADDRESS=peer0.org1.example.com:7051
+      - CORE_PEER_LOCALMSPID=Org1MSP
+      - CORE_PEER_TLS_ENABLED=true
+      - CORE_PEER_TLS_CERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/server.crt
+      - CORE_PEER_TLS_KEY_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/server.key
+      - CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
+      - CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
+    working_dir: /opt/gopath/src/github.com/hyperledger/fabric/peer
+    command: /bin/bash
+    volumes:
+      - ./fabric-network/organizations:/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations
+      - ./fabric-network/channel-artifacts:/opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts
+      - ../chaincode:/opt/gopath/src/github.com/hyperledger/fabric/peer/chaincode
+    depends_on:
+      - peer0.org1.example.com
+    networks:
+      - agri-network
+
+  # ===========================================
+  # NGINX - Reverse Proxy
+  # ===========================================
+  nginx:
+    image: nginx:alpine
+    container_name: agri-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./config/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - agri-network

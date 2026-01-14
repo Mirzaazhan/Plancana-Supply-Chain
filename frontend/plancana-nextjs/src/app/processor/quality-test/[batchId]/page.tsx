@@ -30,6 +30,7 @@ export default function QualityTestPage() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     testType: 'Comprehensive Quality Analysis',
@@ -98,6 +99,7 @@ export default function QualityTestPage() {
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
+    if (formError) setFormError(null);
   };
 
   const handleTestResultChange = (index: number, field: 'key' | 'value', value: string) => {
@@ -119,14 +121,19 @@ export default function QualityTestPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
 
     if (!formData.testType) {
-      toast.error('Please select a test type');
+      const errorMsg = 'Please select a test type';
+      setFormError(errorMsg);
+      toast.error(errorMsg);
       return;
     }
 
     if (!formData.testingLab) {
-      toast.error('Please select or enter a testing laboratory');
+      const errorMsg = 'Please select or enter a testing laboratory';
+      setFormError(errorMsg);
+      toast.error(errorMsg);
       return;
     }
 
@@ -164,13 +171,16 @@ export default function QualityTestPage() {
 
       if (response.ok && data.success) {
         setSuccess(true);
+        setFormError(null);
         toast.success('Quality test added successfully!');
       } else {
         throw new Error(data.error || 'Failed to add quality test');
       }
     } catch (err: any) {
       console.error('Submit error:', err);
-      toast.error(err.message || 'Failed to add quality test');
+      const errorMsg = err.message || 'Failed to add quality test';
+      setFormError(errorMsg);
+      toast.error(errorMsg);
     } finally {
       setSubmitting(false);
     }
@@ -475,6 +485,24 @@ export default function QualityTestPage() {
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
             />
           </div>
+
+          {/* Error Display */}
+          {formError && (
+            <div className="bg-white rounded-lg shadow-sm p-4">
+              <div className="rounded-lg bg-red-50 p-4 border border-red-200">
+                <div className="flex">
+                  <div className="flex-shrink-0">
+                    <AlertCircle className="h-5 w-5 text-red-400" />
+                  </div>
+                  <div className="ml-3">
+                    <p className="text-sm font-medium text-red-800">
+                      {formError}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Submit Button */}
           <div className="sticky bottom-0 bg-gray-50 pt-4 pb-6">

@@ -353,10 +353,11 @@ const TestMap = ({
               token: token,
             });
 
-            // Also set the API key if available
-            if (process.env.NEXT_PUBLIC_ARCGIS_API_KEY) {
-              esriConfig.apiKey = process.env.NEXT_PUBLIC_ARCGIS_API_KEY;
-            }
+            // Note: When using OAuth tokens, don't set API key as they conflict
+            // Only use API key OR OAuth token, not both
+            // if (process.env.NEXT_PUBLIC_ARCGIS_API_KEY) {
+            //   esriConfig.apiKey = process.env.NEXT_PUBLIC_ARCGIS_API_KEY;
+            // }
           } catch (error) {
             console.error("Token registration error:", error);
             setMapError(

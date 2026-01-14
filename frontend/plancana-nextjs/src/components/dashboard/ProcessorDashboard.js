@@ -588,125 +588,118 @@ const ProcessorDashboard = () => {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-          <StatCard
-            title="Available Batches"
-            value={dashboardStats.availableBatches || 12}
-            icon={Package}
-            color="green"
-            description="Ready for processing"
-            trend="+3"
-          />
-          <StatCard
-            title="Processing Now"
-            value={dashboardStats.processingBatches || 5}
-            icon={Clock}
-            color="orange"
-            description="Currently in progress"
-            trend="+2"
-          />
-          <StatCard
-            title="Completed Today"
-            value={dashboardStats.completedToday || 18}
-            icon={CheckCircle}
-            color="blue"
-            description="Finished today"
-            trend="+12%"
-          />
-          <StatCard
-            title="Total Processed"
-            value={dashboardStats.totalProcessed || 2847}
-            icon={BarChart3}
-            color="purple"
-            description="All time total"
-            trend="+8.3%"
-          />
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <StatCard
+          title="Available Batches"
+          value={dashboardStats.availableBatches}
+          icon={Package}
+          color="green"
+          description="Ready for processing"
+        />
+        <StatCard
+          title="Processing Now"
+          value={dashboardStats.processingBatches}
+          icon={Clock}
+          color="orange"
+          description="Currently in progress"
+        />
+        <StatCard
+          title="Completed Today"
+          value={dashboardStats.completedToday}
+          icon={CheckCircle}
+          color="blue"
+          description="Finished today"
+        />
+        <StatCard
+          title="Total Processed"
+          value={dashboardStats.totalProcessed}
+          icon={BarChart3}
+          color="purple"
+          description="All time total"
+        />
+      </div>
+
+      {/* Weather Conditions - Horizontal Layout */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Weather Conditions</h3>
+          <Sun className="h-5 w-5 text-yellow-500" />
         </div>
-        <div className="lg:col-span-1">
-          {/* Weather Conditions */}
-          <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-6 text-white">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-semibold">Weather Conditions</h3>
-              <Sun className="h-6 w-6" />
+
+        {weatherData.loading ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          </div>
+        ) : weatherData.error ? (
+          <div className="text-center py-6">
+            <CloudRain className="h-10 w-10 mx-auto mb-3 text-gray-400" />
+            <p className="text-gray-500 dark:text-gray-400">Weather data unavailable</p>
+            <button
+              onClick={() => fetchWeatherData(currentLatitude, currentLongitude)}
+              className="mt-3 px-4 py-2 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-sm transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-6">
+            {/* Temperature */}
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg">
+                <Sun className="h-6 w-6 text-yellow-600 dark:text-yellow-400" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">{weatherData.temperature}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center">
+                  <MapPin className="h-3 w-3 mr-1" />
+                  {weatherData.location}
+                </p>
+              </div>
             </div>
 
-            {weatherData.loading ? (
-              <div className="flex items-center justify-center h-48">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div>
+            {/* Divider */}
+            <div className="hidden md:block h-12 w-px bg-gray-200 dark:bg-gray-700"></div>
+
+            {/* Humidity */}
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                <Droplets className="h-6 w-6 text-blue-600 dark:text-blue-400" />
               </div>
-            ) : weatherData.error ? (
-              <div className="text-center py-8">
-                <CloudRain className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                <p className="text-blue-100">Weather data unavailable</p>
-                <button
-                  onClick={() =>
-                    fetchWeatherData(currentLatitude, currentLongitude)
-                  }
-                  className="mt-4 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm transition-colors"
-                >
-                  Retry
-                </button>
+              <div>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white">{weatherData.humidity}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Humidity</p>
               </div>
-            ) : (
-              <>
-                <div className="mb-6">
-                  <div className="text-5xl font-bold mb-2">
-                    {weatherData.temperature}
-                  </div>
-                  <div className="flex items-center text-blue-100">
-                    <MapPin className="h-4 w-4 mr-1" />
-                    <span>{weatherData.location}</span>
-                  </div>
-                </div>
+            </div>
 
-                <div className="space-y-3 mb-6">
-                  <div className="flex items-center justify-between py-2 border-b border-blue-400">
-                    <div className="flex items-center">
-                      <Droplets className="h-5 w-5 mr-2" />
-                      <span>Humidity</span>
-                    </div>
-                    <span className="font-semibold">
-                      {weatherData.humidity}
-                    </span>
-                  </div>
+            {/* Divider */}
+            <div className="hidden md:block h-12 w-px bg-gray-200 dark:bg-gray-700"></div>
 
-                  <div className="flex items-center justify-between py-2 border-b border-blue-400">
-                    <div className="flex items-center">
-                      <Wind className="h-5 w-5 mr-2" />
-                      <span>Wind Speed</span>
-                    </div>
-                    <span className="font-semibold">
-                      {weatherData.windSpeed}
-                    </span>
-                  </div>
-
-                  {/* <div className="flex items-center justify-between py-2">
-              <div className="flex items-center">
-                <CloudRain className="h-5 w-5 mr-2" />
-                <span>Precipitation</span>
+            {/* Wind Speed */}
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-green-100 dark:bg-green-900/30 rounded-lg">
+                <Wind className="h-6 w-6 text-green-600 dark:text-green-400" />
               </div>
-              <span className="font-semibold">{weatherData.precipitation}</span>
-            </div> */}
-                </div>
+              <div>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white">{weatherData.windSpeed}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Wind Speed</p>
+              </div>
+            </div>
 
-                <div>
-                  <p className="text-sm text-blue-100 mb-3">5-Day Forecast</p>
-                  <div className="grid grid-cols-5 gap-2">
-                    {weatherData.forecast.map((day, index) => (
-                      <div key={index} className="text-center">
-                        <p className="text-xs mb-1">{day.day}</p>
-                        <Sun className="h-5 w-5 mx-auto mb-1" />
-                        <p className="text-sm font-semibold">{day.temp}</p>
-                        <p className="text-xs">{day.description}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
+            {/* Divider */}
+            <div className="hidden md:block h-12 w-px bg-gray-200 dark:bg-gray-700"></div>
+
+            {/* Description */}
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
+                <CloudRain className="h-6 w-6 text-purple-600 dark:text-purple-400" />
+              </div>
+              <div>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white capitalize">{weatherData.weather_description}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Conditions</p>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Processing Queue Section */}
