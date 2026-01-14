@@ -2,15 +2,15 @@
 FROM node:18-alpine
 
 # Install build dependencies for native modules
-RUN apk add --no-cache python3 make g++ git
+RUN apk add --no-cache python3 make g++ git curl
 
 WORKDIR /app
 
 # Copy package files
 COPY application/package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install ALL dependencies (including dev for prisma)
+RUN npm ci
 
 # Copy application code
 COPY application/ ./
@@ -25,8 +25,8 @@ RUN mkdir -p /app/wallet
 EXPOSE 3000
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/api/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
+  CMD curl -f http://localhost:3000/api/health || exit 1
 
-# Start command
-CMD ["sh", "-c", "npx prisma migrate deploy && npm start"]
+# Start command - run migrations then start
+CMD ["sh", "-c", "npx prisma migrate deploy && node server.js"]
