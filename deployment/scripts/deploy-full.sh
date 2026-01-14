@@ -47,41 +47,18 @@ log_info "Deploying to: $SERVER_IP"
 cd "${DEPLOY_DIR}"
 
 # ============================================
-# Step 1: Create Fabric directories
+# Step 1: Clean up old fabric network
 # ============================================
-log_info "[1/10] Setting up Fabric network directories..."
-
-mkdir -p fabric-network/organizations/peerOrganizations/org1.example.com/ca
-mkdir -p fabric-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/admincerts
-mkdir -p fabric-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/cacerts
-mkdir -p fabric-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/keystore
-mkdir -p fabric-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/signcerts
-mkdir -p fabric-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp/tlscacerts
-mkdir -p fabric-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls
-mkdir -p fabric-network/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/admincerts
-mkdir -p fabric-network/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/cacerts
-mkdir -p fabric-network/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/keystore
-mkdir -p fabric-network/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp/signcerts
-mkdir -p fabric-network/organizations/peerOrganizations/org1.example.com/msp/admincerts
-mkdir -p fabric-network/organizations/peerOrganizations/org1.example.com/msp/cacerts
-mkdir -p fabric-network/organizations/peerOrganizations/org1.example.com/msp/tlscacerts
-mkdir -p fabric-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/admincerts
-mkdir -p fabric-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/cacerts
-mkdir -p fabric-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/keystore
-mkdir -p fabric-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/signcerts
-mkdir -p fabric-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts
-mkdir -p fabric-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls
-mkdir -p fabric-network/organizations/ordererOrganizations/example.com/msp/admincerts
-mkdir -p fabric-network/organizations/ordererOrganizations/example.com/msp/cacerts
-mkdir -p fabric-network/organizations/ordererOrganizations/example.com/msp/tlscacerts
-mkdir -p fabric-network/organizations/fabric-ca/org1
-mkdir -p fabric-network/organizations/fabric-ca/ordererOrg
+log_info "[1/10] Cleaning up old Fabric data..."
+rm -rf fabric-network/organizations/ordererOrganizations
+rm -rf fabric-network/organizations/peerOrganizations
+rm -rf fabric-network/channel-artifacts/*
 mkdir -p fabric-network/channel-artifacts
 
-log_success "Directories created!"
+log_success "Cleaned up!"
 
 # ============================================
-# Step 2: Generate crypto config files
+# Step 2: Create crypto-config.yaml
 # ============================================
 log_info "[2/10] Creating crypto-config.yaml..."
 
@@ -116,36 +93,42 @@ log_success "crypto-config.yaml created!"
 # ============================================
 # Step 3: Generate crypto materials using Docker
 # ============================================
-log_info "[3/10] Generating crypto materials using Docker..."
+log_info "[3/10] Generating crypto materials..."
 
-# Pull the fabric-tools image
 docker pull hyperledger/fabric-tools:2.5
 
-# Run cryptogen in container
 docker run --rm \
     -v "${DEPLOY_DIR}/fabric-network:/fabric-network" \
     -w /fabric-network \
     hyperledger/fabric-tools:2.5 \
     cryptogen generate --config=/fabric-network/crypto-config.yaml --output=/fabric-network/organizations
 
-if [ $? -eq 0 ]; then
-    log_success "Crypto materials generated!"
-else
+if [ $? -ne 0 ]; then
     log_error "Failed to generate crypto materials"
     exit 1
 fi
 
+# Verify crypto was generated
+if [ ! -f "${DEPLOY_DIR}/fabric-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt" ]; then
+    log_error "TLS certificates not found! Crypto generation failed."
+    log_info "Checking what was generated..."
+    find "${DEPLOY_DIR}/fabric-network/organizations" -name "*.crt" 2>/dev/null | head -20
+    exit 1
+fi
+
+log_success "Crypto materials generated!"
+
 # ============================================
-# Step 4: Create configtx.yaml
+# Step 4: Create configtx.yaml with ABSOLUTE paths for genesis
 # ============================================
 log_info "[4/10] Creating configtx.yaml..."
 
-cat > fabric-network/configtx.yaml << 'EOF'
+cat > fabric-network/configtx.yaml << EOF
 Organizations:
   - &OrdererOrg
     Name: OrdererOrg
     ID: OrdererMSP
-    MSPDir: organizations/ordererOrganizations/example.com/msp
+    MSPDir: /fabric-network/organizations/ordererOrganizations/example.com/msp
     Policies:
       Readers:
         Type: Signature
@@ -162,7 +145,7 @@ Organizations:
   - &Org1
     Name: Org1MSP
     ID: Org1MSP
-    MSPDir: organizations/peerOrganizations/org1.example.com/msp
+    MSPDir: /fabric-network/organizations/peerOrganizations/org1.example.com/msp
     Policies:
       Readers:
         Type: Signature
@@ -217,8 +200,8 @@ Orderer: &OrdererDefaults
     Consenters:
       - Host: orderer.example.com
         Port: 7050
-        ClientTLSCert: organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
-        ServerTLSCert: organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
+        ClientTLSCert: /fabric-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
+        ServerTLSCert: /fabric-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt
   BatchTimeout: 2s
   BatchSize:
     MaxMessageCount: 10
@@ -282,21 +265,25 @@ docker run --rm \
     hyperledger/fabric-tools:2.5 \
     configtxgen -profile ChannelUsingRaft -outputBlock /fabric-network/channel-artifacts/mychannel.block -channelID mychannel
 
-if [ $? -eq 0 ]; then
-    log_success "Genesis block created!"
-else
+if [ $? -ne 0 ]; then
     log_error "Failed to create genesis block"
     exit 1
 fi
+
+log_success "Genesis block created!"
 
 # ============================================
 # Step 6: Start infrastructure
 # ============================================
 log_info "[6/10] Starting database and Fabric network..."
 
+# Stop any existing containers
+docker compose down 2>/dev/null || true
+
 # Start PostgreSQL and CouchDB first
 docker compose up -d postgres couchdb0
-sleep 10
+log_info "Waiting for database..."
+sleep 15
 
 # Wait for postgres
 until docker exec agri-postgres pg_isready -U postgres > /dev/null 2>&1; do
@@ -305,9 +292,13 @@ until docker exec agri-postgres pg_isready -U postgres > /dev/null 2>&1; do
 done
 log_success "PostgreSQL ready!"
 
-# Start Fabric orderer and peer
+# Start Fabric orderer
+log_info "Starting orderer..."
 docker compose up -d orderer.example.com
-sleep 5
+sleep 10
+
+# Start Fabric peer
+log_info "Starting peer..."
 docker compose up -d peer0.org1.example.com
 sleep 10
 
@@ -322,68 +313,84 @@ log_info "[7/10] Creating channel and joining peer..."
 docker compose up -d cli
 sleep 5
 
-# Join orderer to channel
-docker exec fabric-cli bash -c "
-export CORE_PEER_LOCALMSPID=Org1MSP
-export CORE_PEER_TLS_ENABLED=true
-export CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
-export CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
-export CORE_PEER_ADDRESS=peer0.org1.example.com:7051
-
-# Join orderer
+# Join orderer to channel using osnadmin
+log_info "Joining orderer to channel..."
+docker exec fabric-cli bash -c '
 osnadmin channel join --channelID mychannel \
     --config-block /opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts/mychannel.block \
     -o orderer.example.com:7053 \
     --ca-file /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/ca.crt \
     --client-cert /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.crt \
     --client-key /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/server.key
+'
+
+if [ $? -ne 0 ]; then
+    log_warn "Orderer join returned error - checking status..."
+fi
+
+sleep 5
 
 # Join peer to channel
+log_info "Joining peer to channel..."
+docker exec fabric-cli bash -c '
+export CORE_PEER_TLS_ENABLED=true
+export CORE_PEER_LOCALMSPID="Org1MSP"
+export CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
+export CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
+export CORE_PEER_ADDRESS=peer0.org1.example.com:7051
+
 peer channel join -b /opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts/mychannel.block
+'
 
-echo 'Channel joined successfully!'
-" || log_warn "Channel setup may need verification"
-
-log_success "Channel created!"
+if [ $? -eq 0 ]; then
+    log_success "Peer joined channel!"
+else
+    log_warn "Peer join may need verification"
+fi
 
 # ============================================
 # Step 8: Deploy chaincode
 # ============================================
 log_info "[8/10] Deploying chaincode..."
 
-docker exec fabric-cli bash -c "
-export CORE_PEER_LOCALMSPID=Org1MSP
+docker exec fabric-cli bash -c '
 export CORE_PEER_TLS_ENABLED=true
+export CORE_PEER_LOCALMSPID="Org1MSP"
 export CORE_PEER_TLS_ROOTCERT_FILE=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
 export CORE_PEER_MSPCONFIGPATH=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/users/Admin@org1.example.com/msp
 export CORE_PEER_ADDRESS=peer0.org1.example.com:7051
 
 cd /opt/gopath/src/github.com/hyperledger/fabric/peer
 
-# Package chaincode
+echo "Packaging chaincode..."
 peer lifecycle chaincode package agricultural-contract.tar.gz \
     --path /opt/gopath/src/github.com/hyperledger/fabric/peer/chaincode/agricultural-contract \
     --lang node \
     --label agricultural-contract_1.0
 
-# Install chaincode
+echo "Installing chaincode..."
 peer lifecycle chaincode install agricultural-contract.tar.gz
 
-# Get package ID
-export CC_PACKAGE_ID=\$(peer lifecycle chaincode queryinstalled | grep 'agricultural-contract_1.0' | awk -F'[, ]+' '{print \$3}')
-echo \"Package ID: \$CC_PACKAGE_ID\"
+echo "Getting package ID..."
+CC_PACKAGE_ID=$(peer lifecycle chaincode queryinstalled 2>&1 | grep -o "agricultural-contract_1.0:[a-f0-9]*")
+echo "Package ID: $CC_PACKAGE_ID"
 
-# Approve chaincode
+if [ -z "$CC_PACKAGE_ID" ]; then
+    echo "ERROR: Could not get package ID"
+    exit 1
+fi
+
+echo "Approving chaincode..."
 peer lifecycle chaincode approveformyorg \
     -o orderer.example.com:7050 \
     --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/ca.crt \
     --channelID mychannel \
     --name agricultural-contract \
     --version 1.0 \
-    --package-id \$CC_PACKAGE_ID \
+    --package-id $CC_PACKAGE_ID \
     --sequence 1
 
-# Commit chaincode
+echo "Committing chaincode..."
 peer lifecycle chaincode commit \
     -o orderer.example.com:7050 \
     --tls --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls/ca.crt \
@@ -394,20 +401,30 @@ peer lifecycle chaincode commit \
     --peerAddresses peer0.org1.example.com:7051 \
     --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt
 
-echo 'Chaincode deployed!'
-" || log_warn "Chaincode deployment may need manual verification"
+echo "Chaincode deployment complete!"
+'
 
-log_success "Chaincode deployment initiated!"
+if [ $? -eq 0 ]; then
+    log_success "Chaincode deployed!"
+else
+    log_warn "Chaincode deployment needs verification"
+fi
 
 # ============================================
 # Step 9: Build and start application
 # ============================================
 log_info "[9/10] Building and starting application services..."
 
+log_info "Building backend..."
 docker compose build backend
+
+log_info "Building frontend..."
 docker compose build frontend
+
+log_info "Building ML service..."
 docker compose build ml-service
 
+log_info "Starting services..."
 docker compose up -d backend ml-service
 sleep 15
 docker compose up -d frontend nginx
@@ -443,7 +460,8 @@ else
 fi
 
 # Check Fabric
-if docker exec peer0.org1.example.com peer channel list 2>/dev/null | grep -q mychannel; then
+CHANNEL_CHECK=$(docker exec peer0.org1.example.com peer channel list 2>/dev/null | grep mychannel || echo "")
+if [ -n "$CHANNEL_CHECK" ]; then
     log_success "Fabric Network: Channel 'mychannel' active"
 else
     log_warn "Fabric Network: Verifying..."
@@ -465,5 +483,6 @@ echo ""
 echo "Commands:"
 echo "  View logs:      docker compose logs -f"
 echo "  Fabric logs:    docker compose logs -f peer0.org1.example.com"
+echo "  Check channel:  docker exec peer0.org1.example.com peer channel list"
 echo "  Restart:        docker compose restart"
 echo ""
