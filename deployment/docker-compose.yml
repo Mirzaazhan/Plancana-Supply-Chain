@@ -182,6 +182,7 @@ services:
     volumes:
       - ./fabric-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp:/var/hyperledger/orderer/msp
       - ./fabric-network/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/tls:/var/hyperledger/orderer/tls
+      - ./fabric-network/config/orderer.yaml:/etc/hyperledger/fabric/orderer.yaml
       - orderer_data:/var/hyperledger/production/orderer
     networks:
       - agri-network
@@ -238,7 +239,9 @@ services:
       - "9444:9444"
     volumes:
       - /var/run/docker.sock:/host/var/run/docker.sock
-      - ./fabric-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com:/etc/hyperledger/fabric
+      - ./fabric-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/msp:/etc/hyperledger/fabric/msp
+      - ./fabric-network/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls:/etc/hyperledger/fabric/tls
+      - ./fabric-network/config/core.yaml:/etc/hyperledger/fabric/core.yaml
       - peer0_data:/var/hyperledger/production
     depends_on:
       - couchdb0
