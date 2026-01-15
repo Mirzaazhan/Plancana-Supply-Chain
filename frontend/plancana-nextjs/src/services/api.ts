@@ -62,11 +62,13 @@ api.interceptors.response.use(
       // Only redirect to login if:
       // 1. We're not already on the login/register pages
       // 2. This is not a login/register request
-      const isAuthRequest = error.config?.url?.includes('/auth/login') ||
-                           error.config?.url?.includes('/auth/register');
-      const isAuthPage = typeof window !== 'undefined' &&
-                        (window.location.pathname === '/login' ||
-                         window.location.pathname === '/register');
+      const isAuthRequest =
+        error.config?.url?.includes("/auth/login") ||
+        error.config?.url?.includes("/auth/register");
+      const isAuthPage =
+        typeof window !== "undefined" &&
+        (window.location.pathname === "/login" ||
+          window.location.pathname === "/register");
 
       // Only redirect on 401 for authenticated requests (expired token), not auth failures
       if (!isAuthRequest && !isAuthPage && typeof window !== "undefined") {
@@ -112,6 +114,7 @@ export const batchService = {
   // Get all batches (Admin/Regulator only)
   getAllBatches: (params?: QueryParams) => api.get("/batches", { params }),
 
+  getBatchesWithLineage: () => api.get("/batches/all-with-lineage"),
   // Check if batch ID exists
   checkBatchExists: (batchId: string) => api.get(`/batch/check/${batchId}`),
   checkBatchId: (batchId: string) => api.get(`/batch/check/${batchId}`), // Alias for consistency
@@ -183,10 +186,14 @@ export const adminService = {
     userId: string,
     data: { newRole: string; confirmDataLoss: boolean }
   ) => api.put(`/admin/users/${userId}/role`, data),
-  changeUserStatus: (userId: string, data: { status: string; reason?: string }) =>
-    api.put(`/admin/users/${userId}/status`, data),
-  deleteUser: (userId: string, data: { confirm: boolean; hardDelete: boolean }) =>
-    api.delete(`/admin/users/${userId}`, { data }),
+  changeUserStatus: (
+    userId: string,
+    data: { status: string; reason?: string }
+  ) => api.put(`/admin/users/${userId}/status`, data),
+  deleteUser: (
+    userId: string,
+    data: { confirm: boolean; hardDelete: boolean }
+  ) => api.delete(`/admin/users/${userId}`, { data }),
 
   // System monitoring
   getSystemStats: () => api.get("/admin/stats"),

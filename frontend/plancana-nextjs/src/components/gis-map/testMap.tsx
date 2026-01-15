@@ -240,7 +240,7 @@ const TestMap = ({
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-      const res = await fetch("/api/api/refresh-token", {
+      const res = await fetch("/api/refresh-token", {
         signal: controller.signal,
       });
 
@@ -632,16 +632,16 @@ const TestMap = ({
               ]).then(() => {
                 if (!isMounted) return;
 
-                fetch("/api/api/batches/active-locations")
-                  .then((res) => {
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    return res.json();
-                  })
-                  .then((data) => {
+                batchService
+                  .getBatchesWithLineage()
+                  .then((response) => {
                     if (!isMounted) return;
 
+                    // Axios returns the data in response.data
+                    const data = response.data;
                     const batchesData = data.batchesData || [];
 
+                    // Update state and map markers
                     const uniqueBatchIds = Array.from(
                       new Set(batchesData.map((batch: any) => batch.batchId))
                     ) as string[];

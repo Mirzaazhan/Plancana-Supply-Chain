@@ -321,7 +321,7 @@ const IntelligenceBoard = () => {
       </div>
 
       {/* 1. TOP LEVEL: THE CORRELATION SCORECARD */}
-      <div className="grid grid-cols-1 max-[431px]:grid-cols-2 gap-6">
+      <div className="grid grid-cols-2 max-[431px]:grid-cols-2 gap-6">
         <div className="bg-white p-6 rounded-xl shadow-sm border-3 border-blue-400 ">
           <div className="flex justify-between items-start">
             <p className="text-xs font-bold text-gray-700 uppercase tracking-wider">

@@ -1710,19 +1710,14 @@ app.post(
         await gateway.disconnect();
         // STEP 6: Execute PostGIS logic to update FarmLocation
         // 1. Get the Farmer's active Farm Location (or the one being used)
-        const activeFarmLocation = farmerProfile.farmLocations[0];
-
-        if (activeFarmLocation) {
+        let locationIdToUse = null;
+        if (latitude && longitude) {
           const newLocationRecord = await prisma.farmLocation.create({
             data: {
-              farmerId: farmerProfile.id, // Link to the farmer
-              location: location,
-              latitude: latitude
-                ? parseFloat(latitude)
-                : activeFarmLocation.latitude,
-              longitude: longitude
-                ? parseFloat(longitude)
-                : activeFarmLocation.longitude,
+              farmerId: farmerProfile.id,
+              location: location || "Default Farm Location",
+              latitude: parseFloat(latitude),
+              longitude: parseFloat(longitude),
               temperature: additionalData.temperature
                 ? parseFloat(additionalData.temperature)
                 : null,
@@ -1735,22 +1730,23 @@ app.post(
             },
           });
 
-          // 2. Update the PostGIS geometry for this NEW specific row
-          if (newLocationRecord.latitude && newLocationRecord.longitude) {
-            await updateGeometryPoint(
-              '"farm_locations"',
-              newLocationRecord.id, // Use the ID of the newly created row
-              newLocationRecord.latitude,
-              newLocationRecord.longitude
-            );
-          }
+          locationIdToUse = newLocationRecord.id;
 
-          // 3. IMPORTANT: Update the Batch to point to this specific location record
+          // Update PostGIS geometry
+          await updateGeometryPoint(
+            '"farm_locations"',
+            newLocationRecord.id,
+            newLocationRecord.latitude,
+            newLocationRecord.longitude
+          );
+        }
+        if (locationIdToUse) {
           await prisma.batch.update({
             where: { id: batch.id },
-            data: { farmLocationId: newLocationRecord.id },
+            data: { farmLocationId: locationIdToUse },
           });
         }
+
         if (latitude && longitude && batch.id) {
           await logBatchLocation(
             batch.id,
@@ -2175,13 +2171,6 @@ app.get("/api/batch/:batchId", authenticate, async (req, res) => {
           batchId: dbBatch.parentBatch.id,
           departureTime: { lt: splitDate },
         },
-        include: {
-          distributor: {
-            include: {
-              user: { select: { username: true } },
-            },
-          },
-        },
         orderBy: { departureTime: "asc" },
       });
     }
@@ -2529,25 +2518,38 @@ app.get("/api/verify/:batchId", async (req, res) => {
     let blockchainPricing = {};
     if (dbBatch) {
       try {
-        const { gateway: pricingGateway, contract: pricingContract } = await blockchainService.connectToNetwork();
-        const pricingResult = await pricingContract.evaluateTransaction('getPricingHistory', batchId);
+        const { gateway: pricingGateway, contract: pricingContract } =
+          await blockchainService.connectToNetwork();
+        const pricingResult = await pricingContract.evaluateTransaction(
+          "getPricingHistory",
+          batchId
+        );
         const pricingData = JSON.parse(pricingResult.toString());
         await pricingGateway.disconnect();
 
         // Map pricing by level for easy lookup
-        if (pricingData.pricingHistory && Array.isArray(pricingData.pricingHistory)) {
-          pricingData.pricingHistory.forEach(priceRecord => {
+        if (
+          pricingData.pricingHistory &&
+          Array.isArray(pricingData.pricingHistory)
+        ) {
+          pricingData.pricingHistory.forEach((priceRecord) => {
             blockchainPricing[priceRecord.level] = {
               pricePerUnit: parseFloat(priceRecord.pricePerUnit),
               totalValue: parseFloat(priceRecord.totalValue),
-              currency: priceRecord.currency || 'MYR',
-              breakdown: priceRecord.breakdown || {}
+              currency: priceRecord.currency || "MYR",
+              breakdown: priceRecord.breakdown || {},
             };
           });
-          console.log('💰 Blockchain Pricing Loaded:', Object.keys(blockchainPricing));
+          console.log(
+            "💰 Blockchain Pricing Loaded:",
+            Object.keys(blockchainPricing)
+          );
         }
       } catch (pricingError) {
-        console.log('⚠️ Could not fetch blockchain pricing:', pricingError.message);
+        console.log(
+          "⚠️ Could not fetch blockchain pricing:",
+          pricingError.message
+        );
         // Continue without pricing data
       }
     }
@@ -2555,88 +2557,114 @@ app.get("/api/verify/:batchId", async (req, res) => {
 
     // Get ownership transfer history from BatchTransfer
     let ownershipHistory = [];
-    console.log('🔍 Starting ownership history lookup for batch:', dbBatch?.batchId, 'UUID:', dbBatch?.id, 'Status:', dbBatch?.status);
+    console.log(
+      "🔍 Starting ownership history lookup for batch:",
+      dbBatch?.batchId,
+      "UUID:",
+      dbBatch?.id,
+      "Status:",
+      dbBatch?.status
+    );
 
     if (dbBatch) {
       try {
         // Try both batchId (string) and id (UUID) to be safe
         const transfers = await prisma.batchTransfer.findMany({
           where: {
-            OR: [
-              { batchId: dbBatch.id },
-              { batchId: dbBatch.batchId }
-            ]
+            OR: [{ batchId: dbBatch.id }, { batchId: dbBatch.batchId }],
           },
-          orderBy: { transferDate: 'asc' }
+          orderBy: { transferDate: "asc" },
         });
 
-        console.log('📦 Batch Transfers Found:', transfers.length, 'for batch:', dbBatch.batchId);
+        console.log(
+          "📦 Batch Transfers Found:",
+          transfers.length,
+          "for batch:",
+          dbBatch.batchId
+        );
         if (transfers.length > 0) {
-          console.log('📦 Transfer Details:', JSON.stringify(transfers, null, 2));
+          console.log(
+            "📦 Transfer Details:",
+            JSON.stringify(transfers, null, 2)
+          );
         }
 
         // Get transactions for pricing (Transaction.batchId is a foreign key to Batch.id, so use UUID only)
         const transactions = await prisma.transaction.findMany({
           where: {
-            batchId: dbBatch.id  // Must use UUID, not human-readable batchId
+            batchId: dbBatch.id, // Must use UUID, not human-readable batchId
           },
-          orderBy: { id: 'asc' }
+          orderBy: { id: "asc" },
         });
 
-        console.log('💰 Transactions Found:', transactions.length);
+        console.log("💰 Transactions Found:", transactions.length);
         if (transactions.length > 0) {
-          console.log('💰 Transaction Details:', JSON.stringify(transactions.map(t => ({
-            id: t.id,
-            fromPartyId: t.fromPartyId,
-            toPartyId: t.toPartyId,
-            totalAmount: t.totalAmount
-          })), null, 2));
+          console.log(
+            "💰 Transaction Details:",
+            JSON.stringify(
+              transactions.map((t) => ({
+                id: t.id,
+                fromPartyId: t.fromPartyId,
+                toPartyId: t.toPartyId,
+                totalAmount: t.totalAmount,
+              })),
+              null,
+              2
+            )
+          );
         }
 
         // Helper function to get actor name
         const getActorName = async (actorId, role) => {
           try {
-            if (role === 'FARMER') {
+            if (role === "FARMER") {
               const farmer = await prisma.farmerProfile.findUnique({
                 where: { id: actorId },
-                select: { farmName: true }
+                select: { farmName: true },
               });
-              return farmer?.farmName || 'Farmer';
-            } else if (role === 'PROCESSOR') {
+              return farmer?.farmName || "Farmer";
+            } else if (role === "PROCESSOR") {
               const processor = await prisma.processorProfile.findUnique({
                 where: { id: actorId },
-                select: { facilityName: true }
+                select: { facilityName: true },
               });
-              return processor?.facilityName || 'Processor';
-            } else if (role === 'DISTRIBUTOR') {
+              return processor?.facilityName || "Processor";
+            } else if (role === "DISTRIBUTOR") {
               const distributor = await prisma.distributorProfile.findUnique({
                 where: { id: actorId },
-                select: { companyName: true }
+                select: { companyName: true },
               });
-              return distributor?.companyName || 'Distributor';
-            } else if (role === 'RETAILER') {
+              return distributor?.companyName || "Distributor";
+            } else if (role === "RETAILER") {
               const retailer = await prisma.retailerProfile.findUnique({
                 where: { id: actorId },
-                select: { storeName: true }
+                select: { storeName: true },
               });
-              return retailer?.storeName || 'Retailer';
+              return retailer?.storeName || "Retailer";
             }
           } catch (e) {
-            console.log('Error getting actor name:', e.message);
+            console.log("Error getting actor name:", e.message);
           }
-          return 'Unknown';
+          return "Unknown";
         };
 
         // Build ownership history with actor names and prices
         ownershipHistory = await Promise.all(
           transfers.map(async (transfer) => {
-            const fromName = await getActorName(transfer.fromActorId, transfer.fromActorRole);
-            const toName = await getActorName(transfer.toActorId, transfer.toActorRole);
+            const fromName = await getActorName(
+              transfer.fromActorId,
+              transfer.fromActorRole
+            );
+            const toName = await getActorName(
+              transfer.toActorId,
+              transfer.toActorRole
+            );
 
             // Find matching transaction for pricing
-            const matchingTx = transactions.find(tx =>
-              tx.fromPartyId === transfer.fromActorId &&
-              tx.toPartyId === transfer.toActorId
+            const matchingTx = transactions.find(
+              (tx) =>
+                tx.fromPartyId === transfer.fromActorId &&
+                tx.toPartyId === transfer.toActorId
             );
 
             // Get pricing from blockchain based on the recipient's role
@@ -2644,7 +2672,9 @@ app.get("/api/verify/:batchId", async (req, res) => {
             const blockchainPrice = rolePricing.pricePerUnit;
 
             // Prefer blockchain pricing, fall back to transaction pricing
-            const pricePerUnit = blockchainPrice || (matchingTx ? matchingTx.totalAmount / dbBatch.quantity : null);
+            const pricePerUnit =
+              blockchainPrice ||
+              (matchingTx ? matchingTx.totalAmount / dbBatch.quantity : null);
 
             return {
               from: fromName,
@@ -2656,46 +2686,67 @@ app.get("/api/verify/:batchId", async (req, res) => {
               location: transfer.transferLocation,
               quantity: dbBatch.quantity, // BatchTransfer doesn't have quantity, use batch quantity
               pricePerUnit: pricePerUnit,
-              totalValue: pricePerUnit ? pricePerUnit * dbBatch.quantity : matchingTx?.totalAmount,
+              totalValue: pricePerUnit
+                ? pricePerUnit * dbBatch.quantity
+                : matchingTx?.totalAmount,
               notes: transfer.notes,
-              status: transfer.status
+              status: transfer.status,
             };
           })
         );
 
-        console.log('📊 Ownership History Built:', ownershipHistory.length, 'entries');
+        console.log(
+          "📊 Ownership History Built:",
+          ownershipHistory.length,
+          "entries"
+        );
         if (ownershipHistory.length > 0) {
-          console.log('📊 Ownership History Details:', JSON.stringify(ownershipHistory, null, 2));
+          console.log(
+            "📊 Ownership History Details:",
+            JSON.stringify(ownershipHistory, null, 2)
+          );
         }
 
         // If no transfer history found but batch is SOLD/DELIVERED/IN_RETAIL, create synthetic history
-        if (ownershipHistory.length === 0 && (dbBatch.status === 'SOLD' || dbBatch.status === 'DELIVERED' || dbBatch.status === 'IN_RETAIL')) {
-          console.log('⚠️ No transfer history found for', dbBatch.status, 'batch, creating synthetic history');
+        if (
+          ownershipHistory.length === 0 &&
+          (dbBatch.status === "SOLD" ||
+            dbBatch.status === "DELIVERED" ||
+            dbBatch.status === "IN_RETAIL")
+        ) {
+          console.log(
+            "⚠️ No transfer history found for",
+            dbBatch.status,
+            "batch, creating synthetic history"
+          );
 
           // Create a synthetic sale record
           ownershipHistory.push({
-            from: dbBatch.farmer?.farmName || 'Farmer',
-            to: 'Customer',
-            fromRole: 'FARMER',
-            toRole: 'RETAILER',
+            from: dbBatch.farmer?.farmName || "Farmer",
+            to: "Customer",
+            fromRole: "FARMER",
+            toRole: "RETAILER",
             transferDate: dbBatch.updatedAt,
             timestamp: dbBatch.updatedAt,
-            location: 'Market',
+            location: "Market",
             quantity: dbBatch.quantity,
             pricePerUnit: dbBatch.pricePerUnit,
             totalValue: dbBatch.pricePerUnit * dbBatch.quantity,
             notes: `Direct sale - Status: ${dbBatch.status}`,
-            status: 'COMPLETED'
+            status: "COMPLETED",
           });
 
-          console.log('📊 Synthetic Ownership History created:', JSON.stringify(ownershipHistory, null, 2));
+          console.log(
+            "📊 Synthetic Ownership History created:",
+            JSON.stringify(ownershipHistory, null, 2)
+          );
         }
       } catch (err) {
-        console.error('❌ BatchTransfer table error:', err);
-        console.error('❌ Error stack:', err.stack);
+        console.error("❌ BatchTransfer table error:", err);
+        console.error("❌ Error stack:", err.stack);
       }
     } else {
-      console.log('⚠️ dbBatch is null, cannot retrieve ownership history');
+      console.log("⚠️ dbBatch is null, cannot retrieve ownership history");
     }
 
     // Get batch lineage (parent/child relationships)
@@ -2751,38 +2802,41 @@ app.get("/api/verify/:batchId", async (req, res) => {
       verificationTime: new Date().toISOString(),
 
       // Basic batch info (public)
-      batchInfo: dbBatch ? {
-        productType: dbBatch.productType,
-        quantity: dbBatch.quantity,
-        unit: dbBatch.unit || 'kg',
-        harvestDate: dbBatch.harvestDate,
-        status: dbBatch.status,
-        pricePerUnit: dbBatch.pricePerUnit,
-        currency: 'MYR',
-        farmer: {
-          farmName: dbBatch.farmer?.farmName,
-          user: dbBatch.farmer?.user,
-          bio: dbBatch.farmer?.bio,
-        },
-        farmLocation: dbBatch.farmLocation,
-        location: dbBatch.farmLocation?.location || dbBatch.farmLocation?.farmName,
-        certifications: dbBatch.certifications,
-        notes: dbBatch.notes,
-        // Additional fields
-        crop: dbBatch.productType,
-        variety: dbBatch.variety,
-        cropType: dbBatch.cropType,
-        qualityGrade: dbBatch.qualityGrade,
-        moistureContent: dbBatch.moistureContent,
-        proteinContent: dbBatch.proteinContent,
-      } : {
-        productType: blockchainVerification?.crop,
-        quantity: blockchainVerification?.quantity,
-        harvestDate: blockchainVerification?.createdDate,
-        status: blockchainVerification?.status,
-        farmer: blockchainVerification?.farmer,
-        location: blockchainVerification?.location,
-      },
+      batchInfo: dbBatch
+        ? {
+            productType: dbBatch.productType,
+            quantity: dbBatch.quantity,
+            unit: dbBatch.unit || "kg",
+            harvestDate: dbBatch.harvestDate,
+            status: dbBatch.status,
+            pricePerUnit: dbBatch.pricePerUnit,
+            currency: "MYR",
+            farmer: {
+              farmName: dbBatch.farmer?.farmName,
+              user: dbBatch.farmer?.user,
+              bio: dbBatch.farmer?.bio,
+            },
+            farmLocation: dbBatch.farmLocation,
+            location:
+              dbBatch.farmLocation?.location || dbBatch.farmLocation?.farmName,
+            certifications: dbBatch.certifications,
+            notes: dbBatch.notes,
+            // Additional fields
+            crop: dbBatch.productType,
+            variety: dbBatch.variety,
+            cropType: dbBatch.cropType,
+            qualityGrade: dbBatch.qualityGrade,
+            moistureContent: dbBatch.moistureContent,
+            proteinContent: dbBatch.proteinContent,
+          }
+        : {
+            productType: blockchainVerification?.crop,
+            quantity: blockchainVerification?.quantity,
+            harvestDate: blockchainVerification?.createdDate,
+            status: blockchainVerification?.status,
+            farmer: blockchainVerification?.farmer,
+            location: blockchainVerification?.location,
+          },
 
       // Verification details
       verification: {
@@ -2812,30 +2866,35 @@ app.get("/api/verify/:batchId", async (req, res) => {
             currentStage: dbBatch.status,
 
             // Processing stages with details
-            processingStages: dbBatch.processingRecords?.map(record => {
-              // Get pricing from blockchain if available
-              const processorPricing = blockchainPricing['PROCESSOR'] || {};
-              return {
-                processor: record.processor?.user?.username || 'Processor',
-                processorName: record.processor?.facilityName || 'Processing Facility',
-                facility: record.processor?.facilityName,
-                location: record.processor?.location,
-                timestamp: record.processingDate,
-                date: record.processingDate,
-                inputQuantity: record.inputQuantity,
-                outputQuantity: record.outputQuantity,
-                quantity: record.outputQuantity,
-                unit: dbBatch.unit,
-                pricePerUnit: processorPricing.pricePerUnit || dbBatch.pricePerUnit,
-                currency: processorPricing.currency || 'MYR',
-                notes: record.notes || `Processed: ${record.inputQuantity} ${dbBatch.unit} → ${record.outputQuantity} ${dbBatch.unit}`,
-              };
-            }) || [],
+            processingStages:
+              dbBatch.processingRecords?.map((record) => {
+                // Get pricing from blockchain if available
+                const processorPricing = blockchainPricing["PROCESSOR"] || {};
+                return {
+                  processor: record.processor?.user?.username || "Processor",
+                  processorName:
+                    record.processor?.facilityName || "Processing Facility",
+                  facility: record.processor?.facilityName,
+                  location: record.processor?.location,
+                  timestamp: record.processingDate,
+                  date: record.processingDate,
+                  inputQuantity: record.inputQuantity,
+                  outputQuantity: record.outputQuantity,
+                  quantity: record.outputQuantity,
+                  unit: dbBatch.unit,
+                  pricePerUnit:
+                    processorPricing.pricePerUnit || dbBatch.pricePerUnit,
+                  currency: processorPricing.currency || "MYR",
+                  notes:
+                    record.notes ||
+                    `Processed: ${record.inputQuantity} ${dbBatch.unit} → ${record.outputQuantity} ${dbBatch.unit}`,
+                };
+              }) || [],
 
             // Distribution/Transfer stages from ownership history (ONLY DISTRIBUTOR)
             distributionStages: (() => {
               const stages = ownershipHistory
-                .filter(transfer => transfer.toRole === 'DISTRIBUTOR')
+                .filter((transfer) => transfer.toRole === "DISTRIBUTOR")
                 .map((transfer, idx) => {
                   // Get pricing from blockchain based on the role
                   const rolePricing = blockchainPricing[transfer.toRole] || {};
@@ -2843,25 +2902,26 @@ app.get("/api/verify/:batchId", async (req, res) => {
                   return {
                     distributor: transfer.to,
                     distributorName: transfer.to,
-                    warehouse: transfer.location || 'Distribution Center',
+                    warehouse: transfer.location || "Distribution Center",
                     location: transfer.location,
                     timestamp: transfer.transferDate,
                     date: transfer.transferDate,
                     quantity: transfer.quantity,
                     unit: dbBatch.unit,
-                    pricePerUnit: rolePricing.pricePerUnit || transfer.pricePerUnit || null,
-                    currency: rolePricing.currency || 'MYR',
+                    pricePerUnit:
+                      rolePricing.pricePerUnit || transfer.pricePerUnit || null,
+                    currency: rolePricing.currency || "MYR",
                     notes: transfer.notes || `Transferred to ${transfer.to}`,
                   };
                 });
-              console.log('🚚 Distribution Stages:', stages.length, stages);
+              console.log("🚚 Distribution Stages:", stages.length, stages);
               return stages;
             })(),
 
             // Retail stages from ownership history (ONLY RETAILER)
             retailStages: (() => {
               const stages = ownershipHistory
-                .filter(transfer => transfer.toRole === 'RETAILER')
+                .filter((transfer) => transfer.toRole === "RETAILER")
                 .map((transfer, idx) => {
                   // Get pricing from blockchain based on the role
                   const rolePricing = blockchainPricing[transfer.toRole] || {};
@@ -2869,18 +2929,19 @@ app.get("/api/verify/:batchId", async (req, res) => {
                   return {
                     retailer: transfer.to,
                     retailerName: transfer.to,
-                    store: transfer.location || 'Retail Store',
+                    store: transfer.location || "Retail Store",
                     location: transfer.location,
                     timestamp: transfer.transferDate,
                     date: transfer.transferDate,
                     quantity: transfer.quantity,
                     unit: dbBatch.unit,
-                    pricePerUnit: rolePricing.pricePerUnit || transfer.pricePerUnit || null,
-                    currency: rolePricing.currency || 'MYR',
+                    pricePerUnit:
+                      rolePricing.pricePerUnit || transfer.pricePerUnit || null,
+                    currency: rolePricing.currency || "MYR",
                     notes: transfer.notes || `Transferred to ${transfer.to}`,
                   };
                 });
-              console.log('🏪 Retail Stages:', stages.length, stages);
+              console.log("🏪 Retail Stages:", stages.length, stages);
               return stages;
             })(),
 
@@ -2894,8 +2955,8 @@ app.get("/api/verify/:batchId", async (req, res) => {
                     testType: dbBatch.qualityTests[0].testType,
                     result: dbBatch.qualityTests[0].passFailStatus,
                     date: dbBatch.qualityTests[0].testDate,
-                    inspector: 'Quality Inspector',
-                    facility: 'Quality Lab',
+                    inspector: "Quality Inspector",
+                    facility: "Quality Lab",
                   }
                 : null,
             },
@@ -2908,13 +2969,18 @@ app.get("/api/verify/:batchId", async (req, res) => {
       message: "Batch verified successfully",
     };
 
-    console.log('✅ Verification Response Summary:', {
+    console.log("✅ Verification Response Summary:", {
       batchId: verificationResponse.batchId,
       batchStatus: dbBatch?.status,
-      hasOwnershipHistory: verificationResponse.supplyChainSummary?.ownershipHistory?.length || 0,
-      processingStages: verificationResponse.supplyChainSummary?.processingStages?.length || 0,
-      distributionStages: verificationResponse.supplyChainSummary?.distributionStages?.length || 0,
-      ownershipHistoryData: verificationResponse.supplyChainSummary?.ownershipHistory,
+      hasOwnershipHistory:
+        verificationResponse.supplyChainSummary?.ownershipHistory?.length || 0,
+      processingStages:
+        verificationResponse.supplyChainSummary?.processingStages?.length || 0,
+      distributionStages:
+        verificationResponse.supplyChainSummary?.distributionStages?.length ||
+        0,
+      ownershipHistoryData:
+        verificationResponse.supplyChainSummary?.ownershipHistory,
     });
 
     res.json(verificationResponse);
@@ -4876,29 +4942,104 @@ app.post(
     }
   }
 );
-app.get("/api/batches/all-with-lineage", async (req, res) => {
+// Fixed endpoint with proper null checks
+app.get("/api/batches/all-with-lineage", authenticate, async (req, res) => {
   let gateway = null;
   try {
-    const connection = await blockchainService.connectToNetwork();
-    gateway = connection?.gateway;
-    const contract = connection?.contract;
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        error: "Authentication required. User not found in request.",
+      });
+    }
+    const userId = req.user.id;
+    const userRole = req.user.role;
+    let connection = null;
+    let contract = null;
 
+    try {
+      connection = await blockchainService.connectToNetwork();
+      gateway = connection?.gateway;
+      contract = connection?.contract;
+    } catch (bcError) {
+      console.warn(
+        "Blockchain connection failed, continuing without it:",
+        bcError.message
+      );
+    }
+
+    let whereClause = {};
+
+    if (userRole === "FARMER") {
+      // Fetch the farmer profile
+      const farmerProfile = await prisma.farmerProfile.findUnique({
+        where: { userId: userId },
+      });
+
+      // Check if farmerProfile exists
+      if (!farmerProfile) {
+        console.error(
+          `❌ Profile mismatch: User ${userId} has role FARMER but no profile record.`
+        );
+        return res.status(404).json({
+          success: false,
+          error: "Farmer profile record not found.",
+        });
+      }
+
+      whereClause = { farmerId: farmerProfile.id };
+    }
+    // For other roles (ADMIN, PROCESSOR, etc.), whereClause remains {} to fetch all batches
+
+    // Fetch all batches with proper includes
     const allBatches = await prisma.batch.findMany({
+      where: whereClause,
       include: {
-        farmer: { select: { firstName: true, lastName: true, farmName: true } },
+        farmer: {
+          select: {
+            id: true, // Include id for safety
+            firstName: true,
+            lastName: true,
+            farmName: true,
+          },
+        },
       },
     });
 
+    // Filter out batches with missing farmer profiles
+    const validBatches = allBatches.filter((batch) => {
+      if (!batch.farmer) {
+        console.warn(
+          `⚠️ Batch ${batch.batchId} has no associated farmer profile - skipping`
+        );
+        return false;
+      }
+      return true;
+    });
+
+    if (validBatches.length === 0) {
+      return res.json({
+        success: true,
+        count: 0,
+        batchesData: [],
+        message: "No valid batches found",
+      });
+    }
+
+    // Get parent IDs for lineage tracking
     const parentIds = [
-      ...new Set(allBatches.map((b) => b.parentBatchId).filter(Boolean)),
+      ...new Set(validBatches.map((b) => b.parentBatchId).filter(Boolean)),
     ];
+
     const parents = await prisma.batch.findMany({
       where: { id: { in: parentIds } },
     });
+
     const parentLookup = new Map(parents.map((p) => [p.id, p]));
 
+    // Process each batch to build history and routes
     const batchesData = await Promise.all(
-      allBatches.map(async (currentBatch) => {
+      validBatches.map(async (currentBatch) => {
         const getFormattedPoints = async (targetId, limitDate = null) => {
           const filter = limitDate ? { lte: limitDate } : {};
 
@@ -4918,6 +5059,7 @@ app.get("/api/batches/all-with-lineage", async (req, res) => {
               }),
             ]);
 
+          // Get blockchain history if available
           let blockchainHistory = [];
           if (contract) {
             try {
@@ -4933,28 +5075,22 @@ app.get("/api/batches/all-with-lineage", async (req, res) => {
               );
             }
           }
+
+          // Helper function to verify blockchain records
           const getBcVerification = (dbTimestamp, status) => {
             const match = blockchainHistory.find((bh) => {
               if (bh.status !== status) return false;
 
-              // Parse blockchain timestamp (handle both Unix and ISO formats)
               let bcTimestamp;
-
-              // Check if it's a Unix timestamp (number as string with optional decimal)
               if (/^\d+(\.\d+)?$/.test(bh.timestamp)) {
-                // Unix timestamp: "1736582400.123" → convert to milliseconds
                 bcTimestamp = parseFloat(bh.timestamp) * 1000;
               } else {
-                // ISO string: "2026-01-11T10:30:00.000Z" → parse to milliseconds
                 bcTimestamp = new Date(bh.timestamp).getTime();
               }
 
-              // Parse database timestamp
               const dbTimestampMs = new Date(dbTimestamp).getTime();
-
-              // Check if timestamps match within 60 seconds (60000 ms)
               const timeDiff = Math.abs(bcTimestamp - dbTimestampMs);
-              return timeDiff < 300000; // 5 minute tolerance in milliseconds
+              return timeDiff < 300000; // 5 minute tolerance
             });
 
             return match
@@ -4962,13 +5098,15 @@ app.get("/api/batches/all-with-lineage", async (req, res) => {
                   txId: match.txId,
                   verifiedBy: match.updatedBy,
                   isImmutable: true,
-                  blockchainTimestamp: match.timestamp, // Include for debugging
+                  blockchainTimestamp: match.timestamp,
                 }
               : null;
           };
+
           const parentInfo = currentBatch.parentBatchId
             ? parentLookup.get(currentBatch.parentBatchId)
             : null;
+
           return [
             ...locations.map((l) => ({
               eventType: l.eventType,
@@ -4983,16 +5121,10 @@ app.get("/api/batches/all-with-lineage", async (req, res) => {
                 splitTimestamp: limitDate
                   ? new Date(limitDate).getTime()
                   : null,
-                temperature: l.metadata?.temperature
-                  ? l.metadata.temperature
-                  : null,
-                humidity: l.metadata?.humidity ? l.metadata.humidity : null,
-                weather_main: l.metadata?.weather_main
-                  ? l.metadata.weather_main
-                  : null,
-                weather_desc: l.metadata?.weather_desc
-                  ? l.metadata.weather_desc
-                  : null,
+                temperature: l.metadata?.temperature || null,
+                humidity: l.metadata?.humidity || null,
+                weather_main: l.metadata?.weather_main || null,
+                weather_desc: l.metadata?.weather_desc || null,
                 parentBatch: parentInfo ? parentInfo.batchId : null,
                 blockchain: getBcVerification(l.timestamp, l.eventType),
               },
@@ -5066,16 +5198,15 @@ app.get("/api/batches/all-with-lineage", async (req, res) => {
             timestamp: route.timestamp
               ? new Date(route.timestamp).getTime()
               : 0,
-            humidity: route.metadata?.humidity ? route.metadata.humidity : null,
-            temperature: route.metadata?.temperature
-              ? route.metadata.temperature
-              : null,
+            humidity: route.metadata?.humidity || null,
+            temperature: route.metadata?.temperature || null,
           }));
         };
 
         let combinedPoints = [];
         let combinedRoutes = [];
 
+        // Get parent batch history if this is a split batch
         if (currentBatch.parentBatchId && currentBatch.splitDate) {
           const [pPoints, pRoutes] = await Promise.all([
             getFormattedPoints(
@@ -5091,6 +5222,7 @@ app.get("/api/batches/all-with-lineage", async (req, res) => {
           combinedRoutes.push(...pRoutes);
         }
 
+        // Get current batch history
         const [cPoints, cRoutes] = await Promise.all([
           getFormattedPoints(currentBatch.id),
           getFormattedRoutes(currentBatch.id),
@@ -5098,6 +5230,7 @@ app.get("/api/batches/all-with-lineage", async (req, res) => {
         combinedPoints.push(...cPoints);
         combinedRoutes.push(...cRoutes);
 
+        // Sort points chronologically
         combinedPoints.sort(
           (a, b) =>
             new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
@@ -5122,7 +5255,20 @@ app.get("/api/batches/all-with-lineage", async (req, res) => {
     });
   } catch (error) {
     console.error("Global history fetch error:", error);
-    res.status(500).json({ success: false, error: "Internal server error" });
+    res.status(500).json({
+      success: false,
+      error: "Internal server error",
+      details: error.message,
+    });
+  } finally {
+    // Always disconnect gateway
+    if (gateway) {
+      try {
+        await gateway.disconnect();
+      } catch (e) {
+        console.error("Error disconnecting gateway:", e);
+      }
+    }
   }
 });
 
@@ -6033,24 +6179,42 @@ app.put(
   }
 );
 
-app.get("/api/batches/active-locations", async (req, res) => {
+app.get("/api/batches/active-locations", authenticate, async (req, res) => {
   try {
-    // 1. Fetch all active batches in one query
-    const activeBatches = await prisma.batch.findMany({
-      where: {
-        status: {
-          in: [
-            "REGISTERED",
-            "PROCESSING",
-            "PROCESSED",
-            "IN_TRANSIT",
-            "IN_DISTRIBUTION",
-            "RETAIL_READY",
-            "IN_RETAIL",
-            "SOLD",
-          ],
-        },
+    const userId = req.user.id;
+    const userRole = req.user.role;
+
+    let whereClause = {
+      status: {
+        in: [
+          "REGISTERED",
+          "PROCESSING",
+          "PROCESSED",
+          "IN_TRANSIT",
+          "IN_DISTRIBUTION",
+          "RETAIL_READY",
+          "IN_RETAIL",
+          "SOLD",
+        ],
       },
+    };
+
+    if (userRole === "FARMER") {
+      const farmerProfile = await prisma.farmerProfile.findUnique({
+        where: { userId: userId },
+      });
+
+      if (!farmerProfile) {
+        return res
+          .status(404)
+          .json({ success: false, error: "Farmer profile not found" });
+      }
+
+      whereClause.farmerId = farmerProfile.id;
+    }
+
+    const activeBatches = await prisma.batch.findMany({
+      where: whereClause,
       include: {
         farmer: { select: { firstName: true, lastName: true, farmName: true } },
         farmLocation: true,
@@ -8097,9 +8261,10 @@ app.post(
 
       // ========== ADD PRICING RECORD TO BLOCKCHAIN ==========
       // Calculate total cost and price per unit for distributor stage
-      const totalCost = (distributionCost ? parseFloat(distributionCost) : 0) +
-                       (storageCost ? parseFloat(storageCost) : 0) +
-                       (handlingCost ? parseFloat(handlingCost) : 0);
+      const totalCost =
+        (distributionCost ? parseFloat(distributionCost) : 0) +
+        (storageCost ? parseFloat(storageCost) : 0) +
+        (handlingCost ? parseFloat(handlingCost) : 0);
 
       // Get previous price (from batch or calculate from costs)
       let distributorPricePerUnit = 0;
@@ -8111,7 +8276,7 @@ app.post(
         const currentBatchPrice = parseFloat(batch.pricePerUnit || 0);
 
         // Calculate new price = previous price + (total costs / quantity)
-        distributorPricePerUnit = currentBatchPrice + (totalCost / quantity);
+        distributorPricePerUnit = currentBatchPrice + totalCost / quantity;
         distributorTotalValue = distributorPricePerUnit * quantity;
 
         // Add pricing record to blockchain
@@ -8122,7 +8287,9 @@ app.post(
             totalValue: distributorTotalValue,
             breakdown: {
               basePrice: currentBatchPrice,
-              distributionCost: distributionCost ? parseFloat(distributionCost) : 0,
+              distributionCost: distributionCost
+                ? parseFloat(distributionCost)
+                : 0,
               storageCost: storageCost ? parseFloat(storageCost) : 0,
               handlingCost: handlingCost ? parseFloat(handlingCost) : 0,
             },
@@ -8137,9 +8304,16 @@ app.post(
             );
           });
 
-          console.log(`💰 Pricing record added to blockchain for distributor - Price: MYR ${distributorPricePerUnit.toFixed(2)}/unit`);
+          console.log(
+            `💰 Pricing record added to blockchain for distributor - Price: MYR ${distributorPricePerUnit.toFixed(
+              2
+            )}/unit`
+          );
         } catch (pricingError) {
-          console.error("⚠️ Failed to add pricing record to blockchain:", pricingError.message);
+          console.error(
+            "⚠️ Failed to add pricing record to blockchain:",
+            pricingError.message
+          );
           // Don't fail the whole request if pricing fails
         }
       }
@@ -8920,7 +9094,11 @@ app.get("/api/refresh-token", async (req, res) => {
   const ARCGIS_TOKEN_URL = "https://www.arcgis.com/sharing/rest/oauth2/token";
 
   // Validate environment variables
-  if (!process.env.ARCGIS_CLIENT_ID || !process.env.ARCGIS_CLIENT_SECRET || !process.env.ARCGIS_REFRESH_TOKEN) {
+  if (
+    !process.env.ARCGIS_CLIENT_ID ||
+    !process.env.ARCGIS_CLIENT_SECRET ||
+    !process.env.ARCGIS_REFRESH_TOKEN
+  ) {
     console.error("Missing ArcGIS Environment Variables.");
     return res.status(500).json({
       error: "Server Configuration Error: Missing credentials.",
@@ -8943,7 +9121,10 @@ app.get("/api/refresh-token", async (req, res) => {
 
     if (response.status !== 200) {
       return res.status(response.status).json({
-        error: response.data.error_description || response.data.error || "ArcGIS token refresh failed.",
+        error:
+          response.data.error_description ||
+          response.data.error ||
+          "ArcGIS token refresh failed.",
       });
     }
 
@@ -8980,8 +9161,12 @@ app.get("/api/weather", async (req, res) => {
 
   try {
     const [weatherResponse, forecastResponse] = await Promise.all([
-      axios.get(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${OPENWEATHER_API_KEY}&units=metric`),
-      axios.get(`https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${OPENWEATHER_API_KEY}&units=metric`)
+      axios.get(
+        `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${OPENWEATHER_API_KEY}&units=metric`
+      ),
+      axios.get(
+        `https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${OPENWEATHER_API_KEY}&units=metric`
+      ),
     ]);
 
     console.log("Successfully fetched weather and forecast data");
