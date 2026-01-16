@@ -27,6 +27,7 @@ import {
   XCircle,
   ShieldAlert,
 } from "lucide-react";
+import ProcessingStartModal from "./ProcessingStartModal";
 
 const RetailerDashboard = () => {
   const { user } = useAuth();
@@ -444,7 +445,9 @@ const RetailerDashboard = () => {
         </div>
         <div>
           <span className="text-gray-500">Origin:</span>
-          <span className="ml-2 font-medium">{batch.location || "N/A"}</span>
+          <span className="ml-2 font-medium">
+            {batch.farmLocation.location || "N/A"}
+          </span>
         </div>
         <div>
           <span className="text-gray-500">Harvest Date:</span>
@@ -521,7 +524,7 @@ const RetailerDashboard = () => {
       {/* Purple Gradient Welcome Banner */}
       <div className="bg-gradient-to-r from-orange-700 to-orange-600 rounded-xl shadow-lg p-8 text-white">
         <h1 className="text-3xl font-bold mb-2 flex items-center gap-2">
-          Welcome back, {user?.username}! 
+          Welcome back, {user?.username}!
         </h1>
         <p className="text-purple-50 text-lg">
           Manage your retail inventory and complete the supply chain journey.
@@ -563,7 +566,9 @@ const RetailerDashboard = () => {
       {/* Weather Conditions - Horizontal Layout */}
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Weather Conditions</h3>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Weather Conditions
+          </h3>
           <Sun className="h-5 w-5 text-yellow-500" />
         </div>
 
@@ -574,9 +579,13 @@ const RetailerDashboard = () => {
         ) : weatherData.error ? (
           <div className="text-center py-6">
             <CloudRain className="h-10 w-10 mx-auto mb-3 text-gray-400" />
-            <p className="text-gray-500 dark:text-gray-400">Weather data unavailable</p>
+            <p className="text-gray-500 dark:text-gray-400">
+              Weather data unavailable
+            </p>
             <button
-              onClick={() => fetchWeatherData(currentLatitude, currentLongitude)}
+              onClick={() =>
+                fetchWeatherData(currentLatitude, currentLongitude)
+              }
               className="mt-3 px-4 py-2 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-lg text-sm transition-colors"
             >
               Retry
@@ -590,7 +599,9 @@ const RetailerDashboard = () => {
                 <Sun className="h-6 w-6 text-yellow-600 dark:text-yellow-400" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-gray-900 dark:text-white">{weatherData.temperature}</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-white">
+                  {weatherData.temperature}
+                </p>
                 <p className="text-sm text-gray-500 dark:text-gray-400 flex items-center">
                   <MapPin className="h-3 w-3 mr-1" />
                   {weatherData.location}
@@ -607,8 +618,12 @@ const RetailerDashboard = () => {
                 <Droplets className="h-6 w-6 text-blue-600 dark:text-blue-400" />
               </div>
               <div>
-                <p className="text-lg font-semibold text-gray-900 dark:text-white">{weatherData.humidity}</p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Humidity</p>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {weatherData.humidity}
+                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Humidity
+                </p>
               </div>
             </div>
 
@@ -621,8 +636,12 @@ const RetailerDashboard = () => {
                 <Wind className="h-6 w-6 text-green-600 dark:text-green-400" />
               </div>
               <div>
-                <p className="text-lg font-semibold text-gray-900 dark:text-white">{weatherData.windSpeed}</p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Wind Speed</p>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                  {weatherData.windSpeed}
+                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Wind Speed
+                </p>
               </div>
             </div>
 
@@ -635,8 +654,12 @@ const RetailerDashboard = () => {
                 <CloudRain className="h-6 w-6 text-orange-600 dark:text-orange-400" />
               </div>
               <div>
-                <p className="text-lg font-semibold text-gray-900 dark:text-white capitalize">{weatherData.weather_description}</p>
-                <p className="text-sm text-gray-500 dark:text-gray-400">Conditions</p>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white capitalize">
+                  {weatherData.weather_description}
+                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Conditions
+                </p>
               </div>
             </div>
           </div>

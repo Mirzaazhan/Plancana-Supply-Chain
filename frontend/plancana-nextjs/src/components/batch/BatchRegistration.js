@@ -36,7 +36,6 @@ const BatchRegistration = () => {
   const [batchId, setBatchId] = useState("");
   const [availableVarieties, setAvailableVarieties] = useState([]);
   const [filteredCropOptions, setFilteredCropOptions] = useState([]);
-  const [validationErrors, setValidationErrors] = useState({});
 
   const [formData, setFormData] = useState({
     // Basic Info
@@ -92,6 +91,26 @@ const BatchRegistration = () => {
     transportationAccess: "",
   });
 
+  const calculateEMC = (temp, humidity) => {
+    if (temp == null || humidity == null) return "";
+    const T = parseFloat(temp);
+    const H = parseFloat(humidity) / 100;
+
+    // Formula constants
+    const W = 330 + 0.452 * T + 0.00415 * T * T;
+    const K = 0.791 + 0.000463 * T - 0.000000844 * T * T;
+    const K1 = 6.34 + 0.000775 * T - 0.0000935 * T * T;
+    const K2 = 1.09 + 0.0284 * T - 0.0000904 * T * T;
+
+    const term1 = (K * H) / (1 - K * H);
+    const term2 =
+      (K1 * K * H + 2 * K1 * K2 * K * K * H * H) /
+      (1 + K1 * K * H + K1 * K2 * K * K * H * H);
+
+    const emc = (1800 / W) * (term1 + term2);
+    return emc.toFixed(2); // Returns as string for the input field
+  };
+
   const steps = [
     { title: "Basic Info", description: "Enter basic batch information" },
     {
@@ -129,16 +148,6 @@ const BatchRegistration = () => {
     if (formData[field] === value) {
       return;
     }
-
-    // Clear validation error for this field when user starts typing
-    if (validationErrors[field]) {
-      setValidationErrors((prev) => {
-        const newErrors = { ...prev };
-        delete newErrors[field];
-        return newErrors;
-      });
-    }
-
     setFormData((prev) => {
       const updated = {
         ...prev,
@@ -224,80 +233,22 @@ const BatchRegistration = () => {
     }
   };
 
-  // Validate and set errors (called on Next button click)
   const validateStep = (step) => {
-    const errors = {};
-
     switch (step) {
-      case 0: // Basic Info - Detailed validation
-        // Required fields
-        if (!formData.farmer || formData.farmer.trim() === "") {
-          errors.farmer = "Farmer name is required";
-        }
-
-        if (!formData.cropType) {
-          errors.cropType = "Crop type is required";
-        }
-
-        if (!formData.crop || formData.crop.trim() === "") {
-          errors.crop = "Product name is required";
-        }
-
-        if (!formData.location || formData.location.trim() === "") {
-          errors.location = "Location is required";
-        }
-
-        // Quantity validation
-        if (!formData.quantity || formData.quantity === "") {
-          errors.quantity = "Quantity is required";
-        } else {
-          const qty = parseFloat(formData.quantity);
-          if (isNaN(qty)) {
-            errors.quantity = "Quantity must be a valid number";
-          } else if (qty <= 0) {
-            errors.quantity = "Quantity must be greater than 0";
-          } else if (qty > 1000000) {
-            errors.quantity = "Quantity seems too large. Please verify.";
-          }
-        }
-
-        // Quality grade validation
-        if (!formData.qualityGrade) {
-          errors.qualityGrade = "Quality grade is required";
-        }
-
-        // Moisture content validation
-        if (!formData.moistureContent || formData.moistureContent === "") {
-          errors.moistureContent = "Moisture content is required";
-        } else {
-          const moisture = parseFloat(formData.moistureContent);
-          if (isNaN(moisture)) {
-            errors.moistureContent = "Moisture content must be a number";
-          } else if (moisture < 0 || moisture > 100) {
-            errors.moistureContent =
-              "Moisture content must be between 0 and 100%";
-          }
-        }
-
-        // Price validation (if provided)
-        if (formData.pricePerUnit && formData.pricePerUnit !== "") {
-          const price = parseFloat(formData.pricePerUnit);
-          if (isNaN(price)) {
-            errors.pricePerUnit = "Price must be a valid number";
-          } else if (price < 0) {
-            errors.pricePerUnit = "Price cannot be negative";
-          }
-        }
-
-        setValidationErrors(errors);
-        return Object.keys(errors).length === 0;
-
+      case 0: // Basic Info
+        return (
+          formData.farmer &&
+          formData.cropType &&
+          formData.crop &&
+          formData.quantity &&
+          formData.location &&
+          formData.qualityGrade &&
+          formData.moistureContent
+        );
       case 1: // Farm Details (optional step)
-        return true;
-
+        return true; // All fields in this step are optional
       case 2: // Verification
         return true;
-
       default:
         return true;
     }
@@ -305,15 +256,9 @@ const BatchRegistration = () => {
 
   const nextStep = () => {
     if (validateStep(currentStep)) {
-      setValidationErrors({});
       setCurrentStep((prev) => Math.min(prev + 1, steps.length - 1));
     } else {
-      toast.error("Please fix the errors before proceeding");
-      // Scroll to first error
-      const firstErrorField = document.querySelector(".border-red-500");
-      if (firstErrorField) {
-        firstErrorField.scrollIntoView({ behavior: "smooth", block: "center" });
-      }
+      toast.error("Please fill in all required fields");
     }
   };
 
@@ -359,17 +304,20 @@ const BatchRegistration = () => {
 
   useEffect(() => {
     if (formData.latitude && formData.longitude) {
-      fetch(
-        `/api/api/weather?lat=${formData.latitude}&lon=${formData.longitude}`
-      )
+      fetch(`/api/weather?lat=${formData.latitude}&lon=${formData.longitude}`)
         .then((response) => response.json())
         .then((data) => {
+          const autoMoisture = calculateEMC(
+            data.weather.main.temp,
+            data.weather.main.humidity
+          );
           setFormData((prev) => ({
             ...prev,
             temperature: data.weather.main.temp,
             humidity: data.weather.main.humidity,
             weather_main: data.weather.weather[0].main,
             weather_description: data.weather.weather[0].description,
+            moistureContent: autoMoisture,
           }));
         })
         .catch((error) => {
@@ -428,11 +376,7 @@ const BatchRegistration = () => {
                       onChange={(e) =>
                         handleInputChange("cropType", e.target.value)
                       }
-                      className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 ${
-                        validationErrors.cropType
-                          ? "border-red-500 bg-red-50"
-                          : "border-gray-300"
-                      }`}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                       required
                     >
                       <option value="">Select crop type</option>
@@ -442,22 +386,6 @@ const BatchRegistration = () => {
                         </option>
                       ))}
                     </select>
-                    {validationErrors.cropType && (
-                      <p className="mt-1 text-sm text-red-600 flex items-center">
-                        <svg
-                          className="h-4 w-4 mr-1"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                        {validationErrors.cropType}
-                      </p>
-                    )}
                   </div>
 
                   <AutocompleteInput
@@ -515,29 +443,9 @@ const BatchRegistration = () => {
                         onChange={(e) =>
                           handleInputChange("quantity", e.target.value)
                         }
-                        className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 ${
-                          validationErrors.quantity
-                            ? "border-red-500 bg-red-50"
-                            : "border-gray-300"
-                        }`}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                         required
                       />
-                      {validationErrors.quantity && (
-                        <p className="mt-1 text-sm text-red-600 flex items-center">
-                          <svg
-                            className="h-4 w-4 mr-1"
-                            fill="currentColor"
-                            viewBox="0 0 20 20"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                          {validationErrors.quantity}
-                        </p>
-                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -572,7 +480,6 @@ const BatchRegistration = () => {
                     onLongitudeChange={(value) =>
                       handleInputChange("longitude", value)
                     }
-                    required={false}
                     required={false}
                   />
                 </div>
@@ -676,11 +583,7 @@ const BatchRegistration = () => {
                       onChange={(e) =>
                         handleInputChange("qualityGrade", e.target.value)
                       }
-                      className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 ${
-                        validationErrors.qualityGrade
-                          ? "border-red-500 bg-red-50"
-                          : "border-gray-300"
-                      }`}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                     >
                       <option value="">Select quality grade</option>
                       {qualityGradeOptions.map((grade) => (
@@ -689,61 +592,27 @@ const BatchRegistration = () => {
                         </option>
                       ))}
                     </select>
-                    {validationErrors.qualityGrade && (
-                      <p className="mt-1 text-sm text-red-600 flex items-center">
-                        <svg
-                          className="h-4 w-4 mr-1"
-                          fill="currentColor"
-                          viewBox="0 0 20 20"
-                        >
-                          <path
-                            fillRule="evenodd"
-                            d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
-                            clipRule="evenodd"
-                          />
-                        </svg>
-                        {validationErrors.qualityGrade}
-                      </p>
-                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
                         Moisture Content (%){" "}
-                        <span className="text-red-500">*</span>
+                        <span className="text-xs text-blue-600">
+                          (Auto-calculated via EMC)
+                        </span>
                       </label>
                       <input
                         type="number"
                         step="0.1"
-                        placeholder="0.0"
+                        placeholder="Waiting for location..."
                         value={formData.moistureContent}
-                        required
-                        onChange={(e) =>
-                          handleInputChange("moistureContent", e.target.value)
-                        }
-                        className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 ${
-                          validationErrors.moistureContent
-                            ? "border-red-500 bg-red-50"
-                            : "border-gray-300"
-                        }`}
+                        readOnly // Disable manual key-in
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-900 cursor-not-allowed font-semibold"
                       />
-                      {validationErrors.moistureContent && (
-                        <p className="mt-1 text-sm text-red-600 flex items-center">
-                          <svg
-                            className="h-4 w-4 mr-1"
-                            fill="currentColor"
-                            viewBox="0 0 20 20"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                          {validationErrors.moistureContent}
-                        </p>
-                      )}
+                      <p className="text-xs text-gray-500 mt-1 italic">
+                        Value derived from local temperature and humidity.
+                      </p>
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -1838,41 +1707,6 @@ const BatchRegistration = () => {
       {/* Footer Actions */}
       {currentStep < 3 && (
         <div className="bg-white border-t border-gray-200 px-6 py-4">
-          {/* Validation Error Summary */}
-          {currentStep === 0 && Object.keys(validationErrors).length > 0 && (
-            <div className="mb-4 rounded-lg bg-red-50 p-4 border border-red-200">
-              <div className="flex">
-                <div className="flex-shrink-0">
-                  <svg
-                    className="h-5 w-5 text-red-400"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </div>
-                <div className="ml-3 flex-1">
-                  <h3 className="text-sm font-medium text-red-800">
-                    Please fix the following errors:
-                  </h3>
-                  <div className="mt-2 text-sm text-red-700">
-                    <ul className="list-disc pl-5 space-y-1">
-                      {Object.entries(validationErrors).map(
-                        ([field, error]) => (
-                          <li key={field}>{error}</li>
-                        )
-                      )}
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
           <div className="flex items-center justify-between">
             <button
               onClick={prevStep}
@@ -1903,7 +1737,7 @@ const BatchRegistration = () => {
               <button
                 onClick={nextStep}
                 disabled={!validateStep(currentStep)}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-2 rounded-md font-medium transition-colors duration-200"
+                className="max-[431px]:text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-2 rounded-md font-medium transition-colors duration-200"
               >
                 Next
               </button>

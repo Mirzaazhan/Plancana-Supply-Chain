@@ -24,6 +24,8 @@ import {
   FlaskConical,
 } from "lucide-react";
 import MLValidationBadge from "../ml/MLValidationBadge";
+const API_URL =
+  "https://nonnitrogenized-ungravitational-wendie.ngrok-free.dev/api";
 
 const BatchDetails = ({ batchId, onBack, currentUser }) => {
   const router = useRouter();
@@ -50,15 +52,12 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
     try {
       setLoading(true);
       const token = localStorage.getItem("token");
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/batch/${batchId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      const response = await fetch(`${API_URL}/batch/${batchId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
 
       if (!response.ok) {
         throw new Error("Failed to fetch batch details");
@@ -102,14 +101,11 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
   const fetchQRCode = async () => {
     try {
       const token = localStorage.getItem("token");
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/qr/${batchId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+      const response = await fetch(`${API_URL}/qr/${batchId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
       if (response.ok) {
         const data = await response.json();
@@ -166,21 +162,18 @@ const BatchDetails = ({ batchId, onBack, currentUser }) => {
     try {
       setUpdating(true);
       const token = localStorage.getItem("token");
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/batch/${batch.id}/status`,
-        {
-          method: "PUT",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            status: newStatus,
-            updatedBy: currentUser?.username,
-            notes: `Status updated to ${newStatus}`,
-          }),
-        }
-      );
+      const response = await fetch(`${API_URL}/batch/${batch.id}/status`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          status: newStatus,
+          updatedBy: currentUser?.username,
+          notes: `Status updated to ${newStatus}`,
+        }),
+      });
 
       if (response.ok) {
         // Refresh batch data

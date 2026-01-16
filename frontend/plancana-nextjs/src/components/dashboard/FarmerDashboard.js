@@ -123,7 +123,7 @@ const FarmerDashboard = () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
 
-      const response = await fetch(`/api/api/weather?lat=${lat}&lon=${lon}`, {
+      const response = await fetch(`/api/weather?lat=${lat}&lon=${lon}`, {
         signal: controller.signal,
       });
 

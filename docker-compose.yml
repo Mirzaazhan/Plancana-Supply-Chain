@@ -1,0 +1,80 @@
+version: "3.8"
+
+services:
+  # 1. The Database
+  postgres_DB:
+    image: postgis/postgis:14-3.2
+    container_name: postgres_DB
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=plancana_db
+    ports:
+      - "5433:5432" # Windows access on 5433, Internal on 5432
+    networks:
+      - plancana-network
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+
+  # 2. The Backend API
+  plancana-backend:
+    build: ./application # Points to the folder with your Dockerfile
+    container_name: plancana-backend
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@postgres_DB:5432/plancana_db
+      - AS_LOCALHOST=false
+    networks:
+      - plancana-network
+      - fabric_test # Connects to the existing blockchain network
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./application:/app # Bind mount for real-time code updates
+      - /home/iqbal/fyp/fabric-samples/test-network/organizations:/app/organizations
+    depends_on:
+      - postgres_DB
+
+  # 3. The Frontend
+  plancana-frontend:
+    build: ./frontend/plancana-nextjs
+    container_name: plancana-frontend
+    networks:
+      - plancana-network
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost/api
+    depends_on:
+      - plancana-backend
+
+  plancana-tunnel:
+    image: ngrok/ngrok:latest
+    container_name: plancana-tunnel
+    environment:
+      - NGROK_AUTHTOKEN=38FSVMdFcHD5Mt3VvwcvhdpkdTe_3TF9BMRV3HR19xZ1MAAFo
+    command:
+      - "http"
+      - "plancana-proxy:80" # This is correct, but only works if they share a network
+      - "--host-header=localhost"
+    networks:
+      - plancana-network # <--- THIS IS THE MISSING LINK
+    depends_on:
+      - plancana-proxy
+
+  # 4. Nginx Reverse Proxy
+  plancana-proxy:
+    image: nginx:latest
+    container_name: plancana-proxy
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - plancana-network
+    depends_on:
+      - plancana-frontend
+      - plancana-backend
+
+networks:
+  plancana-network:
+    driver: bridge
+  fabric_test:
+    external: true # Tells Docker this network already exists (from Fabric)

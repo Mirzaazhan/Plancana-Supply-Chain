@@ -623,7 +623,7 @@ class BlockchainService {
       await gateway.connect(connectionProfile, {
         wallet,
         identity: "appUser",
-        discovery: { enabled: true, asLocalhost: true },
+        discovery: { enabled: true, asLocalhost: false },
       });
 
       // Get network and contract
@@ -6342,87 +6342,60 @@ app.get("/api/batches/active-locations", authenticate, async (req, res) => {
 });
 
 // GET /api/analytics/weather-quality-correlation
-app.get("/api/analytics/weather-quality-correlation", async (req, res) => {
-  try {
-    const batches = await prisma.batch.findMany({
-      where: {
+app.get(
+  "/api/analytics/weather-quality-correlation",
+  authenticate,
+  async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const userRole = req.user.role;
+
+      let whereClause = {
         OR: [
           { moistureContent: { not: null } },
           { qualityGrade: { not: null } },
         ],
-      },
-      include: {
-        farmLocation: true,
-        processingRecords: {
-          orderBy: { processingDate: "desc" },
-        },
-      },
-    });
+      };
 
-    const batchIds = batches.map((b) => b.id);
-    const distributionRecords = await prisma.distributionRecord.findMany({
-      where: { batchIDHash: { in: batchIds } },
-    });
-
-    const processingRecords = await prisma.processingRecord.findMany({
-      where: { batchId: { in: batchIds } },
-    });
-
-    const moistureContentEMC = (temp, humidity) => {
-      if (temp == null || humidity == null) return null;
-
-      const H = humidity / 100;
-
-      const W = 330 + 0.452 * temp + 0.00415 * temp * temp;
-      const K = 0.791 + 0.000463 * temp - 0.000000844 * temp * temp;
-      const K1 = 6.34 + 0.000775 * temp - 0.0000935 * temp * temp;
-      const K2 = 1.09 + 0.0284 * temp - 0.0000904 * temp * temp;
-
-      const term1 = (K * H) / (1 - K * H);
-      const term2 =
-        (K1 * K * H + 2 * K1 * K2 * K * K * H * H) /
-        (1 + K1 * K * H + K1 * K2 * K * K * H * H);
-
-      const emc = (1800 / W) * (term1 + term2);
-
-      return Number(emc.toFixed(2)); // % moisture
-    };
-
-    const correlationData = [];
-
-    batches.forEach((batch) => {
-      const procLogs = processingRecords.filter((p) => p.batchId === batch.id);
-
-      if (batch.farmLocation) {
-        correlationData.push({
-          batchId: batch.batchId,
-          moisture: batch.moistureContent || 0,
-          quality: batch.qualityGrade || "N/A",
-          stage: "farm",
-          temp: batch.farmLocation.temperature,
-          humidity: batch.farmLocation.humidity,
-          weather_main: batch.farmLocation.weather_main,
+      // 1. Apply Farmer ID filtering
+      if (userRole === "FARMER") {
+        const farmerProfile = await prisma.farmerProfile.findUnique({
+          where: { userId: userId },
         });
+
+        if (!farmerProfile) {
+          return res
+            .status(404)
+            .json({ success: false, error: "Farmer profile not found" });
+        }
+
+        whereClause.farmerId = farmerProfile.id;
       }
-      procLogs.forEach((p) => {
-        correlationData.push({
-          batchId: batch.batchId,
-          moisture:
-            moistureContentEMC(
-              parseFloat(p.temperature),
-              parseFloat(p.humidity)
-            ) || 0,
-          moisture: batch.moistureContent || 0,
-          quality: p.qualityTests?.grade || "N/A",
-          stage: "processing",
-          temp: parseFloat(p.temperature) || null,
-          humidity: parseFloat(p.humidity) || null,
-          weatherImpact: p.weather_main || null,
-        });
-      });
-    });
 
-    const weatherImpact = await prisma.$queryRaw`
+      // 2. Fetch only batches belonging to that farmer
+      const batches = await prisma.batch.findMany({
+        where: whereClause,
+        include: {
+          farmLocation: true,
+          processingRecords: {
+            orderBy: { processingDate: "desc" },
+          },
+        },
+      });
+
+      const batchIds = batches.map((b) => b.id);
+      const stringBatchIds = batches.map((b) => b.batchId);
+
+      // 3. Ensure Raw Query for weatherImpact also filters by these batches
+      // We convert the IDs to a format safe for a SQL IN clause
+      const idList =
+        batchIds.length > 0 ? batchIds.map((id) => `'${id}'`).join(",") : "''";
+      const stringIdList =
+        stringBatchIds.length > 0
+          ? stringBatchIds.map((id) => `'${id}'`).join(",")
+          : "''";
+
+      const weatherImpact = await prisma.$queryRawUnsafe(`
       SELECT 
         condition,
         COUNT(*) as "totalOccurrences",
@@ -6430,36 +6403,86 @@ app.get("/api/analytics/weather-quality-correlation", async (req, res) => {
         COUNT(*) FILTER (WHERE grade = 'B') as "gradeB",
         COUNT(*) FILTER (WHERE grade = 'C') as "gradeC"
       FROM (
-        SELECT weather_main as condition, "qualityTests" ->> 'grade' as grade FROM processing_records WHERE weather_main IS NOT NULL
+        SELECT weather_main as condition, "qualityTests" ->> 'grade' as grade 
+        FROM processing_records 
+        WHERE weather_main IS NOT NULL AND "batchId" IN (${idList})
         UNION ALL
-        SELECT metadata ->> 'weather_main' as condition,metadata ->> 'quality' as grade FROM batch_location_history WHERE metadata ->> 'weather_main' IS NOT NULL
+        SELECT metadata ->> 'weather_main' as condition, metadata ->> 'quality' as grade 
+        FROM batch_location_history 
+        WHERE metadata ->> 'weather_main' IS NOT NULL AND "batchId" IN (${idList})
       ) as combined_weather
       GROUP BY condition
       ORDER BY "totalOccurrences" DESC
-    `;
+    `);
 
-    const serializedWeatherImpact = weatherImpact.map((item) => ({
-      ...item,
-      totalOccurrences: Number(item.totalOccurrences),
-      gradeA: Number(item.gradeA),
-      gradeB: Number(item.gradeB),
-      gradeC: Number(item.gradeC),
-    }));
+      // ... rest of your moistureContentEMC and serialization logic remains the same
+      const moistureContentEMC = (temp, humidity) => {
+        if (temp == null || humidity == null) return null;
+        const H = humidity / 100;
+        const W = 330 + 0.452 * temp + 0.00415 * temp * temp;
+        const K = 0.791 + 0.000463 * temp - 0.000000844 * temp * temp;
+        const K1 = 6.34 + 0.000775 * temp - 0.0000935 * temp * temp;
+        const K2 = 1.09 + 0.0284 * temp - 0.0000904 * temp * temp;
+        const term1 = (K * H) / (1 - K * H);
+        const term2 =
+          (K1 * K * H + 2 * K1 * K2 * K * K * H * H) /
+          (1 + K1 * K * H + K1 * K2 * K * K * H * H);
+        const emc = (1800 / W) * (term1 + term2);
+        return Number(emc.toFixed(2));
+      };
 
-    res.json({
-      success: true,
-      correlationData,
-      weatherImpact: serializedWeatherImpact,
-    });
-  } catch (error) {
-    console.error("Analytics Error:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to aggregate correlation data",
-    });
+      const correlationData = [];
+      batches.forEach((batch) => {
+        if (batch.farmLocation) {
+          correlationData.push({
+            batchId: batch.batchId,
+            moisture: batch.moistureContent || 0,
+            quality: batch.qualityGrade || "N/A",
+            stage: "farm",
+            temp: batch.farmLocation.temperature,
+            humidity: batch.farmLocation.humidity,
+            weather_main: batch.farmLocation.weather_main,
+          });
+        }
+        batch.processingRecords.forEach((p) => {
+          correlationData.push({
+            batchId: batch.batchId,
+            moisture:
+              moistureContentEMC(
+                parseFloat(p.temperature),
+                parseFloat(p.humidity)
+              ) || 0,
+            quality: p.qualityTests?.grade || "N/A",
+            stage: "processing",
+            temp: parseFloat(p.temperature) || null,
+            humidity: parseFloat(p.humidity) || null,
+            weatherImpact: p.weather_main || null,
+          });
+        });
+      });
+
+      const serializedWeatherImpact = weatherImpact.map((item) => ({
+        ...item,
+        totalOccurrences: Number(item.totalOccurrences),
+        gradeA: Number(item.gradeA),
+        gradeB: Number(item.gradeB),
+        gradeC: Number(item.gradeC),
+      }));
+
+      res.json({
+        success: true,
+        correlationData,
+        weatherImpact: serializedWeatherImpact,
+      });
+    } catch (error) {
+      console.error("Analytics Error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to aggregate correlation data",
+      });
+    }
   }
-});
-
+);
 // ============================================
 // PRICING ENDPOINTS
 // ============================================
