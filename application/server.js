@@ -6383,53 +6383,34 @@ app.get(
         },
       });
 
-      const batchIds = batches.map((b) => b.id);
-      const stringBatchIds = batches.map((b) => b.batchId);
+    const batchIds = batches.map((b) => b.id);
+    const distributionRecords = await prisma.distributionRecord.findMany({
+      where: { batchIDHash: { in: batchIds } },
+    });
 
-      // 3. Ensure Raw Query for weatherImpact also filters by these batches
-      // We convert the IDs to a format safe for a SQL IN clause
-      const idList =
-        batchIds.length > 0 ? batchIds.map((id) => `'${id}'`).join(",") : "''";
-      const stringIdList =
-        stringBatchIds.length > 0
-          ? stringBatchIds.map((id) => `'${id}'`).join(",")
-          : "''";
+    const processingRecords = await prisma.processingRecord.findMany({
+      where: { batchId: { in: batchIds } },
+    });
 
-      const weatherImpact = await prisma.$queryRawUnsafe(`
-      SELECT 
-        condition,
-        COUNT(*) as "totalOccurrences",
-        COUNT(*) FILTER (WHERE grade = 'A') as "gradeA",
-        COUNT(*) FILTER (WHERE grade = 'B') as "gradeB",
-        COUNT(*) FILTER (WHERE grade = 'C') as "gradeC"
-      FROM (
-        SELECT weather_main as condition, "qualityTests" ->> 'grade' as grade 
-        FROM processing_records 
-        WHERE weather_main IS NOT NULL AND "batchId" IN (${idList})
-        UNION ALL
-        SELECT metadata ->> 'weather_main' as condition, metadata ->> 'quality' as grade 
-        FROM batch_location_history 
-        WHERE metadata ->> 'weather_main' IS NOT NULL AND "batchId" IN (${idList})
-      ) as combined_weather
-      GROUP BY condition
-      ORDER BY "totalOccurrences" DESC
-    `);
+    const moistureContentEMC = (temp, humidity) => {
+      if (temp == null || humidity == null) return null;
 
-      // ... rest of your moistureContentEMC and serialization logic remains the same
-      const moistureContentEMC = (temp, humidity) => {
-        if (temp == null || humidity == null) return null;
-        const H = humidity / 100;
-        const W = 330 + 0.452 * temp + 0.00415 * temp * temp;
-        const K = 0.791 + 0.000463 * temp - 0.000000844 * temp * temp;
-        const K1 = 6.34 + 0.000775 * temp - 0.0000935 * temp * temp;
-        const K2 = 1.09 + 0.0284 * temp - 0.0000904 * temp * temp;
-        const term1 = (K * H) / (1 - K * H);
-        const term2 =
-          (K1 * K * H + 2 * K1 * K2 * K * K * H * H) /
-          (1 + K1 * K * H + K1 * K2 * K * K * H * H);
-        const emc = (1800 / W) * (term1 + term2);
-        return Number(emc.toFixed(2));
-      };
+      const H = humidity / 100;
+
+      const W = 330 + 0.452 * temp + 0.00415 * temp * temp;
+      const K = 0.791 + 0.000463 * temp - 0.000000844 * temp * temp;
+      const K1 = 6.34 + 0.000775 * temp - 0.0000935 * temp * temp;
+      const K2 = 1.09 + 0.0284 * temp - 0.0000904 * temp * temp;
+
+      const term1 = (K * H) / (1 - K * H);
+      const term2 =
+        (K1 * K * H + 2 * K1 * K2 * K * K * H * H) /
+        (1 + K1 * K * H + K1 * K2 * K * K * H * H);
+
+      const emc = (1800 / W) * (term1 + term2);
+
+      return Number(emc.toFixed(2)); // % moisture
+    };
 
       const correlationData = [];
       batches.forEach((batch) => {
@@ -6469,20 +6450,20 @@ app.get(
         gradeC: Number(item.gradeC),
       }));
 
-      res.json({
-        success: true,
-        correlationData,
-        weatherImpact: serializedWeatherImpact,
-      });
-    } catch (error) {
-      console.error("Analytics Error:", error);
-      res.status(500).json({
-        success: false,
-        error: "Failed to aggregate correlation data",
-      });
-    }
+    res.json({
+      success: true,
+      correlationData,
+      weatherImpact: serializedWeatherImpact,
+    });
+  } catch (error) {
+    console.error("Analytics Error:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to aggregate correlation data",
+    });
   }
-);
+});
+
 // ============================================
 // PRICING ENDPOINTS
 // ============================================

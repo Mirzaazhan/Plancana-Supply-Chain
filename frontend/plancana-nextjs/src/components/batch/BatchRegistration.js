@@ -140,14 +140,22 @@ const BatchRegistration = () => {
       farmer: user?.username || "",
       customBatchId: generatedBatchId,
     }));
-
-    console.log("formData:", formData);
-  }, [user, formData.cropType]);
+  }, [user]);
 
   const handleInputChange = (field, value) => {
     if (formData[field] === value) {
       return;
     }
+
+    // Clear validation error for this field when user starts typing
+    if (validationErrors[field]) {
+      setValidationErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[field];
+        return newErrors;
+      });
+    }
+
     setFormData((prev) => {
       const updated = {
         ...prev,
@@ -177,7 +185,6 @@ const BatchRegistration = () => {
         crop: "",
         variety: "",
       }));
-      console.log("value:", value);
       setAvailableVarieties([]);
     }
 
@@ -235,16 +242,68 @@ const BatchRegistration = () => {
 
   const validateStep = (step) => {
     switch (step) {
-      case 0: // Basic Info
-        return (
-          formData.farmer &&
-          formData.cropType &&
-          formData.crop &&
-          formData.quantity &&
-          formData.location &&
-          formData.qualityGrade &&
-          formData.moistureContent
-        );
+      case 0: // Basic Info - Detailed validation
+        // Required fields
+        if (!formData.farmer || formData.farmer.trim() === '') {
+          errors.farmer = 'Farmer name is required';
+        }
+
+        if (!formData.cropType) {
+          errors.cropType = 'Crop type is required';
+        }
+
+        if (!formData.crop || formData.crop.trim() === '') {
+          errors.crop = 'Product name is required';
+        }
+
+        if (!formData.location || formData.location.trim() === '') {
+          errors.location = 'Location is required';
+        }
+
+        // Quantity validation
+        if (!formData.quantity || formData.quantity === '') {
+          errors.quantity = 'Quantity is required';
+        } else {
+          const qty = parseFloat(formData.quantity);
+          if (isNaN(qty)) {
+            errors.quantity = 'Quantity must be a valid number';
+          } else if (qty <= 0) {
+            errors.quantity = 'Quantity must be greater than 0';
+          } else if (qty > 1000000) {
+            errors.quantity = 'Quantity seems too large. Please verify.';
+          }
+        }
+
+        // Quality grade validation
+        if (!formData.qualityGrade) {
+          errors.qualityGrade = 'Quality grade is required';
+        }
+
+        // Moisture content validation
+        if (!formData.moistureContent || formData.moistureContent === '') {
+          errors.moistureContent = 'Moisture content is required';
+        } else {
+          const moisture = parseFloat(formData.moistureContent);
+          if (isNaN(moisture)) {
+            errors.moistureContent = 'Moisture content must be a number';
+          } else if (moisture < 0 || moisture > 100) {
+            errors.moistureContent = 'Moisture content must be between 0 and 100%';
+          }
+        }
+
+        // Price validation (if provided)
+        if (formData.pricePerUnit && formData.pricePerUnit !== '') {
+          const price = parseFloat(formData.pricePerUnit);
+          if (isNaN(price)) {
+            errors.pricePerUnit = 'Price must be a valid number';
+          } else if (price < 0) {
+            errors.pricePerUnit = 'Price cannot be negative';
+          }
+        }
+
+        setValidationErrors(errors);
+        return Object.keys(errors).length === 0;
+
       case 1: // Farm Details (optional step)
         return true; // All fields in this step are optional
       case 2: // Verification
@@ -258,7 +317,12 @@ const BatchRegistration = () => {
     if (validateStep(currentStep)) {
       setCurrentStep((prev) => Math.min(prev + 1, steps.length - 1));
     } else {
-      toast.error("Please fill in all required fields");
+      toast.error("Please fix the errors before proceeding");
+      // Scroll to first error
+      const firstErrorField = document.querySelector('.border-red-500');
+      if (firstErrorField) {
+        firstErrorField.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
     }
   };
 
@@ -376,7 +440,11 @@ const BatchRegistration = () => {
                       onChange={(e) =>
                         handleInputChange("cropType", e.target.value)
                       }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 ${
+                        validationErrors.cropType
+                          ? 'border-red-500 bg-red-50'
+                          : 'border-gray-300'
+                      }`}
                       required
                     >
                       <option value="">Select crop type</option>
@@ -386,6 +454,14 @@ const BatchRegistration = () => {
                         </option>
                       ))}
                     </select>
+                    {validationErrors.cropType && (
+                      <p className="mt-1 text-sm text-red-600 flex items-center">
+                        <svg className="h-4 w-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                        {validationErrors.cropType}
+                      </p>
+                    )}
                   </div>
 
                   <AutocompleteInput
@@ -443,9 +519,21 @@ const BatchRegistration = () => {
                         onChange={(e) =>
                           handleInputChange("quantity", e.target.value)
                         }
-                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                        className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 ${
+                          validationErrors.quantity
+                            ? 'border-red-500 bg-red-50'
+                            : 'border-gray-300'
+                        }`}
                         required
                       />
+                      {validationErrors.quantity && (
+                        <p className="mt-1 text-sm text-red-600 flex items-center">
+                          <svg className="h-4 w-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                            <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                          </svg>
+                          {validationErrors.quantity}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -583,7 +671,11 @@ const BatchRegistration = () => {
                       onChange={(e) =>
                         handleInputChange("qualityGrade", e.target.value)
                       }
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
+                      className={`w-full px-3 py-2 border rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 ${
+                        validationErrors.qualityGrade
+                          ? 'border-red-500 bg-red-50'
+                          : 'border-gray-300'
+                      }`}
                     >
                       <option value="">Select quality grade</option>
                       {qualityGradeOptions.map((grade) => (
@@ -592,6 +684,14 @@ const BatchRegistration = () => {
                         </option>
                       ))}
                     </select>
+                    {validationErrors.qualityGrade && (
+                      <p className="mt-1 text-sm text-red-600 flex items-center">
+                        <svg className="h-4 w-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                        {validationErrors.qualityGrade}
+                      </p>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
@@ -607,7 +707,7 @@ const BatchRegistration = () => {
                         step="0.1"
                         placeholder="Waiting for location..."
                         value={formData.moistureContent}
-                        readOnly // Disable manual key-in
+                        readOnly
                         className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-900 cursor-not-allowed font-semibold"
                       />
                       <p className="text-xs text-gray-500 mt-1 italic">
@@ -1609,17 +1709,17 @@ const BatchRegistration = () => {
                 </span>
               </nav>
 
-              <h1 className="max-[431px]:text-xl text-2xl font-bold text-gray-900">
+              <h1 className="text-2xl font-bold text-gray-900">
                 Register New Batch
               </h1>
-              <p className="max-[431px]:text-md text-gray-600 mt-1">
+              <p className="text-gray-600 mt-1">
                 Enter agricultural batch details for blockchain registration
               </p>
             </div>
           </div>
 
           {currentStep < 3 && (
-            <div className="max-[431px]:hidden text-sm text-gray-500">
+            <div className="text-sm text-gray-500">
               Step {currentStep + 1} of {steps.length}
             </div>
           )}
@@ -1628,7 +1728,7 @@ const BatchRegistration = () => {
 
       {/* Progress Steps */}
       <div className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="hidden min-[431px]:flex items-center justify-center">
+        <div className="flex items-center justify-center">
           {steps.map((step, index) => (
             <div key={index} className="flex items-center">
               <div
@@ -1676,29 +1776,6 @@ const BatchRegistration = () => {
             </div>
           ))}
         </div>
-        <div className="min-[431px]:hidden flex items-center justify-between">
-          <div className="flex flex-col">
-            <span className="text-xs font-semibold text-blue-600 uppercase tracking-wider">
-              Step {currentStep + 1} of {steps.length}
-            </span>
-            <span className="text-lg font-bold text-gray-900">
-              {steps[currentStep].title}
-            </span>
-            <div className="flex flex-row gap-3 mt-2">
-              {steps.map((_, index) => (
-                <div
-                  key={index}
-                  className={`h-1.5 w-6 rounded-full ${
-                    index <= currentStep ? "bg-blue-600" : "bg-gray-200"
-                  }`}
-                />
-              ))}
-            </div>
-            <div className="text-sm text-gray-500 mt-2">
-              {steps[currentStep].description}
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Main Content */}
@@ -1707,11 +1784,36 @@ const BatchRegistration = () => {
       {/* Footer Actions */}
       {currentStep < 3 && (
         <div className="bg-white border-t border-gray-200 px-6 py-4">
+          {/* Validation Error Summary */}
+          {currentStep === 0 && Object.keys(validationErrors).length > 0 && (
+            <div className="mb-4 rounded-lg bg-red-50 p-4 border border-red-200">
+              <div className="flex">
+                <div className="flex-shrink-0">
+                  <svg className="h-5 w-5 text-red-400" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <div className="ml-3 flex-1">
+                  <h3 className="text-sm font-medium text-red-800">
+                    Please fix the following errors:
+                  </h3>
+                  <div className="mt-2 text-sm text-red-700">
+                    <ul className="list-disc pl-5 space-y-1">
+                      {Object.entries(validationErrors).map(([field, error]) => (
+                        <li key={field}>{error}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <button
               onClick={prevStep}
               disabled={currentStep === 0}
-              className={`max-[431px]:text-sm px-6 py-2 rounded-md font-medium transition-colors duration-200 ${
+              className={`px-6 py-2 rounded-md font-medium transition-colors duration-200 ${
                 currentStep === 0
                   ? "text-gray-400 cursor-not-allowed"
                   : "text-gray-700 hover:bg-gray-50 border border-gray-300"
@@ -1729,15 +1831,14 @@ const BatchRegistration = () => {
                 {loading && (
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
                 )}
-                <span className="max-[431px]:text-sm">
+                <span>
                   {loading ? "Registering..." : "Register Batch on Blockchain"}
                 </span>
               </button>
             ) : (
               <button
                 onClick={nextStep}
-                disabled={!validateStep(currentStep)}
-                className="max-[431px]:text-sm bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white px-6 py-2 rounded-md font-medium transition-colors duration-200"
+                className="max-[431px]:text-sm bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium transition-colors duration-200"
               >
                 Next
               </button>
