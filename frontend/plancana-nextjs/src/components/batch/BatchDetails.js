@@ -24,8 +24,8 @@ import {
   FlaskConical,
 } from "lucide-react";
 import MLValidationBadge from "../ml/MLValidationBadge";
-const API_URL =
-  "https://nonnitrogenized-ungravitational-wendie.ngrok-free.dev/api";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000/api";
 
 const BatchDetails = ({ batchId, onBack, currentUser }) => {
   const router = useRouter();

@@ -98,16 +98,46 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   useEffect(() => {
     // Check if user is already logged in on app start
-    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-    if (token) {
-      dispatch({
-        type: 'LOGIN_SUCCESS',
-        payload: { user: null as any, token }
-      });
-      loadUser();
-    } else {
-      dispatch({ type: 'LOGIN_FAILURE', payload: '' });
-    }
+    const initAuth = async () => {
+      console.log('🔐 AuthContext initAuth starting...');
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      console.log('🔐 Token in localStorage:', token ? 'EXISTS' : 'NONE');
+
+      if (token) {
+        try {
+          // Fetch user profile before setting authenticated
+          console.log('🔐 Fetching user profile...');
+          const response = await authService.getProfile();
+          console.log('🔐 Profile response:', response.data);
+
+          if (response.data.success) {
+            console.log('🔐 Profile loaded, dispatching LOGIN_SUCCESS');
+            // Also set cookie for middleware (in case it was only in localStorage)
+            document.cookie = `token=${token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
+            dispatch({
+              type: 'LOGIN_SUCCESS',
+              payload: { user: response.data.user, token }
+            });
+          } else {
+            // Token invalid, clear it
+            console.log('🔐 Profile failed, clearing token');
+            localStorage.removeItem('token');
+            document.cookie = 'token=; path=/; max-age=0';
+            dispatch({ type: 'LOGIN_FAILURE', payload: '' });
+          }
+        } catch (error) {
+          console.error('🔐 Failed to load user on init:', error);
+          localStorage.removeItem('token');
+          document.cookie = 'token=; path=/; max-age=0';
+          dispatch({ type: 'LOGIN_FAILURE', payload: '' });
+        }
+      } else {
+        console.log('🔐 No token, dispatching LOGIN_FAILURE');
+        dispatch({ type: 'LOGIN_FAILURE', payload: '' });
+      }
+    };
+
+    initAuth();
   }, []);
 
   const login = async (credentials: any) => {
@@ -123,10 +153,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (response.data.success) {
         const { user, token } = response.data;
 
-        // Store token in localStorage
+        // Store token in localStorage AND cookie (for middleware)
         if (typeof window !== 'undefined') {
           localStorage.setItem('token', token);
-          console.log('💾 Token stored in localStorage');
+          // Set cookie for middleware to read (httpOnly: false so JS can access if needed)
+          document.cookie = `token=${token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`;
+          console.log('💾 Token stored in localStorage and cookie');
         }
 
         dispatch({
@@ -193,6 +225,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const logout = () => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('token');
+      // Clear the cookie as well
+      document.cookie = 'token=; path=/; max-age=0';
     }
     dispatch({ type: 'LOGOUT' });
   };

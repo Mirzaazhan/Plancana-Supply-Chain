@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { toast } from 'react-hot-toast';
 import Image from 'next/image';
@@ -18,7 +17,6 @@ const LoginForm = ({ returnUrl = null }) => {
   const [showPassword, setShowPassword] = useState(false);
 
   const { login, isLoading, error, clearError } = useAuth();
-  const router = useRouter();
 
   console.log('🔍 LoginForm state:', { isLoading, hasError: !!error });
 
@@ -42,16 +40,9 @@ const LoginForm = ({ returnUrl = null }) => {
 
       if (result.success) {
         toast.success('Login successful!');
-
-        // Redirect based on returnUrl or user role
-        if (returnUrl) {
-          console.log('🔍 Redirecting to returnUrl:', returnUrl);
-          router.push(returnUrl);
-        } else {
-          const role = result.user.role.toLowerCase();
-          console.log('🔍 Redirecting to dashboard:', `/${role}/dashboard`);
-          router.push(`/${role}/dashboard`);
-        }
+        // Redirect is handled by login/page.tsx via useEffect
+        // No need to redirect here - it causes duplicate redirects
+        console.log('🔍 Login successful, page will handle redirect');
       } else {
         console.error('❌ Login failed:', result.error);
         toast.error(result.error);

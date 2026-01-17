@@ -647,14 +647,10 @@ class BlockchainService {
   async generateQRCode(batchId) {
     const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3001";
     try {
-      const qrData = {
-        batchId: batchId,
-        verificationUrl: `${FRONTEND_URL}/verify/${batchId}`,
-        timestamp: new Date().toISOString(),
-        network: "agricultural-blockchain",
-      };
+      // Generate direct URL for easy phone scanning
+      const verificationUrl = `${FRONTEND_URL}/verify/${batchId}`;
 
-      const qrCodeData = await QRCode.toDataURL(JSON.stringify(qrData), {
+      const qrCodeData = await QRCode.toDataURL(verificationUrl, {
         errorCorrectionLevel: "M",
         type: "image/png",
         quality: 0.92,
@@ -672,15 +668,10 @@ class BlockchainService {
   async generateProcessingQRCode(batchId) {
     const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3001";
     try {
-      const qrData = {
-        batchId: batchId,
-        processingUrl: `${FRONTEND_URL}/process-batch/${batchId}`,
-        timestamp: new Date().toISOString(),
-        network: "agricultural-blockchain",
-        type: "processing",
-      };
+      // Generate direct URL for easy phone scanning
+      const processingUrl = `${FRONTEND_URL}/process-batch/${batchId}`;
 
-      const qrCodeData = await QRCode.toDataURL(JSON.stringify(qrData), {
+      const qrCodeData = await QRCode.toDataURL(processingUrl, {
         errorCorrectionLevel: "M",
         type: "image/png",
         quality: 0.92,
@@ -2316,6 +2307,24 @@ app.get("/api/batch/:batchId", authenticate, async (req, res) => {
             status: dbBatch.status,
             farmLocation: {
               farmName: dbBatch.farmLocation?.farmName || "Farm",
+            },
+          };
+        }
+        break;
+
+      case "DISTRIBUTOR":
+        // Distributors can access batch info for batches they can distribute
+        // They see full batch info needed for distribution
+        if (dbBatch) {
+          responseData = {
+            ...dbBatch,
+            // Mask farmer personal info
+            farmer: {
+              ...dbBatch.farmer,
+              user: {
+                username: dbBatch.farmer?.user?.username || "Farmer",
+                role: "FARMER"
+              },
             },
           };
         }

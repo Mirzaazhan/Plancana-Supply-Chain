@@ -4,15 +4,19 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'react-hot-toast';
+import LocationInput from '@/components/ui/LocationInput';
 import {
   Package,
-  MapPin,
   Loader2,
   CheckCircle2,
   ArrowLeft,
-  Navigation,
   AlertCircle,
-  Save
+  Save,
+  Clock,
+  Zap,
+  Droplets,
+  FileText,
+  Scale
 } from 'lucide-react';
 
 export default function ProcessorProcessPage() {
@@ -25,26 +29,46 @@ export default function ProcessorProcessPage() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [gpsLoading, setGpsLoading] = useState(false);
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [weatherData, setWeatherData] = useState<any>({});
 
   const [formData, setFormData] = useState({
-    processType: 'cleaning',
+    processType: 'initial_processing',
     processingLocation: '',
     latitude: '',
     longitude: '',
     inputQuantity: '',
     outputQuantity: '',
-    wasteQuantity: '',
+    wasteQuantity: '0',
     processingTime: '',
     energyUsage: '',
     waterUsage: '',
     notes: ''
   });
 
+  // Fetch weather data when coordinates change
+  useEffect(() => {
+    if (formData.latitude && formData.longitude) {
+      fetch(`/api/weather?lat=${formData.latitude}&lon=${formData.longitude}`)
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.weather) {
+            setWeatherData({
+              temperature: data.weather.main?.temp,
+              humidity: data.weather.main?.humidity,
+              weather_main: data.weather.weather?.[0]?.main,
+              weather_description: data.weather.weather?.[0]?.description,
+            });
+          }
+        })
+        .catch((error) => {
+          console.error("Error fetching weather data:", error);
+        });
+    }
+  }, [formData.latitude, formData.longitude]);
+
   useEffect(() => {
     fetchBatchDetails();
-    getCurrentLocation();
   }, [batchId]);
 
   const fetchBatchDetails = async () => {
@@ -79,31 +103,6 @@ export default function ProcessorProcessPage() {
     }
   };
 
-  const getCurrentLocation = () => {
-    setGpsLoading(true);
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setFormData(prev => ({
-            ...prev,
-            latitude: position.coords.latitude.toString(),
-            longitude: position.coords.longitude.toString()
-          }));
-          toast.success('Location captured successfully');
-          setGpsLoading(false);
-        },
-        (error) => {
-          console.error('GPS error:', error);
-          toast.error('Could not get location. Please enable GPS.');
-          setGpsLoading(false);
-        }
-      );
-    } else {
-      toast.error('Geolocation is not supported by this browser');
-      setGpsLoading(false);
-    }
-  };
-
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({ ...prev, [name]: value }));
@@ -118,103 +117,35 @@ export default function ProcessorProcessPage() {
     }
   };
 
+  const handleInputChange = (field: string, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+
+    // Clear validation error for this field
+    if (validationErrors[field]) {
+      setValidationErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[field];
+        return newErrors;
+      });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Detailed validation
+    // Validation
     const errors: Record<string, string> = {};
 
-    if (!formData.processType) {
-      errors.processType = 'Processing type is required';
+    if (!formData.latitude || !formData.longitude) {
+      errors.location = 'GPS coordinates are required for traceability';
     }
 
-    if (!formData.processingLocation || formData.processingLocation.trim() === '') {
-      errors.processingLocation = 'Processing location is required';
+    if (!formData.inputQuantity || parseFloat(formData.inputQuantity) <= 0) {
+      errors.inputQuantity = 'Input quantity is required and must be greater than 0';
     }
 
-    // Input quantity validation
-    if (!formData.inputQuantity || formData.inputQuantity === '') {
-      errors.inputQuantity = 'Input quantity is required';
-    } else {
-      const input = parseFloat(formData.inputQuantity);
-      if (isNaN(input)) {
-        errors.inputQuantity = 'Input quantity must be a valid number';
-      } else if (input <= 0) {
-        errors.inputQuantity = 'Input quantity must be greater than 0';
-      } else if (input > 1000000) {
-        errors.inputQuantity = 'Input quantity seems too large';
-      }
-    }
-
-    // Output quantity validation
-    if (!formData.outputQuantity || formData.outputQuantity === '') {
-      errors.outputQuantity = 'Output quantity is required';
-    } else {
-      const output = parseFloat(formData.outputQuantity);
-      if (isNaN(output)) {
-        errors.outputQuantity = 'Output quantity must be a valid number';
-      } else if (output <= 0) {
-        errors.outputQuantity = 'Output quantity must be greater than 0';
-      } else if (output > 1000000) {
-        errors.outputQuantity = 'Output quantity seems too large';
-      }
-    }
-
-    // Waste quantity validation (if provided)
-    if (formData.wasteQuantity && formData.wasteQuantity !== '') {
-      const waste = parseFloat(formData.wasteQuantity);
-      if (isNaN(waste)) {
-        errors.wasteQuantity = 'Waste quantity must be a valid number';
-      } else if (waste < 0) {
-        errors.wasteQuantity = 'Waste quantity cannot be negative';
-      }
-    }
-
-    // Processing time validation (if provided)
-    if (formData.processingTime && formData.processingTime !== '') {
-      const time = parseInt(formData.processingTime);
-      if (isNaN(time) || time < 0) {
-        errors.processingTime = 'Processing time must be a positive number';
-      }
-    }
-
-    // Energy usage validation (if provided)
-    if (formData.energyUsage && formData.energyUsage !== '') {
-      const energy = parseFloat(formData.energyUsage);
-      if (isNaN(energy) || energy < 0) {
-        errors.energyUsage = 'Energy usage must be a positive number';
-      }
-    }
-
-    // Water usage validation (if provided)
-    if (formData.waterUsage && formData.waterUsage !== '') {
-      const water = parseFloat(formData.waterUsage);
-      if (isNaN(water) || water < 0) {
-        errors.waterUsage = 'Water usage must be a positive number';
-      }
-    }
-
-    // GPS Coordinates validation (REQUIRED for traceability)
-    if (!formData.latitude || formData.latitude === '') {
-      errors.latitude = 'Latitude is required for location tracking';
-    } else {
-      const lat = parseFloat(formData.latitude);
-      if (isNaN(lat)) {
-        errors.latitude = 'Latitude must be a valid number';
-      } else if (lat < -90 || lat > 90) {
-        errors.latitude = 'Latitude must be between -90 and 90';
-      }
-    }
-
-    if (!formData.longitude || formData.longitude === '') {
-      errors.longitude = 'Longitude is required for location tracking';
-    } else {
-      const lon = parseFloat(formData.longitude);
-      if (isNaN(lon)) {
-        errors.longitude = 'Longitude must be a valid number';
-      } else if (lon < -180 || lon > 180) {
-        errors.longitude = 'Longitude must be between -180 and 180';
-      }
+    if (!formData.outputQuantity || parseFloat(formData.outputQuantity) <= 0) {
+      errors.outputQuantity = 'Output quantity is required and must be greater than 0';
     }
 
     if (Object.keys(errors).length > 0) {
@@ -227,25 +158,32 @@ export default function ProcessorProcessPage() {
       setSubmitting(true);
       const token = localStorage.getItem('token');
 
+      const submissionData = {
+        processType: formData.processType,
+        processingLocation: formData.processingLocation || 'Processing Facility',
+        latitude: formData.latitude ? parseFloat(formData.latitude) : null,
+        longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+        inputQuantity: parseFloat(formData.inputQuantity),
+        outputQuantity: parseFloat(formData.outputQuantity),
+        wasteQuantity: formData.wasteQuantity ? parseFloat(formData.wasteQuantity) : null,
+        processingTime: formData.processingTime ? parseInt(formData.processingTime) : null,
+        energyUsage: formData.energyUsage ? parseFloat(formData.energyUsage) : null,
+        waterUsage: formData.waterUsage ? parseFloat(formData.waterUsage) : null,
+        notes: formData.notes || 'Batch processing started',
+        // Include weather data
+        temperature: weatherData.temperature,
+        humidity: weatherData.humidity,
+        weather_main: weatherData.weather_main,
+        weather_description: weatherData.weather_description,
+      };
+
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/processor/process/${batchId}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          processType: formData.processType,
-          processingLocation: formData.processingLocation || 'Processing Facility',
-          latitude: formData.latitude ? parseFloat(formData.latitude) : null,
-          longitude: formData.longitude ? parseFloat(formData.longitude) : null,
-          inputQuantity: parseFloat(formData.inputQuantity),
-          outputQuantity: parseFloat(formData.outputQuantity),
-          wasteQuantity: formData.wasteQuantity ? parseFloat(formData.wasteQuantity) : null,
-          processingTime: formData.processingTime ? parseInt(formData.processingTime) : null,
-          energyUsage: formData.energyUsage ? parseFloat(formData.energyUsage) : null,
-          waterUsage: formData.waterUsage ? parseFloat(formData.waterUsage) : null,
-          notes: formData.notes || 'Batch processing started'
-        })
+        body: JSON.stringify(submissionData)
       });
 
       const data = await response.json();
@@ -263,6 +201,17 @@ export default function ProcessorProcessPage() {
       setSubmitting(false);
     }
   };
+
+  const processTypeOptions = [
+    { value: 'initial_processing', label: 'Initial Processing' },
+    { value: 'cleaning', label: 'Cleaning' },
+    { value: 'sorting', label: 'Sorting' },
+    { value: 'grading', label: 'Grading' },
+    { value: 'milling', label: 'Milling' },
+    { value: 'packaging', label: 'Packaging' },
+    { value: 'storage', label: 'Storage' },
+    { value: 'quality_check', label: 'Quality Check' },
+  ];
 
   if (loading) {
     return (
@@ -311,11 +260,14 @@ export default function ProcessorProcessPage() {
           <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
             <h3 className="text-sm font-semibold text-green-900 mb-2">Processing Details:</h3>
             <div className="space-y-1 text-sm text-green-800">
-              <p><strong>Type:</strong> {formData.processType}</p>
+              <p><strong>Type:</strong> {processTypeOptions.find(o => o.value === formData.processType)?.label}</p>
               <p><strong>Input:</strong> {formData.inputQuantity} kg</p>
               <p><strong>Output:</strong> {formData.outputQuantity} kg</p>
-              {formData.wasteQuantity && (
+              {formData.wasteQuantity && parseFloat(formData.wasteQuantity) > 0 && (
                 <p><strong>Waste:</strong> {formData.wasteQuantity} kg</p>
+              )}
+              {formData.processingLocation && (
+                <p><strong>Location:</strong> {formData.processingLocation}</p>
               )}
             </div>
           </div>
@@ -348,7 +300,7 @@ export default function ProcessorProcessPage() {
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-2xl mx-auto px-4 py-4">
+        <div className="max-w-3xl mx-auto px-4 py-4">
           <div className="flex items-center">
             <button
               onClick={() => router.back()}
@@ -357,292 +309,227 @@ export default function ProcessorProcessPage() {
               <ArrowLeft className="w-5 h-5 text-gray-600" />
             </button>
             <div className="flex-1">
-              <h1 className="text-lg font-bold text-gray-900">Process Batch</h1>
+              <h1 className="text-xl font-bold text-gray-900">Start Processing</h1>
               <p className="text-sm text-gray-500">Batch ID: {batchId}</p>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="max-w-2xl mx-auto px-4 py-6">
+      <div className="max-w-3xl mx-auto px-4 py-6">
         {/* Batch Info Card */}
         {batch && (
-          <div className="bg-white rounded-lg shadow-sm p-4 mb-6">
-            <div className="flex items-start justify-between mb-3">
+          <div className="bg-white rounded-xl shadow-sm p-5 mb-6">
+            <div className="flex items-start justify-between mb-4">
               <div className="flex-1">
-                <h3 className="text-sm font-semibold text-gray-900">{batch.productType}</h3>
-                <p className="text-xs text-gray-500">{batch.variety || 'Standard variety'}</p>
+                <h3 className="text-lg font-semibold text-gray-900">{batch.productType}</h3>
+                <p className="text-sm text-gray-500">{batch.variety || 'Standard variety'}</p>
               </div>
-              <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs font-medium rounded">
+              <span className="px-3 py-1 bg-blue-100 text-blue-800 text-sm font-medium rounded-full">
                 {batch.status}
               </span>
             </div>
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <span className="text-gray-500">Quantity:</span>
-                <p className="font-semibold text-gray-900">{batch.quantity} kg</p>
+            <div className="grid grid-cols-3 gap-4 text-sm">
+              <div className="bg-gray-50 rounded-lg p-3">
+                <span className="text-gray-500 block mb-1">Quantity</span>
+                <p className="font-semibold text-gray-900">{batch.quantity} {batch.unit || 'kg'}</p>
               </div>
-              <div>
-                <span className="text-gray-500">Quality:</span>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <span className="text-gray-500 block mb-1">Quality Grade</span>
                 <p className="font-semibold text-gray-900">{batch.qualityGrade || 'Standard'}</p>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-3">
+                <span className="text-gray-500 block mb-1">Farm</span>
+                <p className="font-semibold text-gray-900 truncate">{batch.farmer?.user?.username || 'N/A'}</p>
               </div>
             </div>
           </div>
         )}
 
         {/* Processing Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Process Type */}
-          <div className="bg-white rounded-lg shadow-sm p-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Processing Type <span className="text-red-500">*</span>
-            </label>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Processing Type */}
+          <div className="bg-white rounded-xl shadow-sm p-5">
+            <h4 className="text-sm font-semibold text-gray-900 mb-3 flex items-center">
+              <Package className="w-4 h-4 mr-2 text-blue-600" />
+              Processing Type
+            </h4>
             <select
               name="processType"
               value={formData.processType}
               onChange={handleChange}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
               required
             >
-              <option value="cleaning">Cleaning</option>
-              <option value="sorting">Sorting</option>
-              <option value="grading">Grading</option>
-              <option value="packaging">Packaging</option>
-              <option value="processing">Processing</option>
-              <option value="quality_check">Quality Check</option>
+              {processTypeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </div>
 
-          {/* Location */}
-          <div className="bg-white rounded-lg shadow-sm p-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+          {/* Location Section with Map */}
+          <div className="bg-white rounded-xl shadow-sm p-5">
+            <h4 className="text-sm font-semibold text-gray-900 mb-3">
               Processing Location <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              name="processingLocation"
-              value={formData.processingLocation}
-              onChange={handleChange}
-              placeholder="e.g., Processing Facility A"
-              className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base ${
-                validationErrors.processingLocation
-                  ? 'border-red-500 bg-red-50'
-                  : 'border-gray-300'
-              }`}
+            </h4>
+
+            <LocationInput
+              locationValue={formData.processingLocation}
+              latitudeValue={formData.latitude}
+              longitudeValue={formData.longitude}
+              onLocationChange={(value) => handleInputChange('processingLocation', value)}
+              onLatitudeChange={(value) => handleInputChange('latitude', value)}
+              onLongitudeChange={(value) => handleInputChange('longitude', value)}
+              required={true}
             />
-            {validationErrors.processingLocation && (
-              <p className="mt-1 text-sm text-red-600 flex items-center">
-                <AlertCircle className="h-4 w-4 mr-1" />
-                {validationErrors.processingLocation}
-              </p>
+
+            {validationErrors.location && (
+              <div className="mt-3 flex items-center gap-2 p-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg">
+                <AlertCircle size={16} />
+                <span>{validationErrors.location}</span>
+              </div>
             )}
           </div>
 
-          {/* GPS Coordinates */}
-          <div className="bg-white rounded-lg shadow-sm p-4">
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-gray-700">
-                GPS Coordinates <span className="text-red-500">*</span>
-              </label>
-              <button
-                type="button"
-                onClick={getCurrentLocation}
-                disabled={gpsLoading}
-                className="flex items-center space-x-1 text-blue-600 hover:text-blue-700 text-sm font-medium disabled:opacity-50"
-              >
-                {gpsLoading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Navigation className="w-4 h-4" />
-                )}
-                <span>{gpsLoading ? 'Getting...' : 'Get Location'}</span>
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <input
-                  type="text"
-                  name="latitude"
-                  value={formData.latitude}
-                  onChange={handleChange}
-                  placeholder="Latitude"
-                  className={`px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base w-full ${
-                    validationErrors.latitude
-                      ? 'border-red-500 bg-red-50'
-                      : 'border-gray-300'
-                  }`}
-                />
-                {validationErrors.latitude && (
-                  <p className="mt-1 text-sm text-red-600 flex items-center">
-                    <AlertCircle className="h-4 w-4 mr-1" />
-                    {validationErrors.latitude}
-                  </p>
-                )}
-              </div>
-              <div>
-                <input
-                  type="text"
-                  name="longitude"
-                  value={formData.longitude}
-                  onChange={handleChange}
-                  placeholder="Longitude"
-                  className={`px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base w-full ${
-                    validationErrors.longitude
-                      ? 'border-red-500 bg-red-50'
-                      : 'border-gray-300'
-                  }`}
-                />
-                {validationErrors.longitude && (
-                  <p className="mt-1 text-sm text-red-600 flex items-center">
-                    <AlertCircle className="h-4 w-4 mr-1" />
-                    {validationErrors.longitude}
-                  </p>
-                )}
-              </div>
-            </div>
-            {formData.latitude && formData.longitude && !validationErrors.latitude && !validationErrors.longitude ? (
-              <div className="mt-2 flex items-center text-xs text-green-600">
-                <MapPin className="w-3 h-3 mr-1" />
-                Location captured
-              </div>
-            ) : (
-              <p className="mt-2 text-xs text-gray-500">
-                Click "Get Location" button to automatically capture GPS coordinates
-              </p>
-            )}
-          </div>
+          {/* Quantity Section */}
+          <div className="bg-white rounded-xl shadow-sm p-5">
+            <h4 className="text-sm font-semibold text-gray-900 mb-3 flex items-center">
+              <Scale className="w-4 h-4 mr-2 text-blue-600" />
+              Quantity Information
+            </h4>
 
-          {/* Quantities */}
-          <div className="bg-white rounded-lg shadow-sm p-4">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3">Quantities (kg)</h3>
-            <div className="space-y-3">
+            <div className="grid grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm text-gray-600 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Input Quantity <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="number"
+                  step="0.01"
                   name="inputQuantity"
                   value={formData.inputQuantity}
                   onChange={handleChange}
-                  step="0.01"
                   placeholder="0.00"
-                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base ${
-                    validationErrors.inputQuantity
-                      ? 'border-red-500 bg-red-50'
-                      : 'border-gray-300'
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 ${
+                    validationErrors.inputQuantity ? 'border-red-500 bg-red-50' : 'border-gray-300'
                   }`}
                   required
                 />
+                <p className="text-xs text-gray-500 mt-1">
+                  Original: {batch?.quantity} {batch?.unit || 'kg'}
+                </p>
                 {validationErrors.inputQuantity && (
-                  <p className="mt-1 text-sm text-red-600 flex items-center">
-                    <AlertCircle className="h-4 w-4 mr-1" />
-                    {validationErrors.inputQuantity}
-                  </p>
+                  <p className="mt-1 text-xs text-red-600">{validationErrors.inputQuantity}</p>
                 )}
               </div>
               <div>
-                <label className="block text-sm text-gray-600 mb-1">
-                  Output Quantity <span className="text-red-500">*</span>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Expected Output <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="number"
+                  step="0.01"
                   name="outputQuantity"
                   value={formData.outputQuantity}
                   onChange={handleChange}
-                  step="0.01"
                   placeholder="0.00"
-                  className={`w-full px-4 py-3 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base ${
-                    validationErrors.outputQuantity
-                      ? 'border-red-500 bg-red-50'
-                      : 'border-gray-300'
+                  className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 ${
+                    validationErrors.outputQuantity ? 'border-red-500 bg-red-50' : 'border-gray-300'
                   }`}
                   required
                 />
+                <p className="text-xs text-gray-500 mt-1">Estimated output</p>
                 {validationErrors.outputQuantity && (
-                  <p className="mt-1 text-sm text-red-600 flex items-center">
-                    <AlertCircle className="h-4 w-4 mr-1" />
-                    {validationErrors.outputQuantity}
-                  </p>
+                  <p className="mt-1 text-xs text-red-600">{validationErrors.outputQuantity}</p>
                 )}
               </div>
               <div>
-                <label className="block text-sm text-gray-600 mb-1">
-                  Waste Quantity (Optional)
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Expected Waste
                 </label>
                 <input
                   type="number"
+                  step="0.01"
                   name="wasteQuantity"
                   value={formData.wasteQuantity}
                   onChange={handleChange}
-                  step="0.01"
                   placeholder="0.00"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                 />
+                <p className="text-xs text-gray-500 mt-1">Loss/waste amount</p>
               </div>
             </div>
           </div>
 
-          {/* Processing Details (Optional) */}
-          <div className="bg-white rounded-lg shadow-sm p-4">
-            <h3 className="text-sm font-semibold text-gray-900 mb-3">Processing Details (Optional)</h3>
-            <div className="space-y-3">
+          {/* Additional Details */}
+          <div className="bg-white rounded-xl shadow-sm p-5">
+            <h4 className="text-sm font-semibold text-gray-900 mb-3">
+              Additional Details (Optional)
+            </h4>
+
+            <div className="grid grid-cols-3 gap-4">
               <div>
-                <label className="block text-sm text-gray-600 mb-1">
-                  Processing Time (minutes)
+                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                  <Clock className="w-3 h-3 mr-1 text-gray-500" />
+                  Processing Time (min)
                 </label>
                 <input
                   type="number"
                   name="processingTime"
                   value={formData.processingTime}
                   onChange={handleChange}
-                  placeholder="0"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
+                  placeholder="120"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-600 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                  <Zap className="w-3 h-3 mr-1 text-gray-500" />
                   Energy Usage (kWh)
                 </label>
                 <input
                   type="number"
+                  step="0.1"
                   name="energyUsage"
                   value={formData.energyUsage}
                   onChange={handleChange}
-                  step="0.01"
-                  placeholder="0.00"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
+                  placeholder="45.5"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                 />
               </div>
               <div>
-                <label className="block text-sm text-gray-600 mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
+                  <Droplets className="w-3 h-3 mr-1 text-gray-500" />
                   Water Usage (liters)
                 </label>
                 <input
                   type="number"
+                  step="0.1"
                   name="waterUsage"
                   value={formData.waterUsage}
                   onChange={handleChange}
-                  step="0.01"
-                  placeholder="0.00"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base"
+                  placeholder="200"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
                 />
               </div>
             </div>
           </div>
 
           {/* Notes */}
-          <div className="bg-white rounded-lg shadow-sm p-4">
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Notes
+          <div className="bg-white rounded-xl shadow-sm p-5">
+            <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center">
+              <FileText className="w-4 h-4 mr-2 text-gray-500" />
+              Processing Notes
             </label>
             <textarea
               name="notes"
               value={formData.notes}
               onChange={handleChange}
               rows={3}
-              placeholder="Add any additional notes about the processing..."
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-base resize-none"
+              placeholder="Enter any additional notes about the processing..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900 resize-none"
             />
           </div>
 
@@ -651,7 +538,7 @@ export default function ProcessorProcessPage() {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-6 py-4 rounded-lg font-semibold text-lg transition-colors flex items-center justify-center space-x-2 shadow-lg"
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-6 py-4 rounded-xl font-semibold text-lg transition-colors flex items-center justify-center space-x-2 shadow-lg"
             >
               {submitting ? (
                 <>

@@ -21,17 +21,24 @@ export default function ProcessBatchPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    console.log('🔍 ProcessBatch useEffect:', { authLoading, isAuthenticated, user: !!user, batchId });
+
     // Wait for auth to finish loading
-    if (authLoading) return;
+    if (authLoading) {
+      console.log('⏳ Still loading auth...');
+      return;
+    }
 
     // If not authenticated, redirect to login with return URL
     if (!isAuthenticated) {
+      console.log('🚫 Not authenticated, redirecting to login');
       const returnUrl = `/process-batch/${batchId}`;
-      router.push(`/login?returnUrl=${encodeURIComponent(returnUrl)}`);
+      router.replace(`/login?returnUrl=${encodeURIComponent(returnUrl)}`);
       return;
     }
 
     // If authenticated, validate access
+    console.log('✅ Authenticated, validating access...');
     validateAndRedirect();
   }, [isAuthenticated, authLoading, batchId]);
 

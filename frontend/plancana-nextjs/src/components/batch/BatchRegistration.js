@@ -36,6 +36,7 @@ const BatchRegistration = () => {
   const [batchId, setBatchId] = useState("");
   const [availableVarieties, setAvailableVarieties] = useState([]);
   const [filteredCropOptions, setFilteredCropOptions] = useState([]);
+  const [validationErrors, setValidationErrors] = useState({});
 
   const [formData, setFormData] = useState({
     // Basic Info
@@ -241,6 +242,8 @@ const BatchRegistration = () => {
   };
 
   const validateStep = (step) => {
+    const errors = {};
+
     switch (step) {
       case 0: // Basic Info - Detailed validation
         // Required fields
