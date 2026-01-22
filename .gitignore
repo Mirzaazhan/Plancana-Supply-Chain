@@ -111,6 +111,7 @@ screenshots/
 *.md
 !README.md
 !package.json
+*.pdf
 
 # Azure deployment files
 deploy/

@@ -3,9 +3,9 @@
 import LoginForm from '@/components/auth/LoginForm';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, Suspense } from 'react';
 
-export default function LoginPage() {
+function LoginContent() {
   const { isAuthenticated, user, isLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -53,4 +53,23 @@ export default function LoginPage() {
 
   // @ts-expect-error - LoginForm.js accepts string | null but TS infers stricter types
   return <LoginForm returnUrl={returnUrl} />;
+}
+
+function LoginFallback() {
+  return (
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600 mx-auto mb-4"></div>
+        <p className="text-gray-600">Loading...</p>
+      </div>
+    </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginFallback />}>
+      <LoginContent />
+    </Suspense>
+  );
 }

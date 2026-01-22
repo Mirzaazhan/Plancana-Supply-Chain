@@ -6450,7 +6450,21 @@ app.get(
           });
         });
       });
-
+      const weatherImpact = await prisma.$queryRaw`
+      SELECT 
+        condition,
+        COUNT(*) as "totalOccurrences",
+        COUNT(*) FILTER (WHERE grade = 'A') as "gradeA",
+        COUNT(*) FILTER (WHERE grade = 'B') as "gradeB",
+        COUNT(*) FILTER (WHERE grade = 'C') as "gradeC"
+      FROM (
+        SELECT weather_main as condition, "qualityTests" ->> 'grade' as grade FROM processing_records WHERE weather_main IS NOT NULL
+        UNION ALL
+        SELECT metadata ->> 'weather_main' as condition,metadata ->> 'quality' as grade FROM batch_location_history WHERE metadata ->> 'weather_main' IS NOT NULL
+      ) as combined_weather
+      GROUP BY condition
+      ORDER BY "totalOccurrences" DESC
+    `;
       const serializedWeatherImpact = weatherImpact.map((item) => ({
         ...item,
         totalOccurrences: Number(item.totalOccurrences),
