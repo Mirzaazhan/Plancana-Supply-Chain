@@ -623,7 +623,7 @@ class BlockchainService {
       await gateway.connect(connectionProfile, {
         wallet,
         identity: "appUser",
-        discovery: { enabled: true, asLocalhost: false },
+        discovery: { enabled: true, asLocalhost: true },
       });
 
       // Get network and contract
@@ -1406,9 +1406,14 @@ app.get("/", async (req, res) => {
     const dbStatus = "connected";
 
     // Test blockchain connection
-    const { gateway, contract } = await blockchainService.connectToNetwork();
-    const blockchainStatus = contract ? "connected" : "disconnected";
-    if (gateway) await gateway.disconnect();
+    let blockchainStatus = "disconnected";
+    try {
+      const { gateway, contract } = await blockchainService.connectToNetwork();
+      blockchainStatus = contract ? "connected" : "disconnected";
+      if (gateway) await gateway.disconnect();
+    } catch (blockchainError) {
+      blockchainStatus = "disconnected";
+    }
 
     res.json({
       message: "Agricultural Supply Chain API with Database Integration",
@@ -6659,8 +6664,8 @@ app.get("/api/pricing/history/:batchId", async (req, res) => {
   } catch (error) {
     console.error("Get pricing history error:", error);
 
-    // If chaincode returns error about no pricing records, still return farmer's price
-    if (error.message.includes("No pricing records found")) {
+    // If chaincode returns error about no pricing records OR batch not on blockchain yet, return farmer's price from DB
+    if (error.message.includes("No pricing records found") || error.message.includes("does not exist")) {
       // Get batch for farmer's price
       const batch = await prisma.batch.findUnique({
         where: { batchId: req.params.batchId },
@@ -6820,8 +6825,8 @@ app.get("/api/pricing/markup/:batchId", async (req, res) => {
   } catch (error) {
     console.error("Get price markup error:", error);
 
-    // If chaincode returns error about insufficient pricing records
-    if (error.message.includes("at least 2 pricing records")) {
+    // If chaincode returns error about insufficient pricing records OR batch not on blockchain yet
+    if (error.message.includes("at least 2 pricing records") || error.message.includes("does not exist")) {
       // Get batch to check for farmer price and any other pricing
       const batch = await prisma.batch.findUnique({
         where: { batchId: req.params.batchId },
