@@ -610,7 +610,7 @@ class BlockchainService {
         console.log(
           "User identity does not exist in wallet. Please enroll user first."
         );
-        return null;
+        return { gateway: null, contract: null };
       }
 
       // Load connection profile
@@ -633,7 +633,7 @@ class BlockchainService {
       return { gateway, contract };
     } catch (error) {
       console.error(`Failed to connect to network: ${error}`);
-      return null;
+      return { gateway: null, contract: null };
     }
   }
 
