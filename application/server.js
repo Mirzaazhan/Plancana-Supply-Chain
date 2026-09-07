@@ -9123,6 +9123,11 @@ app.get("/api/ml/stats", authenticate, async (req, res) => {
 
 // ArcGIS Token Refresh Endpoint
 app.get("/api/refresh-token", async (req, res) => {
+  // If API key is available, return it directly (no OAuth needed)
+  if (process.env.ARCGIS_API_KEY) {
+    return res.json({ access_token: process.env.ARCGIS_API_KEY, expires_in: 7200 });
+  }
+
   const ARCGIS_TOKEN_URL = "https://www.arcgis.com/sharing/rest/oauth2/token";
 
   // Validate environment variables
