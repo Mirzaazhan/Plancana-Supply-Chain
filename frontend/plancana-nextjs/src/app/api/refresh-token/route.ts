@@ -3,6 +3,11 @@ import { NextResponse } from "next/server";
 const ARCGIS_TOKEN_URL = "https://www.arcgis.com/sharing/rest/oauth2/token";
 
 export async function GET() {
+  // Use API key directly if available
+  if (process.env.ARCGIS_API_KEY) {
+    return NextResponse.json({ access_token: process.env.ARCGIS_API_KEY, expires_in: 7200 });
+  }
+
   // Validate all required environment variables
   if (!process.env.ARCGIS_CLIENT_ID || !process.env.ARCGIS_CLIENT_SECRET || !process.env.ARCGIS_REFRESH_TOKEN) {
       console.error("Missing ArcGIS Environment Variables.");
