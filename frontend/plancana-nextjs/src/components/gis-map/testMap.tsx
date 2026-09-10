@@ -352,17 +352,16 @@ const TestMap = ({
 
           // Configure ArcGIS with token
           try {
-            IdentityManager.registerToken({
-              server: `${orgUrl}/sharing/rest`,
-              token: token,
-              expires: Date.now() + 55 * 60 * 1000,
-            });
-
-            // Note: When using OAuth tokens, don't set API key as they conflict
-            // Only use API key OR OAuth token, not both
-            // if (process.env.NEXT_PUBLIC_ARCGIS_API_KEY) {
-            //   esriConfig.apiKey = process.env.NEXT_PUBLIC_ARCGIS_API_KEY;
-            // }
+            // Use API key directly if available, otherwise fall back to OAuth token
+            if (process.env.NEXT_PUBLIC_ARCGIS_API_KEY) {
+              esriConfig.apiKey = process.env.NEXT_PUBLIC_ARCGIS_API_KEY;
+            } else {
+              IdentityManager.registerToken({
+                server: `${orgUrl}/sharing/rest`,
+                token: token,
+                expires: Date.now() + 55 * 60 * 1000,
+              });
+            }
           } catch (error) {
             console.error("Token registration error:", error);
             setMapError(
