@@ -1,56 +1,18 @@
-import { NextResponse } from "next/server"; 
-
-const ARCGIS_TOKEN_URL = "https://www.arcgis.com/sharing/rest/oauth2/token";
+import { NextResponse } from "next/server";
 
 export async function GET() {
-  // Use API key directly if available
-  if (process.env.ARCGIS_API_KEY) {
-    return NextResponse.json({ access_token: process.env.ARCGIS_API_KEY, expires_in: 7200 });
-  }
-
-  // Validate all required environment variables
-  if (!process.env.ARCGIS_CLIENT_ID || !process.env.ARCGIS_CLIENT_SECRET || !process.env.ARCGIS_REFRESH_TOKEN) {
-      console.error("Missing ArcGIS Environment Variables.");
-      return NextResponse.json(
-        { error: "Server Configuration Error: Missing credentials." },
-        { status: 500 }
-      );
-  }
-
   try {
-    const params = new URLSearchParams({
-      client_id: process.env.ARCGIS_CLIENT_ID,
-      client_secret: process.env.ARCGIS_CLIENT_SECRET,
-      grant_type: "refresh_token",
-      refresh_token: process.env.ARCGIS_REFRESH_TOKEN,
+    // Forward to backend which has token cached in memory
+    const backendUrl = process.env.BACKEND_URL || "http://backend:3000";
+    const response = await fetch(`${backendUrl}/api/refresh-token`, {
+      cache: "no-store",
     });
-
-    const response = await fetch(ARCGIS_TOKEN_URL, {
-        method: "POST", 
-        headers: {
-            "Content-Type": "application/x-www-form-urlencoded", 
-        },
-        body: params.toString(), 
-    });
-
     const data = await response.json();
-
-    if (!response.ok) {
-        return NextResponse.json(
-            { error: data.error_description || data.error || "ArcGIS token refresh failed." },
-            { status: response.status }
-        );
-    }
-    
-    return NextResponse.json({
-      access_token: data.access_token,
-      expires_in: data.expires_in,
-    });
-
+    return NextResponse.json(data);
   } catch (error) {
-    console.error("Internal Server Error during token refresh:", error);
+    console.error("Failed to fetch token from backend:", error);
     return NextResponse.json(
-      { error: "Internal Server Error during token refresh." },
+      { error: "Failed to fetch ArcGIS token." },
       { status: 500 }
     );
   }
