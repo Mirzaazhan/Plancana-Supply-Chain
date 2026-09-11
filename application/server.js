@@ -9122,58 +9122,60 @@ app.get("/api/ml/stats", authenticate, async (req, res) => {
 });
 
 // ArcGIS Token Refresh Endpoint
+// ArcGIS token cache
+let arcgisTokenCache = { access_token: null, expires_at: 0 };
+
+async function refreshArcGISToken() {
+  const ARCGIS_TOKEN_URL = "https://www.arcgis.com/sharing/rest/oauth2/token";
+  const params = new URLSearchParams({
+    client_id: process.env.ARCGIS_CLIENT_ID,
+    client_secret: process.env.ARCGIS_CLIENT_SECRET,
+    grant_type: "refresh_token",
+    refresh_token: process.env.ARCGIS_REFRESH_TOKEN,
+  });
+  const response = await axios.post(ARCGIS_TOKEN_URL, params.toString(), {
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  });
+  arcgisTokenCache = {
+    access_token: response.data.access_token,
+    expires_at: Date.now() + (response.data.expires_in - 60) * 1000,
+  };
+  console.log("✅ ArcGIS token refreshed, valid until", new Date(arcgisTokenCache.expires_at));
+  return arcgisTokenCache.access_token;
+}
+
+// Pre-fetch token on startup and refresh every 25 minutes
+(async () => {
+  if (process.env.ARCGIS_CLIENT_ID && process.env.ARCGIS_CLIENT_SECRET && process.env.ARCGIS_REFRESH_TOKEN) {
+    try { await refreshArcGISToken(); } catch (e) { console.log("ArcGIS initial token fetch failed:", e.message); }
+    setInterval(async () => {
+      try { await refreshArcGISToken(); } catch (e) { console.log("ArcGIS token refresh failed:", e.message); }
+    }, 25 * 60 * 1000);
+  }
+})();
+
 app.get("/api/refresh-token", async (req, res) => {
   // If API key is available, return it directly (no OAuth needed)
   if (process.env.ARCGIS_API_KEY) {
     return res.json({ access_token: process.env.ARCGIS_API_KEY, expires_in: 7200 });
   }
 
-  const ARCGIS_TOKEN_URL = "https://www.arcgis.com/sharing/rest/oauth2/token";
+  // Return cached token instantly
+  if (arcgisTokenCache.access_token && Date.now() < arcgisTokenCache.expires_at) {
+    return res.json({ access_token: arcgisTokenCache.access_token, expires_in: Math.floor((arcgisTokenCache.expires_at - Date.now()) / 1000) });
+  }
 
-  // Validate environment variables
-  if (
-    !process.env.ARCGIS_CLIENT_ID ||
-    !process.env.ARCGIS_CLIENT_SECRET ||
-    !process.env.ARCGIS_REFRESH_TOKEN
-  ) {
-    console.error("Missing ArcGIS Environment Variables.");
-    return res.status(500).json({
-      error: "Server Configuration Error: Missing credentials.",
-    });
+  // Cache miss — fetch new token
+  if (!process.env.ARCGIS_CLIENT_ID || !process.env.ARCGIS_CLIENT_SECRET || !process.env.ARCGIS_REFRESH_TOKEN) {
+    return res.status(500).json({ error: "Server Configuration Error: Missing credentials." });
   }
 
   try {
-    const params = new URLSearchParams({
-      client_id: process.env.ARCGIS_CLIENT_ID,
-      client_secret: process.env.ARCGIS_CLIENT_SECRET,
-      grant_type: "refresh_token",
-      refresh_token: process.env.ARCGIS_REFRESH_TOKEN,
-    });
-
-    const response = await axios.post(ARCGIS_TOKEN_URL, params.toString(), {
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-    });
-
-    if (response.status !== 200) {
-      return res.status(response.status).json({
-        error:
-          response.data.error_description ||
-          response.data.error ||
-          "ArcGIS token refresh failed.",
-      });
-    }
-
-    res.json({
-      access_token: response.data.access_token,
-      expires_in: response.data.expires_in,
-    });
+    const token = await refreshArcGISToken();
+    res.json({ access_token: token, expires_in: 1800 });
   } catch (error) {
     console.error("Internal Server Error during token refresh:", error.message);
-    res.status(500).json({
-      error: "Internal Server Error during token refresh.",
-    });
+    res.status(500).json({ error: "Internal Server Error during token refresh." });
   }
 });
 
