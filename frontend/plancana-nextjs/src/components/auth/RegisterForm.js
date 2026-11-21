@@ -13,6 +13,7 @@ const RegisterForm = () => {
     email: '',
     password: '',
     role: 'FARMER',
+    organizationSlug: '',
     companyDetails: ''
   });
   const [showPassword, setShowPassword] = useState(false);
@@ -60,6 +61,7 @@ const RegisterForm = () => {
       username: username,
       password: formData.password,
       role: formData.role,
+      organizationSlug: formData.organizationSlug.trim().toLowerCase(),
       profileData: {
         firstName: firstName,
         lastName: lastName,
@@ -241,6 +243,26 @@ const RegisterForm = () => {
                   </option>
                 ))}
               </select>
+            </div>
+
+            {/* Organization Code */}
+            <div>
+              <label htmlFor="organizationSlug" className="block text-sm font-medium text-gray-700 mb-2">
+                Organization Code
+              </label>
+              <input
+                id="organizationSlug"
+                name="organizationSlug"
+                type="text"
+                required
+                className="appearance-none relative block w-full px-4 py-3 border border-gray-300 placeholder-gray-400 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 sm:text-sm transition-colors"
+                placeholder="e.g. alpha-farms"
+                value={formData.organizationSlug}
+                onChange={handleChange}
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                Ask your organization admin for the org code (e.g. alpha-farms)
+              </p>
             </div>
 
             {/* Company Details */}

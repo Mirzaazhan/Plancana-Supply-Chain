@@ -36,7 +36,21 @@ async function main() {
   console.log("🌱 Seeding database...");
 
   try {
-    // --- 1. ADMIN USER ---
+    // --- 0. DEFAULT ORGANIZATION (must be created first) ---
+    console.log("Creating default organization...");
+    const defaultOrg = await prisma.organization.upsert({
+      where: { slug: "default-org" },
+      update: {},
+      create: {
+        name: "Default Organization",
+        slug: "default-org",
+        description: "Default organization for existing demo data",
+        isActive: true,
+      },
+    });
+    console.log(`✅ Default org ready: ${defaultOrg.id}`);
+
+    // --- 1. PLATFORM ADMIN (no organizationId — sees all orgs) ---
     const adminPassword = await bcrypt.hash("admin123", 12);
     await prisma.user.upsert({
       where: { email: "admin@agricultural.com" },
@@ -47,8 +61,9 @@ async function main() {
         password: adminPassword,
         role: "ADMIN",
         status: "ACTIVE",
+        // organizationId intentionally null = platform-level admin
         adminProfile: {
-          create: { firstName: "System", lastName: "Administrator" },
+          create: { firstName: "System", lastName: "Administrator", adminLevel: "SUPER_ADMIN" },
         },
       },
     });
@@ -57,13 +72,14 @@ async function main() {
     const farmerPassword = await bcrypt.hash("farmer123", 12);
     const farmer = await prisma.user.upsert({
       where: { email: "ahmad@farm.com" },
-      update: {},
+      update: { organizationId: defaultOrg.id },
       create: {
         email: "ahmad@farm.com",
         username: "ahmad_farmer",
         password: farmerPassword,
         role: "FARMER",
         status: "ACTIVE",
+        organizationId: defaultOrg.id,
         farmerProfile: {
           create: {
             firstName: "Ahmad",
@@ -109,13 +125,14 @@ async function main() {
     const processorPassword = await bcrypt.hash("processor123", 12);
     const processor = await prisma.user.upsert({
       where: { email: "mill@processor.com" },
-      update: {},
+      update: { organizationId: defaultOrg.id },
       create: {
         email: "mill@processor.com",
         username: "selangor_mill",
         password: processorPassword,
         role: "PROCESSOR",
         status: "ACTIVE",
+        organizationId: defaultOrg.id,
         processorProfile: {
           create: {
             companyName: "Selangor Rice Mill Sdn Bhd",
@@ -161,13 +178,14 @@ async function main() {
     const distributorPassword = await bcrypt.hash("distributor123", 12);
     const distributor = await prisma.user.upsert({
       where: { email: "logistics@distributor.com" },
-      update: {},
+      update: { organizationId: defaultOrg.id },
       create: {
         email: "logistics@distributor.com",
         username: "kl_logistics",
         password: distributorPassword,
         role: "DISTRIBUTOR",
         status: "ACTIVE",
+        organizationId: defaultOrg.id,
         distributorProfile: {
           create: {
             companyName: "KL Logistics Sdn Bhd",
@@ -188,13 +206,14 @@ async function main() {
     const retailerPassword = await bcrypt.hash("retailer123", 12);
     const retailer = await prisma.user.upsert({
       where: { email: "store@retail.com" },
-      update: {},
+      update: { organizationId: defaultOrg.id },
       create: {
         email: "store@retail.com",
         username: "city_supermarket",
         password: retailerPassword,
         role: "RETAILER",
         status: "ACTIVE",
+        organizationId: defaultOrg.id,
         retailerProfile: {
           create: {
             businessName: "City Grocer KLCC",
@@ -222,6 +241,35 @@ async function main() {
         retailerProfile.longitude
       );
     }
+
+    // --- 6. BACKFILL existing batches and supply chain records ---
+    console.log("Backfilling existing data with default organizationId...");
+    await prisma.batch.updateMany({
+      where: { organizationId: null },
+      data: { organizationId: defaultOrg.id },
+    });
+    await prisma.processingRecord.updateMany({
+      where: { organizationId: null },
+      data: { organizationId: defaultOrg.id },
+    });
+    await prisma.transportRoute.updateMany({
+      where: { organizationId: null },
+      data: { organizationId: defaultOrg.id },
+    });
+    await prisma.qualityTest.updateMany({
+      where: { organizationId: null },
+      data: { organizationId: defaultOrg.id },
+    });
+    await prisma.batchTransfer.updateMany({
+      where: { organizationId: null },
+      data: { organizationId: defaultOrg.id },
+    });
+    await prisma.distributionRecord.updateMany({
+      where: { organizationId: null },
+      data: { organizationId: defaultOrg.id },
+    });
+    console.log("✅ Backfill complete");
+
   } catch (error) {
     console.error("❌ Seeding error:", error);
     throw error;

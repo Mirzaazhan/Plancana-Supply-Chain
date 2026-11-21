@@ -24,6 +24,7 @@ class AgriculturalContract extends Contract {
                 status: "REGISTERED",
                 docType: "batch",
                 dataHash: "",
+                organizationId: null,
                 createdDate: ctx.stub.getTxTimestamp().seconds.low + "." + ctx.stub.getTxTimestamp().nanos,
                 lastUpdated: ctx.stub.getTxTimestamp().seconds.low + "." + ctx.stub.getTxTimestamp().nanos,
                 statusHistory: []
@@ -129,7 +130,10 @@ class AgriculturalContract extends Contract {
             exportImportData: null,
             
             // Weather and environmental data
-            environmentalData: extraData.environmentalData || null
+            environmentalData: extraData.environmentalData || null,
+
+            // Multi-tenancy: tag every on-chain batch with the creating org
+            organizationId: extraData.organizationId || null
         };
 
         // Store on blockchain
@@ -1152,7 +1156,7 @@ class AgriculturalContract extends Contract {
     // ===== DISTRIBUTOR FUNCTIONS =====
 
     // Get batches available for distribution (PROCESSED status)
-    async getAvailableBatchesForDistributor(ctx) {
+    async getAvailableBatchesForDistributor(ctx, organizationId = '') {
         console.info('============= START : Get Available Batches For Distributor ===========');
 
         const allResults = [];
@@ -1168,8 +1172,10 @@ class AgriculturalContract extends Contract {
                 record = JSON.parse(strValue);
                 // Only include batches that are PROCESSED and NOT yet owned by a distributor
                 if (record && record.batchId && record.docType === 'batch') {
+                    const orgMatch = !organizationId || record.organizationId === organizationId;
                     if (record.status === 'PROCESSED' &&
-                        (!record.currentOwner || record.currentOwner.actorRole !== 'DISTRIBUTOR')) {
+                        (!record.currentOwner || record.currentOwner.actorRole !== 'DISTRIBUTOR') &&
+                        orgMatch) {
                         allResults.push(record);
                     }
                 }
@@ -1286,7 +1292,7 @@ class AgriculturalContract extends Contract {
     }
 
     // Get batches by distributor (owned by distributor)
-    async getBatchesByDistributor(ctx, distributorId) {
+    async getBatchesByDistributor(ctx, distributorId, organizationId = '') {
         console.info(`============= START : Get Batches By Distributor ${distributorId} ===========`);
 
         const allResults = [];
@@ -1301,10 +1307,12 @@ class AgriculturalContract extends Contract {
             try {
                 record = JSON.parse(strValue);
                 if (record && record.batchId && record.docType === 'batch') {
+                    const orgMatch = !organizationId || record.organizationId === organizationId;
                     // Check if current owner is this distributor
                     if (record.currentOwner &&
                         record.currentOwner.actorId === distributorId &&
-                        record.currentOwner.actorRole === 'DISTRIBUTOR') {
+                        record.currentOwner.actorRole === 'DISTRIBUTOR' &&
+                        orgMatch) {
                         allResults.push(record);
                     }
                 }

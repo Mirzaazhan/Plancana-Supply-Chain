@@ -390,6 +390,7 @@ const authenticate = async (req, res, next) => {
       include: {
         user: {
           include: {
+            organization: true,
             farmerProfile: true,
             processorProfile: true,
             distributorProfile: true,
@@ -409,6 +410,9 @@ const authenticate = async (req, res, next) => {
     }
 
     req.user = session.user;
+    // Multi-tenancy context: null organizationId = platform-level admin (sees all orgs)
+    req.organizationId = session.user.organizationId ?? null;
+    req.isPlatformAdmin = session.user.role === "ADMIN" && session.user.organizationId === null;
     next();
   } catch (error) {
     res.status(401).json({
@@ -566,7 +570,7 @@ const sendPasswordResetEmail = async (email, resetToken) => {
   }
 };
 // Role-based authorization
-const authorize = (allowedRoles) => {
+const authorize = (allowedRoles, options = {}) => {
   return (req, res, next) => {
     if (!req.user) {
       return res.status(401).json({
@@ -582,6 +586,14 @@ const authorize = (allowedRoles) => {
       });
     }
 
+    // requireOrg: true means this endpoint is org-scoped and must not be called by platform admin
+    if (options.requireOrg && req.isPlatformAdmin) {
+      return res.status(403).json({
+        success: false,
+        error: "This endpoint is org-scoped. Use platform admin endpoints.",
+      });
+    }
+
     next();
   };
 };
@@ -589,14 +601,12 @@ const authorize = (allowedRoles) => {
 // Blockchain connection helper (UNCHANGED - preserves your date handling)
 class BlockchainService {
   constructor() {
-    this.walletPath = path.join(
-      process.cwd(),
-      process.env.WALLET_PATH || "wallet"
-    );
-    this.connectionProfilePath = path.join(
-      process.cwd(),
-      process.env.CONNECTION_PROFILE_PATH || "./config/connection-profile.json"
-    );
+    this.walletPath = process.env.WALLET_PATH
+      ? path.resolve(process.env.WALLET_PATH)
+      : path.join(process.cwd(), "wallet");
+    this.connectionProfilePath = process.env.CONNECTION_PROFILE_PATH
+      ? path.resolve(process.env.CONNECTION_PROFILE_PATH)
+      : path.join(process.cwd(), "./config/connection-profile.json");
   }
 
   async connectToNetwork() {
@@ -623,7 +633,7 @@ class BlockchainService {
       await gateway.connect(connectionProfile, {
         wallet,
         identity: "appUser",
-        discovery: { enabled: true, asLocalhost: true },
+        discovery: { enabled: true, asLocalhost: false },
       });
 
       // Get network and contract
@@ -844,7 +854,7 @@ function formatVerificationData(verification) {
 // Register new user
 app.post("/api/auth/register", async (req, res) => {
   try {
-    const { email, username, password, role, profileData } = req.body;
+    const { email, username, password, role, profileData, organizationSlug } = req.body;
 
     // Validate required fields
     if (!email || !username || !password || !role) {
@@ -852,6 +862,29 @@ app.post("/api/auth/register", async (req, res) => {
         success: false,
         error: "Missing required fields: email, username, password, role",
       });
+    }
+
+    // Resolve organization — platform ADMIN registers without a slug (null org)
+    let organizationId = null;
+    const isPlatformAdminRegistration = role === "ADMIN" && !organizationSlug;
+
+    if (!isPlatformAdminRegistration) {
+      if (!organizationSlug) {
+        return res.status(400).json({
+          success: false,
+          error: "organizationSlug is required. Ask your organization admin for the org code.",
+        });
+      }
+      const org = await prisma.organization.findUnique({
+        where: { slug: organizationSlug },
+      });
+      if (!org || !org.isActive) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid or inactive organization code.",
+        });
+      }
+      organizationId = org.id;
     }
 
     // Check if user exists
@@ -883,6 +916,7 @@ app.post("/api/auth/register", async (req, res) => {
         role,
         status: "ACTIVE", // Auto-activate for demo
         isEmailVerified: true, // Auto-verify for demo
+        organizationId,
 
         // Create role-specific profile
         ...(role === "FARMER" && {
@@ -919,7 +953,7 @@ app.post("/api/auth/register", async (req, res) => {
               firstName: profileData?.firstName || "Admin",
               lastName: profileData?.lastName || "User",
               phone: profileData?.phone || "",
-              adminLevel: "ADMIN",
+              adminLevel: isPlatformAdminRegistration ? "SUPER_ADMIN" : "ADMIN",
               permissions: ["user_management", "system_config"],
             },
           },
@@ -931,6 +965,7 @@ app.post("/api/auth/register", async (req, res) => {
       success: true,
       message: "Registration successful",
       userId: user.id,
+      organizationId,
     });
   } catch (error) {
     console.error("Registration error:", error);
@@ -993,6 +1028,7 @@ app.post("/api/auth/login", async (req, res) => {
         userId: user.id,
         email: user.email,
         role: user.role,
+        organizationId: user.organizationId ?? null,
       },
       process.env.JWT_SECRET || "your-default-secret",
       { expiresIn: process.env.JWT_EXPIRES_IN || "7d" }
@@ -1527,6 +1563,7 @@ app.post(
             batchId: batchId,
             farmerId: farmerProfile.id,
             farmLocationId: farmerProfile.farmLocations[0]?.id, // Use first farm location
+            organizationId: req.organizationId,
             cropType: cropType || null,
             productType: crop,
             variety: additionalData.variety || null,
@@ -1651,6 +1688,8 @@ app.post(
           totalBatchValue: additionalData.totalBatchValue,
           paymentMethod: additionalData.paymentMethod,
           buyerName: additionalData.buyerName,
+          // Multi-tenancy: tag the on-chain record with the creating org
+          organizationId: req.organizationId,
           // Coordinates if available
           coordinates:
             additionalData.latitude && additionalData.longitude
@@ -1860,7 +1899,7 @@ app.get(
 
       // Get batches from database
       const batches = await prisma.batch.findMany({
-        where: { farmerId: farmerProfile.id },
+        where: { farmerId: farmerProfile.id, organizationId: req.organizationId },
         include: {
           farmLocation: true,
           processingRecords: {
@@ -3388,8 +3427,8 @@ app.get(
       const { page = 1, limit = 10, status, farmer, crop } = req.query;
       const skip = (parseInt(page) - 1) * parseInt(limit);
 
-      // Build where clause for filtering
-      const where = {};
+      // Build where clause for filtering (org-scoped for non-platform admins)
+      const where = req.isPlatformAdmin ? {} : { organizationId: req.organizationId };
       if (status) where.status = status;
       if (crop) where.productType = { contains: crop, mode: "insensitive" };
       if (farmer) {
@@ -3493,8 +3532,8 @@ app.get(
 
       const skip = (parseInt(page) - 1) * parseInt(limit);
 
-      // Build where clause
-      const where = {};
+      // Build where clause (org-scoped for non-platform admins)
+      const where = req.isPlatformAdmin ? {} : { organizationId: req.organizationId };
 
       // Search filter - searches across username, email, and profile names
       if (search) {
@@ -3677,6 +3716,14 @@ app.get(
         return res.status(404).json({
           success: false,
           error: "User not found",
+        });
+      }
+
+      // Cross-org guard: org-level admins cannot view users from other orgs
+      if (!req.isPlatformAdmin && user.organizationId !== req.organizationId) {
+        return res.status(403).json({
+          success: false,
+          error: "Access denied. User belongs to a different organization.",
         });
       }
 
@@ -4572,20 +4619,23 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
         break;
 
       case "ADMIN":
-        const totalUsers = await prisma.user.count();
-        const totalBatches = await prisma.batch.count();
+        const orgFilter = req.isPlatformAdmin ? {} : { organizationId: req.organizationId };
+        const totalUsers = await prisma.user.count({ where: orgFilter });
+        const totalBatches = await prisma.batch.count({ where: orgFilter });
         const activeUsers = await prisma.user.count({
-          where: { status: "ACTIVE" },
+          where: { ...orgFilter, status: "ACTIVE" },
         });
 
         const usersByRole = await prisma.user.groupBy({
           by: ["role"],
           _count: { role: true },
+          where: orgFilter,
         });
 
         const batchesByStatus = await prisma.batch.groupBy({
           by: ["status"],
           _count: { status: true },
+          where: orgFilter,
         });
 
         dashboardData = {
@@ -4818,6 +4868,7 @@ app.post(
           batchId: newBatchId,
           farmerId: dbBatch.farmerId,
           farmLocationId: dbBatch.farmLocationId,
+          organizationId: dbBatch.organizationId, // inherit from parent
           productType: dbBatch.productType,
           variety: dbBatch.variety,
           quantity: splitQty,
@@ -5674,6 +5725,7 @@ app.get(
           status: {
             in: ["REGISTERED", "PROCESSING"],
           },
+          organizationId: req.organizationId,
         },
         orderBy: {
           createdAt: "desc",
@@ -5786,6 +5838,7 @@ app.post(
           status: "COMPLETED",
           statusBefore: "REGISTERED",
           statusAfter: "PROCESSING",
+          organizationId: req.organizationId,
         },
       });
 
@@ -5864,6 +5917,7 @@ app.post(
           processorId: processorProfile.id,
           facilityId: facility.id,
           processingDate: new Date(),
+          organizationId: req.organizationId,
           processingType: processType || "initial_processing",
           inputQuantity: inputQuantity
             ? parseFloat(inputQuantity)
@@ -5921,6 +5975,7 @@ app.post(
               ),
               timestamp: processingRecord.processingDate,
               routePolyline: routeData.geometry,
+              organizationId: req.organizationId,
             },
           });
         }
@@ -7021,6 +7076,7 @@ app.post(
           statusAfter: transferRecord.statusAfter || batch.status,
           blockchainTxId: transferRecord.txId || null,
           blockchainHash: ownershipHash, // ← INTEGRITY HASH
+          organizationId: req.organizationId,
         },
       });
 
@@ -7194,6 +7250,7 @@ app.post(
           transportCost: transportCost ? parseFloat(transportCost) : null,
           status: updateStatus ? "IN_TRANSIT" : "PLANNED",
           blockchainHash: transportHash, // ← INTEGRITY HASH (changed from txId)
+          organizationId: req.organizationId,
         },
       });
 
@@ -7396,6 +7453,7 @@ app.post(
           passFailStatus,
           certificateUrl: certificateUrl || null,
           blockchainHash: dataHash, // Store integrity hash
+          organizationId: req.organizationId,
         },
       });
 
@@ -7590,6 +7648,7 @@ app.post(
           transportCost: transportCost ? parseFloat(transportCost) : null,
           status: status || "PLANNED",
           blockchainHash: blockchainTxId,
+          organizationId: req.organizationId,
         },
       });
 
@@ -7684,7 +7743,8 @@ app.get(
       const { gateway, contract } = await blockchainService.connectToNetwork();
 
       const result = await contract.evaluateTransaction(
-        "getAvailableBatchesForDistributor"
+        "getAvailableBatchesForDistributor",
+        req.organizationId || ""
       );
       const availableBatches = JSON.parse(result.toString());
 
@@ -7834,6 +7894,7 @@ app.post(
           statusAfter: "IN_DISTRIBUTION",
           blockchainTxId: transferRecord.txId || null,
           blockchainHash: null,
+          organizationId: req.organizationId,
         },
       });
 
@@ -7935,7 +7996,8 @@ app.get(
 
         const result = await contract.evaluateTransaction(
           "getBatchesByDistributor",
-          distributorId
+          distributorId,
+          req.organizationId || ""
         );
         blockchainBatches = JSON.parse(result.toString());
       } catch (bcError) {
@@ -7966,6 +8028,7 @@ app.get(
         where: {
           batchId: { in: transferredBatchIds },
           status: { notIn: ["SOLD", "RECALLED"] },
+          organizationId: req.organizationId,
         },
         include: {
           farmer: {
@@ -8254,6 +8317,7 @@ app.post(
           batchId: batchId,
           batchIDHash: batch.id,
           distributorId: distributorId,
+          organizationId: req.organizationId,
           distributionType: distributionType || null,
           warehouseLocation: warehouseLocation || null,
           warehouseLat: warehouseCoordinates?.latitude || null,
@@ -8389,6 +8453,7 @@ app.post(
               timestamp: distributionTime,
               routePolyline: routeData.geometry,
               status: "IN_TRANSIT",
+              organizationId: req.organizationId,
             },
           });
         }
@@ -8566,6 +8631,7 @@ app.post(
           weather_desc: weather_desc || null,
           weather_main: weather_main || null,
           humidity: humidity ? parseFloat(humidity) : null,
+          organizationId: req.organizationId,
         },
       });
 
@@ -8652,6 +8718,7 @@ app.post(
               timestamp: dbTransfer.transferDate,
               routePolyline: routeData.geometry,
               status: "DELIVERED",
+              organizationId: req.organizationId,
             },
           });
         }
@@ -8702,6 +8769,7 @@ app.get(
       const batches = await prisma.batch.findMany({
         where: {
           status: "RETAIL_READY",
+          organizationId: req.organizationId,
         },
         include: {
           farmer: {
@@ -8831,6 +8899,7 @@ app.get(
       const batches = await prisma.batch.findMany({
         where: {
           status: "IN_RETAIL",
+          organizationId: req.organizationId,
         },
         include: {
           farmer: {
@@ -8970,6 +9039,7 @@ app.get(
       const batches = await prisma.batch.findMany({
         where: {
           status: "SOLD",
+          organizationId: req.organizationId,
         },
         include: {
           farmer: {
@@ -9058,9 +9128,8 @@ app.get(
     try {
       const flaggedBatches = await prisma.batch.findMany({
         where: {
-          notes: {
-            contains: "⚠️  FLAGGED FOR REVIEW",
-          },
+          notes: { contains: "⚠️  FLAGGED FOR REVIEW" },
+          ...(req.isPlatformAdmin ? {} : { organizationId: req.organizationId }),
         },
         include: {
           farmer: {
@@ -9234,6 +9303,166 @@ app.use((err, req, res, next) => {
     error: "Internal server error",
     details: process.env.NODE_ENV === "development" ? err.message : undefined,
   });
+});
+
+// ============================================================================
+// PLATFORM ADMIN ENDPOINTS (platform-level admin only — no org required)
+// ============================================================================
+
+// Create a new organization + its first org-level admin in one call
+app.post(
+  "/api/platform/organizations",
+  authenticate,
+  async (req, res) => {
+    if (!req.isPlatformAdmin) {
+      return res.status(403).json({ success: false, error: "Platform admin access required." });
+    }
+    try {
+      const { name, slug, description, adminEmail, adminUsername, adminPassword } = req.body;
+
+      if (!name || !slug || !adminEmail || !adminUsername || !adminPassword) {
+        return res.status(400).json({
+          success: false,
+          error: "Missing required fields: name, slug, adminEmail, adminUsername, adminPassword",
+        });
+      }
+
+      // Validate slug format (lowercase, hyphens only)
+      if (!/^[a-z0-9-]+$/.test(slug)) {
+        return res.status(400).json({
+          success: false,
+          error: "slug must be lowercase letters, numbers, and hyphens only (e.g. alpha-farms)",
+        });
+      }
+
+      // Check uniqueness
+      const existingOrg = await prisma.organization.findFirst({
+        where: { OR: [{ name }, { slug }] },
+      });
+      if (existingOrg) {
+        return res.status(400).json({ success: false, error: "Organization name or slug already taken." });
+      }
+
+      const existingAdmin = await prisma.user.findFirst({
+        where: { OR: [{ email: adminEmail }, { username: adminUsername }] },
+      });
+      if (existingAdmin) {
+        return res.status(400).json({ success: false, error: "Admin email or username already taken." });
+      }
+
+      // Create org
+      const org = await prisma.organization.create({
+        data: { name, slug, description: description || null, isActive: true },
+      });
+
+      // Create first org-level admin
+      const hashedPassword = await bcrypt.hash(adminPassword, parseInt(process.env.BCRYPT_ROUNDS || 12));
+      const adminUser = await prisma.user.create({
+        data: {
+          email: adminEmail,
+          username: adminUsername,
+          password: hashedPassword,
+          role: "ADMIN",
+          status: "ACTIVE",
+          isEmailVerified: true,
+          organizationId: org.id,
+          adminProfile: {
+            create: {
+              firstName: "Org",
+              lastName: "Admin",
+              adminLevel: "ADMIN",
+              permissions: ["user_management", "system_config"],
+            },
+          },
+        },
+      });
+
+      res.status(201).json({
+        success: true,
+        message: `Organization "${name}" created with org admin.`,
+        organization: { id: org.id, name: org.name, slug: org.slug },
+        adminUserId: adminUser.id,
+      });
+    } catch (error) {
+      console.error("Create organization error:", error);
+      res.status(500).json({ success: false, error: "Failed to create organization." });
+    }
+  }
+);
+
+// List all organizations (platform admin only)
+app.get(
+  "/api/platform/organizations",
+  authenticate,
+  async (req, res) => {
+    if (!req.isPlatformAdmin) {
+      return res.status(403).json({ success: false, error: "Platform admin access required." });
+    }
+    try {
+      const orgs = await prisma.organization.findMany({
+        include: {
+          _count: { select: { users: true, batches: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      res.json({ success: true, organizations: orgs });
+    } catch (error) {
+      console.error("List organizations error:", error);
+      res.status(500).json({ success: false, error: "Failed to fetch organizations." });
+    }
+  }
+);
+
+// Toggle org active/inactive (platform admin only)
+app.patch(
+  "/api/platform/organizations/:orgId",
+  authenticate,
+  async (req, res) => {
+    if (!req.isPlatformAdmin) {
+      return res.status(403).json({ success: false, error: "Platform admin access required." });
+    }
+    try {
+      const { orgId } = req.params;
+      const { isActive } = req.body;
+
+      const org = await prisma.organization.update({
+        where: { id: orgId },
+        data: { isActive },
+      });
+
+      res.json({ success: true, organization: org });
+    } catch (error) {
+      console.error("Update organization error:", error);
+      res.status(500).json({ success: false, error: "Failed to update organization." });
+    }
+  }
+);
+
+// ============================================================================
+// ORG INFO ENDPOINT (any authenticated org-scoped user)
+// ============================================================================
+
+// Get current user's organization details
+app.get("/api/org/info", authenticate, async (req, res) => {
+  if (!req.organizationId) {
+    return res.status(400).json({ success: false, error: "No organization context. Platform admins have no org." });
+  }
+  try {
+    const org = await prisma.organization.findUnique({
+      where: { id: req.organizationId },
+      include: { _count: { select: { users: true, batches: true } } },
+    });
+
+    if (!org) {
+      return res.status(404).json({ success: false, error: "Organization not found." });
+    }
+
+    res.json({ success: true, organization: org });
+  } catch (error) {
+    console.error("Get org info error:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch organization info." });
+  }
 });
 
 // 404 handler (MUST be last!)

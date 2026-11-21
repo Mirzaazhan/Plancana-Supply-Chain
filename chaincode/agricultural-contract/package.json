@@ -1,6 +1,6 @@
 {
   "name": "agricultural-contract",
-  "version": "2.5.2",
+  "version": "2.6.0",
   "description": "Agricultural supply chain smart contract with batch transfer, transport tracking, distribution, and crop type classification",
   "main": "index.js",
   "scripts": {

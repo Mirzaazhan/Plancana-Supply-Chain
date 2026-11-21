@@ -11,6 +11,23 @@ datasource db {
   extensions = [postgis]
 }
 
+// ===== MULTI-TENANCY =====
+
+model Organization {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  slug        String   @unique // e.g. "green-valley-farms" — used as org code on registration
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users   User[]
+  batches Batch[]
+
+  @@map("organizations")
+}
+
 // ===== USER AUTHENTICATION & AUTHORIZATION =====
 
 model User {
@@ -29,6 +46,10 @@ model User {
   lockUntil            DateTime?
   createdAt            DateTime   @default(now())
   updatedAt            DateTime   @updatedAt
+
+  // Multi-tenancy: null = platform-level ADMIN (sees all orgs)
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
 
   // Profile relationships based on role
   farmerProfile      FarmerProfile?
@@ -314,6 +335,10 @@ model Batch {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Multi-tenancy
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id])
+
   // Relationships
   farmer       FarmerProfile @relation(fields: [farmerId], references: [id])
   farmLocation FarmLocation? @relation(fields: [farmLocationId], references: [id])
@@ -395,6 +420,9 @@ model ProcessingRecord {
   weather_main String?
   weather_desc String?
 
+  // Multi-tenancy (bare string — consistent with hybrid storage pattern)
+  organizationId String?
+
   batch     Batch              @relation(fields: [batchId], references: [id])
   processor ProcessorProfile   @relation(fields: [processorId], references: [id])
   facility  ProcessingFacility @relation(fields: [facilityId], references: [id])
@@ -425,8 +453,11 @@ model TransportRoute {
   blockchainHash  String?
   geom_route      Unsupported("geography(LineString, 4326)")?
 
+  // Multi-tenancy
+  organizationId String?
+
   batch       Batch              @relation(fields: [batchId], references: [id])
-  
+
   @@map("transport_routes")
 }
 
@@ -448,6 +479,9 @@ model QualityTest {
   passFailStatus String
   certificateUrl String?
   blockchainHash String?
+
+  // Multi-tenancy
+  organizationId String?
 
   batch Batch @relation(fields: [batchId], references: [id])
 
@@ -519,6 +553,9 @@ model BatchTransfer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Multi-tenancy (bare string — batch might only exist on blockchain)
+  organizationId String?
+
   // No relation - batch might only exist on blockchain (hybrid storage)
   // Use batchId as a string reference only
 
@@ -589,6 +626,9 @@ model DistributionRecord {
   distributionDate DateTime @default(now())
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
+  // Multi-tenancy (bare string — batch might only exist on blockchain)
+  organizationId String?
 
   // No relation - batch might only exist on blockchain (hybrid storage)
   // Use batchId as a string reference only
