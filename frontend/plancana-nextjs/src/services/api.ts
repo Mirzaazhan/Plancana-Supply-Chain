@@ -392,6 +392,21 @@ export const apiUtils = {
   },
 };
 
+// Platform service (platform admin only)
+export const platformService = {
+  getOrganizations: () => api.get("/platform/organizations"),
+  createOrganization: (data: {
+    name: string;
+    slug: string;
+    description?: string;
+    adminEmail: string;
+    adminUsername: string;
+    adminPassword: string;
+  }) => api.post("/platform/organizations", data),
+  toggleOrganization: (orgId: string, isActive: boolean) =>
+    api.patch(`/platform/organizations/${orgId}`, { isActive }),
+};
+
 export const analyticsService = {
   getWeatherQualityCorrelation: () =>
     api.get("/analytics/weather-quality-correlation"),

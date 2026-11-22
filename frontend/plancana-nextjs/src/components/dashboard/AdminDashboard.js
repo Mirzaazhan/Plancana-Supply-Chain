@@ -17,6 +17,7 @@ import {
   Clock,
   ChevronRight,
   Sparkles,
+  Building2,
 } from 'lucide-react';
 import { adminService, batchService } from '../../services/api';
 
@@ -255,6 +256,20 @@ const AdminDashboard = () => {
             </div>
             <h3 className="text-lg font-bold text-gray-900 mb-2">ML Fraud Detection</h3>
             <p className="text-sm text-gray-600">AI-powered anomaly detection dashboard</p>
+        </button>
+
+        <button
+          onClick={() => router.push('/admin/organizations')}
+          className="bg-white rounded-xl shadow-sm p-6 hover:shadow-lg transition-all text-left group"
+        >
+            <div className="flex items-center justify-between mb-4">
+              <div className="bg-indigo-100 p-3 rounded-lg group-hover:bg-indigo-200 transition-colors">
+                <Building2 className="h-6 w-6 text-indigo-600" />
+              </div>
+              <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-indigo-600 transition-colors" />
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">Organizations</h3>
+            <p className="text-sm text-gray-600">Manage companies and their access</p>
         </button>
       </div>
 
