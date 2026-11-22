@@ -392,6 +392,11 @@ export const apiUtils = {
   },
 };
 
+// Org service (any org-scoped user)
+export const orgService = {
+  getOrgInfo: () => api.get("/org/info"),
+};
+
 // Platform service (platform admin only)
 export const platformService = {
   getOrganizations: () => api.get("/platform/organizations"),

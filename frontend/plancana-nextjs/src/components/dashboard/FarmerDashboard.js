@@ -31,6 +31,7 @@ import {
   Tooltip,
 } from "recharts";
 import ArcGISMap from "@/components/gis-map/testMap";
+import OrgBadge from "@/components/common/OrgBadge";
 
 const FarmerDashboard = () => {
   const { user } = useAuth();
@@ -361,6 +362,7 @@ const FarmerDashboard = () => {
         <h1 className="text-3xl font-bold mb-2 flex items-center gap-2">
           Welcome back, {dashboardData?.farmerInfo?.farmName || user?.username}!
         </h1>
+        <OrgBadge className="mb-2" />
         <p className="text-green-50 dark:text-green-100 text-lg">
           Manage your crops and track your agricultural products through the
           supply chain.

@@ -15,6 +15,7 @@ import BatchSplitModal from "./BatchSplitModal";
 import RecallBatchModal from "./RecallBatchModal";
 import BatchDetails from "../batch/BatchDetails";
 import LocationInput from "../ui/LocationInput";
+import OrgBadge from "../common/OrgBadge";
 import {
   Package,
   Truck,
@@ -816,6 +817,7 @@ const DistributorDashboard = () => {
         <h1 className="text-3xl font-bold mb-2 flex items-center gap-2">
           Welcome back, {user?.username}!
         </h1>
+        <OrgBadge className="mb-2" />
         <p className="text-purple-50 text-lg">
           Manage your distribution operations and coordinate deliveries across
           the supply chain.

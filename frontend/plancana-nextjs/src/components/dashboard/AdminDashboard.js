@@ -20,6 +20,7 @@ import {
   Building2,
 } from 'lucide-react';
 import { adminService, batchService } from '../../services/api';
+import OrgBadge from '../common/OrgBadge';
 
 const AdminDashboard = () => {
   const router = useRouter();
@@ -144,6 +145,7 @@ const AdminDashboard = () => {
           <Shield className="h-8 w-8" />
           Admin Dashboard
         </h1>
+        <OrgBadge className="mb-2" />
         <p className="text-purple-50 text-lg">
           System overview and management - Monitor users, batches, and system health
         </p>

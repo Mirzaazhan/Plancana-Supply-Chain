@@ -12,6 +12,7 @@ import {
 import { toast } from "react-hot-toast";
 import PricingModal from "./PricingModal";
 import RecallBatchModal from "./RecallBatchModal";
+import OrgBadge from "../common/OrgBadge";
 import {
   Package,
   ShoppingCart,
@@ -526,6 +527,7 @@ const RetailerDashboard = () => {
         <h1 className="text-3xl font-bold mb-2 flex items-center gap-2">
           Welcome back, {user?.username}!
         </h1>
+        <OrgBadge className="mb-2" />
         <p className="text-purple-50 text-lg">
           Manage your retail inventory and complete the supply chain journey.
         </p>
