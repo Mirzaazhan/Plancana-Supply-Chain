@@ -74,15 +74,12 @@ services:
     networks:
       - assessment-network
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"require('http').get('http://0.0.0.0:3000', r => process.exit(r.statusCode >= 200 && r.statusCode < 400 ? 0 : 1)).on('error', () => process.exit(1))\""]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
+      disable: true
     security_opt:
       - no-new-privileges:true
     tmpfs:
       - /tmp:noexec,nosuid,size=50m
+      - /var/tmp:noexec,nosuid,size=50m
     depends_on:
       - backend
     restart: unless-stopped
